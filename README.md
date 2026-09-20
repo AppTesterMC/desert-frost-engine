@@ -12,7 +12,7 @@
 
 <img src="doc/intro-paul.bmp" alt="Paul's hair on red background during of the Dune intro" width="640">
 
-<br>
+</div>
 
 ## Rebuilding Cryo's *Dune* (1992)
 
