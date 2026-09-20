@@ -1,0 +1,4 @@
+# This file is included from the main "configure" script.
+# Dune is deliberately opt-in until the engine reaches a playable state.
+# add_engine [name] [desc] [build-by-default] [subengines] [base games] [deps] [components]
+add_engine dune "Dune" no
