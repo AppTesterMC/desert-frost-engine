@@ -1,0 +1,13 @@
+# The stillsuit chain (dune_story_setup=stillsuit): at phase 2 with two
+# troops rallied, Carthag-Tuek's chief (place names 0x205, staged at ds:4e by
+# prepare_location_data_for_condit, seg000:331e) talks about the stillsuit
+# maker to the east. Each tap shows his next page or line.
+wait 20000
+checkpoint stillsuit-chief-1
+click left 160 80
+wait 1200
+checkpoint stillsuit-chief-2
+click left 160 80
+wait 1200
+checkpoint stillsuit-chief-3
+quit

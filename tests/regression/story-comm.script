@@ -1,0 +1,51 @@
+# The story systems (dune_story_setup=comm): after Paul's first vision the
+# Emperor's demand waits in the COMM room (palace room 8) and Duncan is there
+# with 2000 kg in stock. VIEW NEW MESSAGES (second row) lists the sender;
+# the Emperor's line; " Viewed"; then Duncan (fourth row) talks up to his
+# offer and the bargaining menu (ds:1ffe); ACCEPT (second row) agrees and
+# leaving the talk ships the spice (seg000:135ad, in the engine log).
+wait 15000
+checkpoint story-comm-room
+move 160 171
+click left 160 171
+wait 1500
+checkpoint story-comm-list
+move 160 163
+click left 160 163
+wait 1500
+checkpoint story-emperor
+click left 160 80
+wait 1000
+move 160 163
+click left 160 163
+wait 1500
+move 160 187
+click left 160 187
+wait 1500
+click left 160 80
+wait 800
+click left 160 80
+wait 800
+click left 160 80
+wait 800
+click left 160 80
+wait 800
+click left 160 80
+wait 800
+click left 160 80
+wait 800
+checkpoint story-duncan-offer
+click left 160 80
+wait 800
+checkpoint story-bargain
+move 160 171
+click left 160 171
+wait 1500
+checkpoint story-accepted
+click left 160 80
+wait 800
+click left 160 80
+wait 800
+click left 160 80
+wait 800
+quit

@@ -29,6 +29,26 @@ an IPA.
 The downloader workflow for obtaining those build inputs locally is documented
 in [`DOWNLOADER_BUILD.md`](DOWNLOADER_BUILD.md).
 
+## Engine-only repository (desert-frost-engine)
+
+The public engine repository, github.com/AppTesterMC/desert-frost-engine, gets
+its own package: only the ScummVM engine, its build/check scripts, the
+regression scenarios (without golden images) and the documentation.
+
+```sh
+./scripts/prepare_engine_package.sh
+```
+
+It writes `release/github/desert-frost-<timestamp>/` with `repo/` (the tree
+to copy over a clone), `repo.tar.gz`, `MANIFEST.txt` (SHA-256 of every file)
+and `UPLOAD.md` (the git commands). It refuses to finish if the tree holds game
+data, private paths, files over 2 MB, or engine sources without the
+GPL-3.0-or-later header. The repository's front page, `BUILDING.md` and
+`.gitignore` are kept in `docs/desert-frost/` and installed at the package root.
+
+While the engine is being edited, snapshot it at a point where `make verify`
+passes and package that copy: `ENGINE_SRC=/path/to/snapshot ./scripts/prepare_engine_package.sh`.
+
 ## Before publishing
 
 1. Review `README.md`, `CONTRIBUTING.md`, and

@@ -1,0 +1,7 @@
+# The ecology route (dune_story_setup=ecology): place 12 gets a wind trap,
+# water and bulbs; its troop takes bulbs (MODIFY EQUIPMENT), specializes in
+# ecology and irrigates for 120 days. The flat map then shows the vegetation
+# tufts (ONMAP 0x78/0x79) grown round the place and north of it.
+wait 20000
+checkpoint ecology-map
+quit

@@ -1,0 +1,48 @@
+# Desert Frost engine repository. Installed as .gitignore by
+# scripts/prepare_engine_package.sh.
+
+# Original game data and media: never commit these.
+*.DAT
+*.dat
+*.HSQ
+*.hsq
+*.HNM
+*.hnm
+*.EXE
+*.exe
+*.SAV
+*.iso
+*.ISO
+*.bin
+*.cue
+*.chd
+*.adf
+*.ADF
+*.mov
+*.mp3
+
+# Regression references are frames of the original game; seed your own with
+# `make init-golden`.
+/golden/
+
+# Build and test output
+/notes/*
+!/notes/research/
+/notes/research/*
+!/notes/research/gameplay-rules.md
+/results/
+*.ipa
+*.o
+*.a
+__pycache__/
+*.pyc
+
+# Local ScummVM checkout and dependencies used by the scripts
+/third_party/*
+!/third_party/scummvm/
+/third_party/scummvm/*
+!/third_party/scummvm/engines/
+/third_party/scummvm/engines/*
+!/third_party/scummvm/engines/dune/
+
+.DS_Store

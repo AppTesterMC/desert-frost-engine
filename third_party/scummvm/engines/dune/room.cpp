@@ -1,6 +1,25 @@
 /* ScummVM - Graphic Adventure Engine
  *
- * This file is part of the Dune engine bring-up.
+ * ScummVM is the legal property of its developers, whose names
+ * are too numerous to list here. Please refer to the COPYRIGHT
+ * file distributed with this source distribution.
+ *
+ * This file is part of the Dune engine.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 #include "common/endian.h"
@@ -68,6 +87,57 @@ uint Room::roomCount() const {
 	if (_data.size() < 2)
 		return 0;
 	return READ_LE_UINT16(_data.data()) / 2;
+}
+
+uint Room::markerCount(uint room) const {
+	if (room >= roomCount())
+		return 0;
+	const uint32 position = READ_LE_UINT16(_data.data() + room * 2);
+	return position < _data.size() ? _data[position] : 0;
+}
+
+void Room::markerPositions(uint room, Common::Array<Common::Point> &points) const {
+	points.clear();
+	if (room >= roomCount())
+		return;
+	const byte *data = _data.data();
+	const uint32 size = _data.size();
+	uint32 position = READ_LE_UINT16(data + room * 2) + 1;
+	while (position + 2 <= size) {
+		const byte id = data[position], modifier = data[position + 1];
+		position += 2;
+		if (id == 0xff && modifier == 0xff)
+			return;
+		if (modifier & 0x80) {
+			if (modifier & 0x40) {
+				position += 8;
+			} else {
+				// A polygon: gradients, start point, right side up to 0x4000, left side up to 0x8000.
+				position += 2 + 4;
+				uint16 x;
+				do {
+					if (position + 4 > size)
+						return;
+					x = READ_LE_UINT16(data + position);
+					position += 4;
+				} while (!(x & 0x4000));
+				if (!(x & 0x8000)) {
+					do {
+						if (position + 4 > size)
+							return;
+						x = READ_LE_UINT16(data + position);
+						position += 4;
+					} while (!(x & 0x8000));
+				}
+			}
+		} else {
+			if (position + 3 > size)
+				return;
+			if (((id | (modifier << 8)) & 0x01ff) == 1)
+				points.push_back(Common::Point(data[position] + ((modifier & 0x02) ? 256 : 0), data[position + 1]));
+			position += 3;
+		}
+	}
 }
 
 bool Room::draw(uint room, Sprite &sprites, Graphics::Surface &target, Sprite *characters,

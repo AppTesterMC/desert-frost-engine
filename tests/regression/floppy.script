@@ -1,0 +1,47 @@
+# The floppy intro's named dumpScreen checkpoints are captured as each scene
+# completes (fast render, one frame per scene). The wait gives the fast
+# pass enough real time to reach the throne room; keep the engine alive in
+# the first room long enough for the audio window to prove the mixer is not
+# silent.
+wait 15000
+checkpoint floppy-landing
+checkpoint floppy-room-scripted
+wait 5000
+# Paul's head opens the globe with the game menu; SAVE GAME (third row)
+# lists the four logs; the last row is EXIT GLOBE.
+move 160 145
+click left 160 145
+wait 4000
+checkpoint floppy-globe
+move 160 179
+click left 160 179
+wait 1500
+checkpoint floppy-menu-save
+move 160 195
+click left 160 195
+wait 1500
+# SEE DUNE MAP (the first row): the flat map with its DUNE MAP title popup
+# (seg000:5bb0), the map menu (seg000:878c) and the planet in the left panel.
+move 160 163
+click left 160 163
+wait 3000
+checkpoint floppy-map-flat
+move 160 163
+click left 160 163
+wait 1000
+# Duke Leto's opening conversation: the second command row, then a tap per
+# page (view area) until the throne room returns.
+move 160 171
+click left 160 171
+wait 1500
+checkpoint floppy-leto-1
+move 160 80
+click left 160 80
+wait 1500
+checkpoint floppy-leto-2
+click left 160 80
+wait 1500
+checkpoint floppy-leto-3
+click left 160 80
+wait 1000
+quit

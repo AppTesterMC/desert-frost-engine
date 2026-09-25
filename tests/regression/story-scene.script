@@ -1,0 +1,15 @@
+# A scripted scene (dune_story_setup=gathering): the COMM room gathering of
+# phase 0x0c (cs:1321). The first shot waits for " Continue..."; each tap
+# presents the next topic-7 line.
+wait 15000
+checkpoint scene-shot
+click left 160 80
+wait 1200
+checkpoint scene-leto
+click left 160 80
+wait 1200
+checkpoint scene-jessica
+click left 160 80
+wait 1200
+checkpoint scene-second-shot
+quit

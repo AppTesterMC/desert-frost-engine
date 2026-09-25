@@ -1,0 +1,51 @@
+--- a/backends/platform/ios7/ios7_app_delegate.mm	2026-09-16 01:21:25
++++ b/backends/platform/ios7/ios7_app_delegate.mm	2026-09-20 10:42:30
+@@ -24,6 +24,8 @@
+ #include "backends/platform/ios7/ios7_scummvm_view_controller.h"
+ #include "backends/platform/ios7/ios7_video.h"
+ 
++#import <AVFAudio/AVFAudio.h>
++
+ @implementation iOS7AppDelegate {
+ 	UIWindow *_window;
+ 	iOS7ScummVMViewController *_controller;
+@@ -68,6 +70,17 @@
+ 		[iOS7AppDelegate setKeyWindow:[[UIWindow alloc] initWithFrame:rect]];
+ 	}
+ 
++	// Dune patch: without an explicit category the app gets SoloAmbient, which
++	// the ring/silent switch mutes completely. A game whose speech and music
++	// carry the story should be heard like a media player, so ask for Playback
++	// and activate the session before the AudioQueue is created.
++	NSError *audioError = nil;
++	AVAudioSession *audioSession = [AVAudioSession sharedInstance];
++	if (![audioSession setCategory:AVAudioSessionCategoryPlayback error:&audioError])
++		NSLog(@"ScummVM: could not set the audio session category: %@", audioError);
++	if (![audioSession setActive:YES error:&audioError])
++		NSLog(@"ScummVM: could not activate the audio session: %@", audioError);
++
+ 	// Force creation of the shared instance on the main thread
+ 	iOS7_buildSharedOSystemInstance();
+ 
+--- a/backends/platform/ios7/ios7_osys_sound.cpp	2026-09-16 01:21:25
++++ b/backends/platform/ios7/ios7_osys_sound.cpp	2026-09-20 10:42:30
+@@ -83,8 +83,17 @@
+ 	}
+ 
+ 	AudioQueueSetParameter(s_AudioQueue.queue, kAudioQueueParam_Volume, 1.0);
+-	if (AudioQueueStart(s_AudioQueue.queue, NULL)) {
+-		printf("Error starting the AudioQueue!\n");
++	// Dune patch: starting can fail transiently while the audio session is
++	// still being handed back to us (after an interruption, Control Centre, a
++	// screen recording starting). One failure used to leave the whole session
++	// silent, so try a few times before giving up.
++	OSStatus startStatus = AudioQueueStart(s_AudioQueue.queue, NULL);
++	for (int attempt = 0; startStatus && attempt < 10; ++attempt) {
++		usleep(100000);
++		startStatus = AudioQueueStart(s_AudioQueue.queue, NULL);
++	}
++	if (startStatus) {
++		printf("Error starting the AudioQueue! (%d)\n", (int)startStatus);
+ 		_mixer->setReady(false);
+ 		return;
+ 	}

@@ -1,6 +1,25 @@
 /* ScummVM - Graphic Adventure Engine
  *
- * This file is part of the Dune engine bring-up.
+ * ScummVM is the legal property of its developers, whose names
+ * are too numerous to list here. Please refer to the COPYRIGHT
+ * file distributed with this source distribution.
+ *
+ * This file is part of the Dune engine.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 #ifndef ENGINES_DUNE_HNM_H
@@ -47,6 +66,37 @@ public:
 	 */
 	Result play(const Common::Array<byte> &data, const char *name, int dumpFrame = -1);
 
+	/**
+	 * Decode a whole video offscreen and keep its last picture (320x200
+	 * bytes) and palette (768 bytes): the CD leaves the arrival videos'
+	 * final view behind the exterior rooms.
+	 */
+	bool lastFrame(const Common::Array<byte> &data, byte *pixels, byte *palette);
+
+	/**
+	 * Called on every frame of play() before it reaches the screen, with the
+	 * frame number and the 320x200 picture (the Irulan subtitles are drawn
+	 * this way, play_IRULx_HSQ seg000:cf1b).
+	 */
+	/** Show the picture @p rows lower (the intro's flyovers sit 24 rows down, seg000:06f3). */
+	void setTop(uint rows) { _top = rows; }
+	typedef void (*FrameHook)(void *context, uint frame, byte *screen);
+	void setFrameHook(FrameHook hook, void *context) {
+		_hook = hook;
+		_hookContext = context;
+	}
+
+	/**
+	 * Step through a video one frame at a time, silently (the CD's flight
+	 * views, MNT1-4, and the approach clips). begin() takes the header;
+	 * step() decodes the next frame and answers false at the end.
+	 */
+	bool begin(const Common::Array<byte> &data);
+	bool step();
+	const byte *screen() const { return _screen.data(); }
+	const byte *palette() const { return _palette; }
+	uint frameNumber() const { return _streamFrame; }
+
 private:
 	bool readPalette(const byte *data, uint32 size, uint32 &position);
 	bool decodeFrame(const byte *block, uint32 size);
@@ -58,6 +108,12 @@ private:
 	Common::Array<byte> _screen;
 	Common::Array<byte> _unpacked;
 	uint _scale;
+	uint _top = 0;
+	FrameHook _hook = nullptr;
+	void *_hookContext = nullptr;
+	const Common::Array<byte> *_stream = nullptr;
+	uint32 _streamOffset = 0;
+	uint _streamFrame = 0;
 };
 
 } // namespace Dune

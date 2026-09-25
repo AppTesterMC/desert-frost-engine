@@ -1,0 +1,43 @@
+# The CD intro is captured at HNM frame 40 by the harness. These commands
+# exercise the landing screen (throne room), room rendering, a tap on the
+# first command row ("SEE DUNE MAP" opens the globe), and a clean engine exit.
+wait 1000
+checkpoint cd-landing
+checkpoint cd-room-scripted
+move 160 163
+click left 160 163
+wait 5000
+checkpoint cd-after-touch
+# EXIT MAPS (the first row) returns to the throne room.
+move 160 163
+click left 160 163
+wait 1000
+# Paul's head opens the globe with the game menu; SAVE GAME (third row)
+# lists the four logs; the last row is EXIT GLOBE.
+move 160 145
+click left 160 145
+wait 4000
+checkpoint cd-globe
+move 160 179
+click left 160 179
+wait 1500
+checkpoint cd-menu-save
+move 160 195
+click left 160 195
+wait 1500
+# Duke Leto's opening conversation: the second command row, then a tap per
+# page (view area) until the throne room returns.
+move 160 171
+click left 160 171
+wait 1500
+checkpoint cd-leto-1
+move 160 80
+click left 160 80
+wait 1500
+checkpoint cd-leto-2
+click left 160 80
+wait 1500
+checkpoint cd-leto-3
+click left 160 80
+wait 1000
+quit

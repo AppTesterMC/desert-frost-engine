@@ -1,0 +1,317 @@
+{
+  "phash_tolerance": 6,
+  "scenarios": [
+    {
+      "name": "cd",
+      "data_env": "DUNE_DATA_CD",
+      "data_default": "/private/tmp/dune-data",
+      "script": "tests/regression/cd.script",
+      "timeout_seconds": 180,
+      "checkpoints": [
+        {
+          "name": "VIRGIN.HNM",
+          "category": "intro-video"
+        },
+        {
+          "name": "TITLE.HNM",
+          "category": "intro-video"
+        },
+        {
+          "name": "room-10",
+          "category": "room-rendering"
+        },
+        {
+          "name": "cd-landing",
+          "category": "cursor-visibility"
+        },
+        {
+          "name": "cd-room-scripted",
+          "category": "room-rendering"
+        },
+        {
+          "name": "cd-after-touch",
+          "category": "cursor-visibility"
+        },
+        {
+          "name": "cd-globe",
+          "category": "map"
+        },
+        {
+          "name": "cd-menu-save",
+          "category": "menu"
+        },
+        {
+          "name": "cd-leto-1",
+          "category": "dialogue"
+        },
+        {
+          "name": "cd-leto-2",
+          "category": "dialogue"
+        },
+        {
+          "name": "cd-leto-3",
+          "category": "dialogue"
+        }
+      ],
+      "audio_windows": [
+        {
+          "name": "music",
+          "start": 0,
+          "duration": 5,
+          "min_duration": 2,
+          "min_rms": 100
+        }
+      ]
+    },
+    {
+      "name": "floppy",
+      "data_env": "DUNE_DATA_FLOPPY",
+      "data_default": "/private/tmp/dune-data/floppy",
+      "script": "tests/regression/floppy.script",
+      "timeout_seconds": 240,
+      "checkpoints": [
+        {
+          "name": "intro-logo-swap",
+          "category": "intro-scene"
+        },
+        {
+          "name": "intro-worm",
+          "category": "intro-video"
+        },
+        {
+          "name": "intro-paul",
+          "category": "intro-video"
+        },
+        {
+          "name": "intro-chani-zoom",
+          "category": "intro-video"
+        },
+        {
+          "name": "intro-chani-animation",
+          "category": "intro-video"
+        },
+        {
+          "name": "room-10",
+          "category": "room-rendering"
+        },
+        {
+          "name": "floppy-landing",
+          "category": "cursor-visibility"
+        },
+        {
+          "name": "floppy-room-scripted",
+          "category": "room-rendering"
+        },
+        {
+          "name": "floppy-globe",
+          "category": "map"
+        },
+        {
+          "name": "floppy-menu-save",
+          "category": "menu"
+        },
+        {
+          "name": "intro-sietch-1",
+          "category": "intro-scene"
+        },
+        {
+          "name": "intro-stilgar",
+          "category": "intro-scene"
+        },
+        {
+          "name": "intro-desert-walk",
+          "category": "intro-scene"
+        },
+        {
+          "name": "intro-palace-balcony",
+          "category": "intro-scene"
+        },
+        {
+          "name": "intro-leto",
+          "category": "intro-scene"
+        },
+        {
+          "name": "intro-sunset-fort",
+          "category": "intro-scene"
+        },
+        {
+          "name": "intro-feyd",
+          "category": "intro-scene"
+        },
+        {
+          "name": "intro-attack",
+          "category": "intro-scene"
+        },
+        {
+          "name": "intro-kiss",
+          "category": "intro-scene"
+        },
+        {
+          "name": "intro-ornithopter",
+          "category": "intro-scene"
+        },
+        {
+          "name": "intro-flight",
+          "category": "intro-scene"
+        },
+        {
+          "name": "intro-credits",
+          "category": "intro-scene"
+        },
+        {
+          "name": "prologue-stars",
+          "category": "prologue"
+        },
+        {
+          "name": "prologue-globe-1",
+          "category": "prologue"
+        },
+        {
+          "name": "prologue-desert",
+          "category": "prologue"
+        },
+        {
+          "name": "prologue-baron",
+          "category": "prologue"
+        },
+        {
+          "name": "prologue-night",
+          "category": "prologue"
+        },
+        {
+          "name": "prologue-palace",
+          "category": "prologue"
+        },
+        {
+          "name": "floppy-leto-1",
+          "category": "dialogue"
+        },
+        {
+          "name": "floppy-leto-2",
+          "category": "dialogue"
+        },
+        {
+          "name": "floppy-leto-3",
+          "category": "dialogue"
+        },
+        {
+          "name": "floppy-map-flat",
+          "category": "map"
+        }
+      ],
+      "audio_windows": [
+        {
+          "name": "music",
+          "start": 0,
+          "duration": 20,
+          "min_duration": 5,
+          "min_rms": 100
+        }
+      ]
+    },
+    {
+      "name": "story-comm",
+      "data_env": "DUNE_DATA_FLOPPY",
+      "data_default": "/private/tmp/dune-data/floppy",
+      "script": "tests/regression/story-comm.script",
+      "timeout_seconds": 240,
+      "config": [
+        "dune_story_setup=comm"
+      ],
+      "checkpoints": [
+        {
+          "name": "story-comm-room",
+          "category": "story"
+        },
+        {
+          "name": "story-comm-list",
+          "category": "story"
+        },
+        {
+          "name": "story-emperor",
+          "category": "story"
+        },
+        {
+          "name": "story-duncan-offer",
+          "category": "story"
+        },
+        {
+          "name": "story-bargain",
+          "category": "story"
+        },
+        {
+          "name": "story-accepted",
+          "category": "story"
+        }
+      ]
+    },
+    {
+      "name": "story-scene",
+      "data_env": "DUNE_DATA_CD",
+      "data_default": "/private/tmp/dune-data",
+      "script": "tests/regression/story-scene.script",
+      "timeout_seconds": 180,
+      "config": [
+        "dune_story_setup=gathering"
+      ],
+      "checkpoints": [
+        {
+          "name": "scene-shot",
+          "category": "story"
+        },
+        {
+          "name": "scene-leto",
+          "category": "story"
+        },
+        {
+          "name": "scene-jessica",
+          "category": "story"
+        },
+        {
+          "name": "scene-second-shot",
+          "category": "story"
+        }
+      ]
+    },
+    {
+      "name": "story-ecology",
+      "data_env": "DUNE_DATA_FLOPPY",
+      "data_default": "/private/tmp/dune-data/floppy",
+      "script": "tests/regression/story-ecology.script",
+      "timeout_seconds": 240,
+      "config": [
+        "dune_story_setup=ecology"
+      ],
+      "checkpoints": [
+        {
+          "name": "ecology-map",
+          "category": "story"
+        }
+      ]
+    },
+    {
+      "name": "story-stillsuit",
+      "data_env": "DUNE_DATA_CD",
+      "data_default": "/private/tmp/dune-data",
+      "script": "tests/regression/story-stillsuit.script",
+      "timeout_seconds": 180,
+      "config": [
+        "dune_story_setup=stillsuit"
+      ],
+      "checkpoints": [
+        {
+          "name": "stillsuit-chief-1",
+          "category": "story"
+        },
+        {
+          "name": "stillsuit-chief-2",
+          "category": "story"
+        },
+        {
+          "name": "stillsuit-chief-3",
+          "category": "story"
+        }
+      ]
+    }
+  ]
+}

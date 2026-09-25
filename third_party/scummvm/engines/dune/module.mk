@@ -1,22 +1,35 @@
 MODULE := engines/dune
 
 MODULE_OBJS := \
+	attack.o \
+	book.o \
 	cursor.o \
 	debug.o \
 	detection.o \
+	dialogue.o \
 	dune.o \
+	harness.o \
 	hnm.o \
 	intro.o \
+	intro_first.o \
+	map.o \
+	intro_scenes.o \
 	metaengine.o \
 	music.o \
 	palace.o \
 	panel.o \
 	resource.o \
 	room.o \
+	saves.o \
 	scene.o \
 	sky.o \
 	sprite.o \
-	sound.o
+	sound.o \
+	story.o \
+	story_scene.o \
+	ecology.o \
+	text.o \
+	world.o
 
 # This module can be built as a plugin.
 ifeq ($(ENABLE_DUNE), DYNAMIC_PLUGIN)

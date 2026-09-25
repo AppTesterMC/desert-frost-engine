@@ -21,12 +21,19 @@ or learn something.
 | HERAD AdLib music through ScummVM's OPL emulator | done, version 1 / OPL2 (`music.cpp`) |
 | `.SAL` rooms: sprites, gradient/noise polygons, lines | done; line dithering missing (`room.cpp`) |
 | Sky: tiles and the 33 time-of-day palettes | drawn at fixed midday; no game clock yet (`sky.cpp`) |
-| Control panel: layout, font, compass, touch zones | done; COMMAND1 text and first throne-room commands are live (`panel.cpp`) |
+| Control panel: original layout, small game font, day counter, compass | done; which commands a room offers is decoded only for the throne room (`panel.cpp`) |
 | Mouse pointer (original arrow), direct touch on phones | done (`cursor.cpp`); the original's other pointer shapes are not used yet |
-| Palace map with real exits | done for 10 rooms; the palace front (room 1) has no backdrop yet (`palace.cpp`) |
-| CD intro | the six videos play; music and fades between them missing |
-| Floppy intro | logos through worm-call, Paul and Chani cards; later scenes remain (`intro.cpp`) |
-| Game clock, characters, dialogue, commands, map, game logic, saves | not started |
+| Places: palace, sietches, villages, fortresses with their real room tables, exits and characters | done from the executable's data (`world.cpp`); which marker each character takes is a guess |
+| CD intro | VIRGIN, CRYO, CRYO2 (held), PRESENT, Irulan's narration with its subtitles, TITLE and the MTG1 flyover, in the executable's intro_script order; the later story scenes (MTG2, MTG3, VER) and the fades are not ported yet |
+| Floppy intro, credits, prologue | complete from the logo to the throne room: 33 scenes, credits, 9 narrated cards (`intro.cpp`, `intro_scenes.cpp`, `attack.cpp`) |
+| Landing screen | throne room with Duke Leto and the first two commands, as the original (`scene.cpp`) |
+| Dialogue | the original's engine: DIALOGUE/CONDIT/PHRASE data, conditions, actions, portrait with talking animation, lines in the command box, a tap per page (`dialogue.cpp`, `text.cpp`); only Duke Leto is selectable so far |
+| The book | cover, topics, encyclopedia paragraphs and recorded lines with drop capitals (`book.cpp`); pagination is ours |
+| Map screen and globe | flat map from MAP/TABLAT with the places' icons, scrolling, picking a destination and flying there; the original's DUNE MAP title popup, map menu (contact range, greyed rows) and planet panel; the globe with the game menu (`map.cpp`) |
+| Saves | the original's four logs in their own format, save and load from the globe menu (`saves.cpp`) |
+| Options | music on/off, restart, exit with confirmation | done |
+| Characters and troops | who stands on which marker as the executable decides; sietch Fremen and chiefs; hiring by talking to the Fremen; troop orders (occupations) | done; hiring and harvest rules are ours (`world.cpp`) |
+| Clock, flight, spice, rallying, results | the executable's rules: clock rate, flight steps, harvest and prospecting formulas, charisma check, results layout (`world.cpp`, `notes/research/gameplay-rules.md`) | done for those; story phases and callbacks, Jessica's contact-range lessons, the Emperor's shipments bargained with Duncan, the COMM room, visions, the first vision in the desert, the scripted scenes, Stilgar's Water of Life, the ecology route (wind traps, bulbs, irrigation, vegetation, fortresses taken, MODIFY EQUIPMENT), the Harkonnen zone, arrival deaths and the final scene run; battles, smugglers, troop marches, raids and worms not yet |
 
 ## Source map
 
@@ -37,20 +44,34 @@ or learn something.
 | `resource.cpp/.h` | Load a file by name from `DUNE.DAT` or the directory; transparently un-HSQ it |
 | `sprite.cpp/.h` | Palette blocks and sprite decoding/blitting of a sprite sheet |
 | `room.cpp/.h` | Draw one room of a `.SAL` file with a given sprite sheet |
-| `palace.cpp/.h` | The palace's rooms and exits, from the executable's location table |
+| `palace.cpp/.h` | The palace's room labels for the dump names and the debug overlay |
+| `world.cpp/.h` | The data segment read from the player's executable (LZEXE unpacking for the floppy): locations, room tables, characters, the player's position, the release's sheet slots |
+| `map.cpp/.h` | The flat map renderer (MAP.HSQ + TABLAT.BIN) and the map/globe screen with its icons and panel extras |
+| `saves.cpp/.h` | DUNE21S/DUNE37S save files: RLE, map flags, dialogue table, data segment |
 | `panel.cpp/.h` | The control panel below the view: drawing, game font, COMMAND1 strings, hit testing |
-| `scene.cpp/.h` | `GameScreen`: placeholder menu, palace room view, input |
+| `scene.cpp/.h` | `GameScreen`: room view of any place (floppy sheets or the CD's arrival-video backdrop), conversations, the book, map and globe, the game menu, input; the globe renderer |
+| `text.cpp/.h` | `SentenceBank`: COMMAND/PHRASE files and their inline codes |
+| `story.cpp` | World: the spice shipments, COMM messages, vision queue, first vision, Stilgar's events |
+| `ecology.cpp` | World: the live map and its stage bits, ecology jobs, vegetation discs, fortresses taken, equipment |
+| `story_scene.cpp` | GameScreen: scripted scenes, the COMM viewer, visions, the open desert, endings, FIND PROSPECTORS, the dump/regression story walks |
+| `dialogue.cpp/.h` | `GameState` (the data segment), CONDIT expressions, the DIALOGUE table and the conversation driver |
+| `book.cpp/.h` | Paul's journal: BOOK.HSQ, topics, encyclopedia and recorded lines |
 | `sky.cpp/.h` | Sky tiles and time-of-day palettes from `SKY.HSQ` |
-| `intro.cpp/.h` | CD intro (videos) and floppy intro (sprite sequence through the first character cards) |
+| `intro.cpp/.h` | CD intro (videos); floppy intro sequencing, narration text, skip to the prologue |
+| `intro_first.cpp` | Floppy intro first half: logos, presents, stars, title, worm, Paul, sunrise, Chani and Liet |
+| `intro_scenes.cpp` | Floppy intro second half, credits and prologue: sietch, palace, backdrops, kiss, ornithopter, flight |
+| `attack.cpp/.h` | The night-attack particle simulation (intro and later battles) |
 | `hnm.cpp/.h` | Blocking HNM video player |
 | `music.cpp/.h` | HERAD song player on OPL |
 | `sound.cpp/.h` | One-shot VOC sample playback (unused at the moment) |
 | `cursor.cpp/.h` | The original arrow pointer via ScummVM's cursor manager; direct-touch default |
 | `debug.cpp/.h` | Log file, OSD messages, screenshot dumps, developer config keys |
 
-Data flow for a room: `Resource` loads `PALACE.SAL` and the sheet named by
-`palace.h` → `Sprite::setPalette()` → `Room::draw()` into a 320x200 8-bit
-surface → `Panel::draw()` on rows 152-199 → one `copyRectToScreen`.
+Data flow for a room: `World` gives the place's `.SAL` file, the room record
+and the sheet its slot names → `Resource` loads them → sky or video backdrop
+for exteriors → `Sprite::setPalette()` → `Room::draw()` with the characters
+present at the markers into a 320x200 8-bit surface → `Panel::draw()` on rows
+152-199 → one `copyRectToScreen`.
 
 ## Conventions
 
@@ -102,7 +123,13 @@ anyone to test on a device. Audio can be checked without listening by running
 the SDL binary with `SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE=out.raw` and
 inspecting the samples.
 
-Developer config keys are documented in `debug.h`. Changes to ScummVM outside
+Developer config keys are documented in `debug.h`; `dune_dump_every=<ms>`
+turns a dump run into a real-time intro that writes a frame every so many
+milliseconds (`s<scene>-<ms>.bmp`), for checking animations; `dune_floppy_start=<n>`
+skips the first n floppy intro scenes so a late scene can be checked quickly.
+`make verify` runs the scripted regression scenarios against `golden/` and
+must pass before an IPA is built (`make ipa`); `make add-missing-golden`
+seeds references for new checkpoints only. Changes to ScummVM outside
 this directory are kept as patches in `Cryogenic/scripts/patches/` (see its
 README); the iOS build script applies them.
 
@@ -160,11 +187,13 @@ How the code is meant to absorb them:
 
 ## Where to go next
 
-1. The remaining intro scenes (list in `intro.h`), one swift-dune scene at a
-   time: WormCall, Background + Character (Paul), Sunrise, ...
-2. Characters in rooms from the NPC tables, then the real command list
-   (`COMMAND*.HSQ`) and dialogue (`PHRASE*.HSQ`, `DIALOGUE.HSQ`, `CONDIT.HSQ`).
-3. The intro script from the executable (both releases) instead of measured
+1. The rest of `notes/research/gameplay-rules.md`: battles and attacks,
+   troop movement, smugglers, the spice shipments, Harkonnen raids, ecology,
+   the story-phase callbacks; the flight views (CD MNT videos, floppy cockpit).
+2. The marker each character stands on, the real command list per room, the
+   remaining dialogue actions (questions, music, the map); the original's
+   justified text layout (`sub_18B11`).
+3. The CD's arrival videos played on travel (their last picture is already the
+   backdrop) and SKYDN.HSQ for the CD's room skies.
+4. The intro script from the executable (both releases) instead of measured
    positions.
-4. Other places: sietches, villages and fortresses use the same location table
-   (`palace.h` documents its layout).
