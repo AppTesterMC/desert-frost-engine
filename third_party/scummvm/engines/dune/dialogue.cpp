@@ -245,7 +245,7 @@ void Conversation::start(uint character, uint list, byte mask, bool oneList, boo
 	_list = list;
 	_searchOffset = 0;
 	_mask = mask;
-	_pendingFinish = _endAfter = false;
+	_pendingFinish = _endAfter = _answered = false;
 	_pages.clear();
 	_pageIndex = 0;
 	// sub_193DF: the character now counts as met and as the one Paul talks to.
@@ -272,7 +272,7 @@ bool Conversation::next(Common::String &page, bool &newSentence) {
 			if (_endAfter || _single)
 				break;
 		}
-		if (!findEntry())
+		if (_answered || !findEntry())
 			break;
 	}
 	_active = false;
@@ -333,6 +333,14 @@ bool Conversation::findEntry() {
 		if (_oneList || (_list & 3) == 0 || _list >= Dialogue::kListsPerCharacter)
 			return false;
 	}
+}
+
+void Conversation::finishPending() {
+	if (!_pendingFinish)
+		return;
+	finishEntry();
+	if (_single || _endAfter)
+		_answered = true; // next() shows the rest of its pages, then stops
 }
 
 void Conversation::finishEntry() {

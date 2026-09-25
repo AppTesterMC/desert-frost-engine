@@ -52,6 +52,7 @@ static const byte kPalaceTableHead[5] = { 76, 2, 0, 253, 0 };
 World::World(GameState &state, Resource &resources, StartupLog &log) :
 		_state(state), _resources(resources), _log(log), _palaceTable(0), _pointerTable(0), _shift(0),
 		_tablesFound(false), _floppy(false), _harvestRemainder(0) {
+	seedRandom();
 }
 
 // ---- LZEXE --------------------------------------------------------------------
@@ -507,6 +508,87 @@ void World::peopleInRoom(Common::Array<byte> &people) const {
 		for (uint k = 0; k < chiefs; ++k)
 			people.push_back((byte)(kFremenChief + k));
 	}
+	// init_room_persons (seg000:3157): at a village of appearance 0x21 the
+	// smuggler (character 13, record ds:10a8) stands in every room.
+	if (placeType() == Location::kVillageMin) {
+		bool listed = false;
+		for (uint i = 0; i < people.size(); ++i)
+			listed |= people[i] == kSmuggler;
+		if (!listed)
+			people.push_back(kSmuggler);
+	}
+	// seg000:316e: a defeated Harkonnen troop at a fortress stands in its
+	// room 3 as the Harkonnen captain, character 12 (record ds:1098).
+	if (placeType() >= Location::kFortressMin && placeType() <= Location::kFortressMax && room() == 3 &&
+			captainTroop(currentLocation())) {
+		bool listed = false;
+		for (uint i = 0; i < people.size(); ++i)
+			listed |= people[i] == kCaptain;
+		if (!listed)
+			people.push_back(kCaptain);
+	}
+}
+
+void World::stageSmugglers(uint index) {
+	// seg000:2318 / 235f: the village's smugglers are the record (six of 17
+	// bytes from ds:10d8) whose first byte is the place's first name; it
+	// becomes ds:10b4, its fields staged for the conditions: ds:1c its flags,
+	// ds:1d byte 1, ds:20 its bill (+0e), ds:1f days since the bill (+10),
+	// and ds:1e days since the last visit (+3), 1 on the first.
+	const byte first = locationByte(index, 0);
+	uint p = ds(0x10d8);
+	for (uint k = 0; k < 8 && _state.vars[p] != 0xff; ++k, p += 17) {
+		if (_state.vars[p] != first)
+			continue;
+		WRITE_LE_UINT16(&_state.vars[ds(0x10b4)], (uint16)p);
+		_state.setB(0x1c, _state.vars[p + 2]);
+		const uint16 bill = READ_LE_UINT16(&_state.vars[p + 0x0e]);
+		_state.setW(0x20, bill);
+		const byte today = (byte)(_state.w(GameState::kGameTime) >> 4);
+		_state.setB(0x1f, bill ? (byte)(today - _state.vars[p + 0x10]) : 0);
+		_state.setB(0x1d, _state.vars[p + 1]);
+		byte since = (byte)(today - _state.vars[p + 3]);
+		if (!(_state.vars[p + 2] & 8)) {
+			since = 1;
+			_state.vars[p + 2] |= 8;
+		}
+		_state.setB(0x1e, since);
+		return;
+	}
+}
+
+uint World::captainTroop(uint index) const {
+	Common::Array<uint> ids;
+	troopsAt(index, ids);
+	for (uint i = 0; i < ids.size(); ++i) {
+		const Troop t = troop(ids[i]);
+		if (t.harkonnen() && (t.occupation & 0x20))
+			return ids[i];
+	}
+	return 0;
+}
+
+void World::prepareCaptain() {
+	// seg000:932e: the captain names the fort he knows of: the one kept in his
+	// record (+0c), or else the nearest hidden fort within 30 cells, which he
+	// remembers; that place is staged for the conditions (ds:11ce), and
+	// his dialogue event reveals it (speaker 12, event 8).
+	const uint id = captainTroop(currentLocation());
+	if (!id)
+		return;
+	uint16 known = READ_LE_UINT16(&troopByte(id, 0x0c));
+	if (!known) {
+		uint dist;
+		const int fort = nearestHiddenHarkonnen(currentLocation(), dist);
+		if (fort < 0 || dist >= 0x1e)
+			return;
+		known = placeOffset((uint)fort);
+		WRITE_LE_UINT16(&troopByte(id, 0x0c), known);
+	}
+	if (known >= Location::kTableOffset)
+		stageLocationForConditions((known - Location::kTableOffset) / Location::kRecordSize);
+	_log.line(Common::String::format("Story: the Harkonnen captain (troop %u) knows of place %u", id,
+			(known - Location::kTableOffset) / Location::kRecordSize));
 }
 
 void World::addCharisma(uint amount) {
@@ -780,14 +862,22 @@ bool World::rallyTroop(uint id) {
 	if (!t.id || t.hired() || t.harkonnen())
 		return false;
 	_state.setB(GameState::kFremenTroops, (byte)(_state.b(GameState::kFremenTroops) + 1));
-	// seg000:6f78: charisma + 1 (cap 200); crossing a multiple of 4 raises
-	// every troop's motivation (seg000:6f56, not transcribed).
-	_state.setB(kCharisma, (byte)MIN<uint>(200, _state.b(kCharisma) + 1u));
+	// seg000:66e1: with ds:1178 troops rallied the story moves to phase 0x4c
+	// (the Harkonnens strike back: Leto's death).
+	if (_state.b(GameState::kFremenTroops) >= var(0x1178) && _state.b(GameState::kPhase) < 0x4c)
+		_requestedPhase = 0x4c;
+	changeCharisma(1); // seg000:6f78, with the motivation spill
 	troopByte(id, 3) = (byte)((t.occupation & 0x20) | Troop::kWaitingForOrders);
 	WRITE_LE_UINT16(&troopByte(id, 0x0a), _state.w(GameState::kGameTime));
 	WRITE_LE_UINT16(&troopByte(id, 0x0c), 0);
 	WRITE_LE_UINT16(&troopByte(id, 0x0e), 0);
 	troopByte(id, 0x14) = (byte)(_state.w(GameState::kGameTime) >> 4);
+	// seg000:6704: the first troop rallied at a place paints its Atreides disc.
+	const int place = troopPlace(id);
+	if (place >= 0 && !locationByte((uint)place, 11)) {
+		locationByte((uint)place, 11) = 2;
+		paintArea((uint)place, 0x20, 2);
+	}
 	_log.line(Common::String::format("Troops: troop %u rallied (%u men), %u Fremen troops, charisma %u", id,
 			t.population, _state.b(GameState::kFremenTroops), _state.b(kCharisma)));
 	return true;
@@ -807,7 +897,14 @@ void World::setTroopOccupation(uint id, byte occupation) {
 		if (index == kBulbPlace && !location((uint)index).bulbs)
 			occupation = Troop::kBulbGrowing;
 	}
-	troopByte(id, 3) = (byte)((t.occupation & 0xe0) | occupation);
+	// seg000:6aea writes the whole byte: a new job clears the captured (0x20),
+	// moving and not-hired bits; 6aed clears the refusals (speech 0x30).
+	troopByte(id, 3) = occupation;
+	troopByte(id, 0x12) &= 0xcf;
+	// seg000:6b06: a job other than waiting shows its skill class in the
+	// troop's lines (speech 0x2000 spice, 0x4000 army, 0x8000 ecology).
+	if (occupation != Troop::kWaitingForOrders)
+		troopByte(id, 0x13) |= (byte)(0x20 << ((occupation & 0x0f) >> 2));
 	// Re-derive "working" (bitfield_10 bit 8) and the stopped bit from the
 	// job's viability test (seg000:6b96 for mining).
 	uint16 bits = READ_LE_UINT16(&troopByte(id, 0x10)) & ~0x100;
@@ -914,14 +1011,45 @@ void World::runPeriod() {
 	// run_events_for_current_time_period, seg000:1b23: the troops' jobs
 	// (seg000:6c6f; the table at 6c26 has spice mining and prospecting
 	// transcribed so far), then the period's action (seg000:1db3).
-	for (uint id = 1; id < kTroops; ++id) {
+	// Once the Harkonnen palace has fallen (ds:c2 >= 7) no troop or
+	// time-of-day event runs any more (seg000:1b5e).
+	const bool troopEvents = _state.b(kShipmentPaused) < 7;
+	for (uint id = 1; troopEvents && id < kTroops; ++id) {
 		const Troop t = troop(id);
-		if (!t.id || (READ_LE_UINT16(&troopByte(id, 0x12)) & 0x430) || (t.occupation & 0xa0) || (t.occupation & 0x40))
+		if (!t.id)
+			continue;
+		// seg000:6c92-6ceb: a marching troop always travels; one sulking or
+		// refusing (speech 0x430) sits out, unless ds:fa clears its 0x30.
+		if (t.occupation & 0x40) {
+			if (!(t.occupation & 0xa0) || (READ_LE_UINT16(&troopByte(id, 0x12)) & 0x430))
+				troopTravelStep(id); // seg000:6ced -> 8308
+			continue;
+		}
+		if (READ_LE_UINT16(&troopByte(id, 0x12)) & 0x430) {
+			if (!_state.b(0xfa))
+				continue;
+			troopByte(id, 0x12) &= 0xcf;
+			if (READ_LE_UINT16(&troopByte(id, 0x12)) & 0x400)
+				continue;
+		}
+		if (t.occupation & 0xa0)
 			continue;
 		const int index = (int)(t.location - Location::kTableOffset) / Location::kRecordSize;
 		if (index < 0 || (uint)index >= locationCount())
 			continue;
 		switch (t.occupation & 0x0f) {
+		case Troop::kMilitaryTraining:
+			if (!t.harkonnen())
+				militaryTraining(id, (uint)index);
+			break;
+		case Troop::kEspionage:
+			if (!t.harkonnen())
+				espionageTick(id, (uint)index);
+			break;
+		case 6:
+			if (!t.harkonnen() && !(t.occupation & 0x10))
+				attackTick(id, (uint)index);
+			break;
 		case Troop::kSpiceMining:
 			mineSpice(id, (uint)index);
 			break;
@@ -938,7 +1066,7 @@ void World::runPeriod() {
 			break;
 		}
 	}
-	if (timeSlot() == 3) {
+	if (troopEvents && timeSlot() == 3) {
 		// actions_time_in_day_3 (seg000:20a4): the Emperor's shipments.
 		uint16 sighting = 0;
 		if (shipmentDay(sighting))
@@ -1014,7 +1142,9 @@ void World::markDiscovered(uint index) {
 
 bool World::discoverable(uint index) const {
 	const Location l = location(index);
-	return l.hidden() && l.isSietch() && l.discoverPhase != 0xff && l.discoverPhase <= _state.b(GameState::kPhase);
+	// seg000:4125-4131: any hidden place (villages too) once the story phase
+	// reaches its byte 0x0b.
+	return l.hidden() && l.discoverPhase != 0xff && l.discoverPhase <= _state.b(GameState::kPhase);
 }
 
 uint World::rowCells(int latitude) const {

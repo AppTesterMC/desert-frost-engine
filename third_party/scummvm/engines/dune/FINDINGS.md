@@ -586,6 +586,26 @@ unless the garrison is gone; the SEE RESULTS globe colours; the credits'
 portrait scenes (the cast is listed on black). The wait before the final
 scene's pictures is a " Continue..." instead of timed fades.
 
+## Troops at war, worms and the final attack (2026-09-25)
+
+Implemented in `troops.cpp`, `battle.cpp` and `scene.cpp` from the CD 3.7 disassembly; the full spec with formulas is `notes/speedrun/battle-worm-spec.md`.
+
+- **Random numbers.** Battles use the executable's two LCGs (`e3cc`: $s \leftarrow 0\mathrm{xcbd1}\,s+1$; `e3b7`: $0\mathrm{xe56d}$), seeded from the clock and not saved, so reloading a log rerolls a battle, which the speedrun relies on. `dune_rng_seed` pins them for checks.
+- **Marches** (`84a6`, `8308`, `8604`, `8357`): 7 sub-steps at the order, then 4 a period (8 with an ornithopter); arrival within 7 cells. Arriving at a hostile place makes every hired troop there attack (`83fd`); a marching troop always travels, even one refusing to work (`6c92`-`6ceb`).
+- **Strength** (`342d`, checked against the disassembly): $S=\min(255,\lfloor bM/256\rfloor)$ with $b=\lfloor \min(255,2m+a)\,p/16\rfloor$ and $M=1+2k+4l+8w+16t$. The balance (`33d9`) saturates: at half the Harkonnen strength it is 4 of 256.
+- **Battles**: one roll per attacking troop per period (`739e`); MASSIVE ATTACK is one roll repeated up to 16 times with no time passing (`7317`); Paul's presence adds 30 motivation, and losing with him there kills him (COMMAND after "You know what?", 2 records on). A won fort gives its whole equipment row as free stock, its Harkonnens become recruitable freed Fremen (slots below 8), and it becomes a sietch two days later (`6e20`).
+- **Harkonnen captain**: a defeated Harkonnen troop at a fort stands in room 3 as character 12 (`316e`); before he speaks he stages the nearest hidden fort within 30 (`932e`), measured as $\max(\lvert\Delta\mathrm{lng}\rvert \gg 8,\lvert\Delta\mathrm{lat}\rvert)$ (`5274`), not in row cells.
+- **Worms**: CALL A WORM (greyed before phase 0x4f), GO THERE RIDING A WORM once `ds:0a` bit 6 is set; the first ride is phase 0x50 (+40 charisma); no ornithopter is taken and no Harkonnen zone is checked (`4182` runs for the ornithopter only).
+- **Final attack** (`ds:c2`), all from the dialogue data: 1 when the last fort falls; Thufir's COME WITH ME answer (topic 5, action 0x0e) 2; his STAY HERE answer (topic 6) 3; Gurney's entry line with Jessica, Thufir, Gurney, Stilgar and Chani in the room (`w[12] & 0xb6`) starts the council scene cs:12db, whose Thufir line makes it 4; any Thufir line with 10 000 men and atomics training at locations 2-4 makes 5 (`1243`); Stilgar's question, ACCEPT, action 9 marches them and makes 6; the palace falls on the first attack period with no roll (`73a9`, 7).
+- **Engine corrections found on the way**: a new job writes the whole occupation byte (`6aea`, it clears captured/moving/not hired) and shows its skill class in the troop's lines (`6b06`); the per-job troop counts are `dx + 1 + job` for both sides (`34d9`-`3504`, `ds:66` counts military training); a verb's answer is one line whose action counts before the gate is read (`95e2`-`95f7`); rallying the `ds:1178`-th troop opens phase 0x4c (`66e1`); a flight spots any findable hidden place (villages too) and only with someone travelling with Paul (`40f9`, `4101`); a village of appearance 0x21 has the smuggler in every room (`3157`) and its record is staged (`2318`); the smugglers' event 8 opens phase 0x3c (`2388`); walking into a room sets `ds:23 = 5` for the entry lines (`3f27`).
+
+## The speedrun check
+
+`scripts/check_speedrun.sh [campaign|full] [seeds]` runs the engine's bot (`speedrun.cpp`, developer key `dune_speedrun`) on the floppy and CD data. It plays through the same actions as the menu rows and logs each route step. A shortcut the bot had to take is logged `FORCED`.
+
+- **campaign** starts after Leto's death with one day of the route's preparation forced. From the first worm ride on, it plays the route's war without shortcuts on both releases: espionage, marches, massive attacks with reloads, the captains, and the war council.
+- **full** plays from a new game. It reaches the worm phase by the game's own rules on floppy: the stillsuits, prospectors, Jessica's doors, the desert vision, Gurney, Thufir's armoury, Stilgar, the smugglers, Harah's return, Chani and Leto's death. The Emperor's growing demands then outpace the bot's slower war, so the full run does not finish yet.
+
 ## Map and globe
 
 `MAP.HSQ` is a 50681-byte picture whose low nibbles are the terrain and whose

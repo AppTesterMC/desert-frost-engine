@@ -212,6 +212,8 @@ public:
 	 */
 	void armGate() { _gate = 0xff; }
 	bool gateHeld() const { return _gate == 0xff; }
+	/** Apply the line on screen's action now (a verb's answer, seg000:95e2-95f7). */
+	void finishPending();
 
 private:
 	bool findEntry();
@@ -228,7 +230,7 @@ private:
 	uint _character, _list, _searchOffset;
 	Dialogue::Entry _current;
 	bool _pendingFinish, _endAfter, _oneList;
-	bool _single = false, _paused = false;
+	bool _single = false, _paused = false, _answered = false;
 	byte _bargainParty = 0;
 	byte _gate = 0;
 	EventHandler _eventHandler = nullptr;

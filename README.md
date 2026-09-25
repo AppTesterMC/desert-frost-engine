@@ -68,7 +68,12 @@ floppy releases are detected. The table shows what works; the full status is in
 | Gameplay | the game clock, flight, hiring Fremen troops (WORK FOR ME) and giving them orders, spice harvest and prospecting, rallying (charisma), the results screen, all following the executable's rules ([gameplay-rules.md](notes/research/gameplay-rules.md)) |
 | Story | story phases and their callbacks, Jessica's lessons, the Emperor's spice demands bargained with Duncan in the COMM room, Paul's visions, the scripted scenes, the sietch chiefs' story lines (the stillsuit maker) and Stilgar's Water of Life |
 | Ecology and ending | the ecology route (wind traps, bulbs, irrigation, vegetation spreading on the map, fortresses taken, MODIFY EQUIPMENT), the Harkonnen zone, deaths on arrival, and the final scene |
-| Not yet | battles and raids, smugglers, troop marches, worms, the floppy's flight view, full command lists per room |
+| War and the ending | troop marches and espionage, fort battles, MASSIVE ATTACK and FIGHT FOR A WHOLE DAY, the Harkonnen captain, worm riding, the smugglers' village and the final attack on the Harkonnen palace |
+| Not yet | the floppy's flight view, full command lists per room; a complete play-through from a new game is still being checked (see below) |
+
+`scripts/check_speedrun.sh` lets a bot play the known PC speedrun route through
+the engine's own actions and checks that it reaches the Emperor's throne room
+(the route is in [`notes/speedrun/route.md`](notes/speedrun/route.md)).
 
 The reverse-engineering record, with a source and confidence for each fact, is
 in [`FINDINGS.md`](third_party/scummvm/engines/dune/FINDINGS.md).
@@ -111,8 +116,8 @@ differences. The repository will not bundle the commercial audio.
   close to the DOS floppy data, so this is the most promising next port.
 - **Sega Mega CD:** identify the boot/index format in the ISO, then add a
   release-specific resource layer, video handling, CD audio, and detection.
-- **DOS gameplay:** add battles, smugglers, troop marches, raids, worms and
-  the remaining room commands. The DOS version then serves as the
+- **DOS gameplay:** finish the full play-through from a new game and the
+  remaining room commands. The DOS version then serves as the
   reference behaviour for the other ports.
 
 Amiga and Sega Mega CD are research targets, not supported releases yet.
@@ -148,6 +153,7 @@ BUILDING.md                         how to build and test
 doc/                                screenshots and README media
 docs/                               ScummVM proposal and project notes
 notes/research/gameplay-rules.md    game rules recovered from the executable
+notes/speedrun/                     the speedrun route and the battle/worm rules
 ```
 
 ## Legal and licensing

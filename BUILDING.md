@@ -133,6 +133,11 @@ the new ones. When a change is meant to alter a picture, review the diff in the
 report. Then accept that one checkpoint with
 `python3 scripts/dune_accept_golden.py cd/<checkpoint>`.
 
+`./scripts/check_speedrun.sh [campaign|full] [seed...]` has a bot play the PC
+speedrun route on both releases (uses `DUNE_DATA_FLOPPY` and `DUNE_DATA_CD`).
+It prints PASS when the Emperor's throne room is reached. `campaign` starts
+after Leto's death; `full`, from a new game, does not pass yet.
+
 `./scripts/check_dune_build.sh` is the wider pre-release check: it screenshots
 every reachable screen of both releases and measures the audio. See
 [`scripts/PREFLIGHT.md`](scripts/PREFLIGHT.md).
@@ -174,6 +179,8 @@ are documented in `engines/dune/debug.h`:
 | `dune_no_music=1` | disable the AdLib music |
 | `dune_test_flight=<n>` | fly to place *n* in real time and stop (with `dune_dump_every`, samples the flight view) |
 | `dune_skip_cd_story=1` | CD only: stop the intro after TITLE instead of playing the story scenes |
+| `dune_speedrun=<campaign\|full>` | the speedrun bot (used by `check_speedrun.sh`) |
+| `dune_rng_seed=<n>` | fix the random seed so runs are reproducible |
 | `dune_hnm_dump_frame=<n>` | on a dump run, the video frame at which each intro video is screenshotted (default 40) |
 | `dune_story_setup=<name>` | start from a prepared story state (`comm`, `gathering`, `ecology`, `stillsuit`; used by the story scenarios) |
 | `dune_input=<file>`, `dune_checkpoint_dir=<dir>` | scripted input and checkpoints (used by the harness) |

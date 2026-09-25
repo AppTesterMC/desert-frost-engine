@@ -30,6 +30,10 @@
 !/notes/research/
 /notes/research/*
 !/notes/research/gameplay-rules.md
+!/notes/speedrun/
+/notes/speedrun/*
+!/notes/speedrun/route.md
+!/notes/speedrun/battle-worm-spec.md
 /results/
 *.ipa
 *.o

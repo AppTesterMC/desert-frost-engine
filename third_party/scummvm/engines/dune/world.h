@@ -199,6 +199,13 @@ public:
 	 * hired troop's chief, once per troop.
 	 */
 	void peopleInRoom(Common::Array<byte> &people) const;
+	enum { kCaptain = 12, kSmuggler = 13 }; ///< records ds:1098 and ds:10a8
+	/** seg000:2318: the village's smugglers become the current ones (ds:10b4, 1c-20). */
+	void stageSmugglers(uint index);
+	/** A defeated Harkonnen troop at the place (the captain, seg000:316e), 0 none. */
+	uint captainTroop(uint index) const;
+	/** seg000:932e: before the captain speaks, stage the fort he knows of. */
+	void prepareCaptain();
 	/** Put a character's record where Paul is (a companion told to STAY HERE). */
 	void settleCharacter(uint index);
 
@@ -373,6 +380,8 @@ public:
 	 * consequence on the fourth day (returns true).
 	 */
 	bool shipmentDay(uint16 &sighting);
+	/** Days since the pending demand was made (the Emperor ends it on the fourth). */
+	int daysSinceDemand() const;
 	/** actions_time_in_day_8 (seg000:1dda): the vision reminder; false when not due. */
 	bool shipmentReminderDue() const;
 	/** Duncan's event 8 (seg000:2239): the offer ladder (22b1) and the smuggler bill he mentions (235f). */
@@ -452,6 +461,44 @@ public:
 	/** sub_11071: phase 0x14's first vision, when Paul waits alone in the desert. */
 	void firstVision();
 
+	// ---- Troop marches (troops.cpp) and battles (battle.cpp) ----
+	/** Seed the two battle generators (not saved; dune_rng_seed pins them). */
+	void seedRandom();
+	/** rand (seg000:e3cc) and rand_masked (e3b7): LCGs outside the save, so a reload rerolls. */
+	uint16 lcgRand();
+	uint16 lcgRandMasked(uint16 mask);
+	/** The place a troop stands at (or marches to), -1 if none. */
+	int troopPlace(uint id) const;
+	static uint16 placeOffset(uint index);
+	/** troop_issue_move_order (seg000:84a6); false when refused. */
+	bool issueMoveOrder(uint id, uint dest);
+	/** ESPIONAGE (seg000:6a45): march to the nearest hidden fort within 30 cells. */
+	bool startEspionage(uint id);
+	/** seg000:5274's distance between two places: max(|dlng| >> 8, |dlat|). */
+	uint placeDistance(uint a, uint b) const;
+	/** The nearest hidden fortress or palace (the ds:e2/e4 part of seg000:5274). */
+	int nearestHiddenHarkonnen(uint from, uint &dist) const;
+	/** location_has_battle (seg000:627e). */
+	bool placeInBattle(uint index) const;
+	/** seg000:33be: forces and balance (ds:94, 96, 9c); returns the balance. */
+	byte battleForces(uint index, uint &harkonnen, uint &fremen);
+	static byte battleBalance(uint harkonnen, uint fremen);
+	uint troopStrength(uint id, bool withPaul = false);
+	/** MASSIVE ATTACK (seg000:7317); true when the place is won. */
+	bool massiveAttack(uint index);
+	/** seg000:83fd: every hired troop at the place attacks. */
+	void startAttack(uint index);
+	/** seg000:1243: 10 000 men with atomics training at locations 2-4. */
+	bool finalAttackReady() const;
+	/** ds:46d9: a pending death (4 shot on arrival, 6 killed in battle); cleared by reading. */
+	byte takePaulFate() {
+		const byte f = _paulFate;
+		_paulFate = 0;
+		return f;
+	}
+	/** seg000:6f78 / 6fb0: charisma with the motivation spill. */
+	void changeCharisma(int delta);
+
 private:
 	bool findTables();
 	bool readExecutable(const char *name, Common::Array<byte> &image) const;
@@ -477,6 +524,29 @@ private:
 	Common::Array<byte> _map;
 	uint16 _ecologyLfsr = 1;
 	void raiseSkill(uint id, uint skillClass, byte amount);
+	uint16 _rngA = 1, _rngB = 1;
+	byte _paulFate = 0;
+	byte *troopRecord(uint id);
+	void unlinkTroop(uint id);
+	uint linkTroop(uint id, uint index);
+	void registerEquipment(uint id, uint index, int sign, byte mask = 0xff);
+	void removeFromPlay(uint id);
+	void applyJob(uint id, byte job);
+	bool travelSubstep(uint id);
+	void travelSubsteps(uint id, uint n);
+	void troopTravelStep(uint id);
+	void troopArrive(uint id);
+	uint battleLoss(uint x, uint id);
+	void troopCaptured(uint id);
+	void harkonnenStrike(uint id, uint index, uint h);
+	bool fremenStrike(uint id, uint index);
+	void attackTick(uint id, uint index);
+	void afterBattleWonHired(uint index, bool fortress);
+	void battleWon(uint index);
+	void battleLost(uint index);
+	void militaryTraining(uint id, uint index);
+	void espionageTick(uint id, uint index);
+	void palaceFalls();
 	void fortressTaken(uint index);
 	void paintArea(uint index, byte stage, uint radius);
 	template<typename F> void forDisc(uint16 longitude, int16 latitude, uint radius, int limit, F cell);

@@ -256,6 +256,8 @@ void GameScreen::updateRoomVars() {
 				bits |= (uint16)(1 << people[i]);
 	}
 	_state.setW(GameState::kPersonsInRoom, bits);
+	if (!_desert && _world.placeType() == Location::kVillageMin)
+		_world.stageSmugglers(_world.currentLocation()); // seg000:3166
 	if (!_desert)
 		_world.stageLocationForConditions(_world.currentLocation());
 }

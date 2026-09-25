@@ -152,6 +152,14 @@ public:
 	void prepareEcologyTest(bool showMap);
 	/** Dump runs: a whole conversation with a character present. */
 	void talkThrough(uint character);
+	/** COME WITH ME / STAY HERE to the person Paul talks to (seg000:95e2, 9533). */
+	void companionVerb();
+	/** " WORK FOR ME " to the Fremen of an unrallied troop (seg000:95c1). */
+	void workForMe();
+	/** An ACCEPT (1) / REFUSE (2) / ARGUE (3) answer to the question on screen. */
+	void answerQuestion(byte choice);
+	/** The speedrun check (dune_speedrun=campaign|full): logs each route milestone. */
+	void speedrun(const Common::String &part);
 
 	/** Once per frame: drives the talking animation. */
 	void update();
@@ -220,7 +228,14 @@ private:
 		kRowCommPick,   ///< a sender in the COMM list (rowArgument = the message index)
 		kRowCommCancel, ///< "  Cancel" under the COMM list
 		kRowWait,       ///< WAIT FOR EVENING / WAIT FOR MORNING (the desert)
-		kRowWorm,       ///< CALL A WORM (not built)
+		kRowWorm,       ///< CALL A WORM (seg000:42d1): the map, choosing where the worm goes
+		kRowWormTravel, ///< GO THERE RIDING A WORM (seg000:50ea)
+		kRowMassiveAttack, ///< MASSIVE ATTACK (seg000:7317)
+		kRowFightDay,   ///< FIGHT FOR A WHOLE DAY (seg000:0fc5)
+		kRowEspionage,  ///< ESPIONAGE (seg000:6a45)
+		kRowAttack,     ///< ATTACK, for a troop on espionage (seg000:6a2f)
+		kRowMoveTroop,  ///< MOVE TROOP (seg000:8064): the map, choosing where
+		kRowMoveDone,   ///< "  Done" once the troop's destination is chosen (seg000:8214)
 		kRowProspectors,///< FIND PROSPECTORS (map)
 		kRowEquipment,  ///< MODIFY EQUIPMENT (troop contact)
 		kRowEquipDone,  ///< "  Done" under the equipment panel
@@ -294,6 +309,39 @@ private:
 	void setVideoSkyPalette();
 	void playArrivalVideo(byte placeType);
 	bool arrivalIsFatal(uint place);
+	/** ds:2b: Paul stands in a battle (the night-attack screen, seg000:503c). */
+	bool _battle = false;
+	/** The worm carries Paul on the next journey (travel mode 2, seg000:4795). */
+	bool _riding = false;
+	/** The troop whose destination the map is choosing (MOVE TROOP), 0 none. */
+	uint _movingTroop = 0;
+	/** seg000:1bec after time passed: the battle may be over, or Paul dead. */
+	bool battleCheck();
+	/** A worm journey (seg000:4703, travel mode 2). */
+	void rideWormTo(int destination);
+	void speedrunLog(const Common::String &what);
+	bool speedrunAlive();
+	void speedrunCampaignSetup();
+	void speedrunCampaign();
+	void speedrunFinalAttack();
+	bool speedrunFight(uint place);
+	void speedrunEquip(uint place);
+	void speedrunConverse();
+	bool speedrunMeet(uint who);
+	bool speedrunCompanion(uint who, bool come);
+	void speedrunWait();
+	void speedrunTalkHere(Common::Array<uint> &newTroops);
+	void speedrunVisitPlace(uint place, Common::Array<uint> &newTroops);
+	void speedrunCompanions(const uint *want, uint count);
+	void speedrunStory();
+	void speedrunShipment();
+	bool _speedrunShipping = false;
+	void speedrunTravel(uint place);
+	/** Walk into a room of the place (seg000:3f27): the entry lines may speak. */
+	void enterRoom(uint room);
+	bool _speedrunRecruited = false;
+	int speedrunSpot(uint from, uint16 lng, int16 lat);
+	bool speedrunExplore();
 	void showFinal(uint picture);
 	uint _finalPicture = 0;         ///< the final scene's FINAL.HSQ picture on screen (1, 2), 0 none
 	TalkKind _talkKind = kTalkNormal;

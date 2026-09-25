@@ -22,6 +22,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "common/config-manager.h"
 #include "common/events.h"
 #include "common/random.h"
 #include "common/str.h"
@@ -55,7 +56,13 @@ namespace {
 // Dump and harness runs capture pictures as fast as possible: no real-time
 // clock, no flight or panel animations (as intro_scenes.cpp).
 bool isFastCapture() {
-	return (isDumpRun() && !dumpEveryMillis()) || isDuneHarnessRun();
+	return (isDumpRun() && !dumpEveryMillis()) || isDuneHarnessRun() || ConfMan.hasKey("dune_speedrun");
+}
+
+// The capture runs also skip some rules (deaths, the ending, desert
+// landings) so their pictures stay put; the speedrun check keeps them all.
+bool skipsRules() {
+	return isFastCapture() && !ConfMan.hasKey("dune_speedrun");
 }
 
 } // namespace
@@ -297,8 +304,47 @@ void GameScreen::passTime(uint slots) {
 		emperorEnding();
 		return;
 	}
+	if (battleCheck())
+		return;
 	if (_mode == kRoom)
 		drawRoom(); // the day counter, and the sky when the hour turned
+}
+
+bool GameScreen::battleCheck() {
+	// night_attack_period_step (seg000:1bec): a death pending in the battle
+	// (ds:46d9 = 6, COMMAND 0xc0) ends the game; a battle over clears ds:2b.
+	if (_world.takePaulFate() == 6) {
+		_battle = false;
+		// COMMAND 0xc0 on the CD: two records after "You know what?..."
+		// (0xbe); found by its neighbour, as the floppy's numbering differs.
+		const uint16 shot = _panel.findCommand("You know what?", true);
+		const Common::String text = shot != 0xffff ? _panel.commandString(shot + 2) : Common::String();
+		_log.line(Common::String::format("Battle: Paul dies in the battle (\"%s\")", text.c_str()));
+		_endingText = text.size() > 12 ? text.substr(0, 12) : text;
+		emperorEnding();
+		return true;
+	}
+	if (_battle && !_world.placeInBattle(_world.currentLocation())) {
+		_battle = false;
+		_log.line(Common::String::format("Battle: the battle at place %u is over", _world.currentLocation()));
+	}
+	return false;
+}
+
+void GameScreen::rideWormTo(int destination) {
+	// map_confirm_travel_and_close (seg000:4703) in travel mode 2: calling a
+	// worm ends a battle; the first ride is phase 0x50 (ds:0a bit 6,
+	// charisma + 40); no ornithopter is taken and no Harkonnen zone is
+	// checked on the way (seg000:4182 only runs for the ornithopter).
+	_battle = false;
+	_riding = true;
+	setGamePhase(0x50);
+	_log.line(Common::String::format("Travel: riding a worm to %d", destination));
+	if (destination == -2)
+		travelToward(_map->pointLongitude(), _map->pointLatitude());
+	else
+		travelTo((uint)destination);
+	_riding = false;
 }
 
 void GameScreen::refreshRooms() {
@@ -322,7 +368,7 @@ void GameScreen::showRoom(uint number) {
 	_room = number;
 	refreshRooms();
 	updateRoomVars();
-	if (_world.placeType() == Location::kHarkonnenPalace && number == 2 && !isFastCapture() &&
+	if (_world.placeType() == Location::kHarkonnenPalace && number == 2 && !skipsRules() &&
 			_state.b(GameState::kPhase) < 0xc8) {
 		// sub_14057: location_and_room 0x3002, the Baron's hall: phase 0xc8
 		// and the final scene (cs:128f, seg000:16fc).
@@ -354,7 +400,7 @@ void GameScreen::travelToward(uint16 longitude, int16 latitude) {
 	_log.line(Common::String::format("Travel: toward the desert at %u/%d", longitude, latitude));
 	const bool fromDesert = _desert;
 	_desert = false;
-	if (!fromDesert) {
+	if (!fromDesert && !_riding) {
 		if (_world.room() != 1 && parkedOrnis())
 			_world.setPosition(from, 1);
 		_room = _world.room();
@@ -376,10 +422,12 @@ void GameScreen::travelToward(uint16 longitude, int16 latitude) {
 		return;
 	_world.markDiscovered(arrived);
 	_world.setPosition(arrived, 1);
-	_world.setOrnithopters(arrived, +1);
 	_room = 1;
 	refreshRooms();
-	animateOrni(-1);
+	if (!_riding) {
+		_world.setOrnithopters(arrived, +1);
+		animateOrni(-1);
+	}
 	_panel.setLeftPanel(Panel::kLeftBook);
 	_panel.setCompanions(_world.companion(0), _world.companion(1));
 	showRoom(1);
@@ -393,7 +441,7 @@ void GameScreen::travelTo(uint locationIndex) {
 	const uint from = _world.currentLocation();
 	const bool fromDesert = _desert;
 	_desert = false;
-	if (from != locationIndex && !fromDesert) {
+	if (from != locationIndex && !fromDesert && !_riding) {
 		// play_travel_departure_transition: Paul's orni takes off from the pad
 		// (seen from the place's first room), then leaves it (map_confirm_travel).
 		if (_world.room() != 1 && parkedOrnis())
@@ -417,10 +465,13 @@ void GameScreen::travelTo(uint locationIndex) {
 		// travel_finish_at_destination parks it on the destination's pad, and
 		// the arrival lands it (travel_arrival_landing_sequence): on the CD
 		// the place's approach clip (SIET, PALACE, FORT) plays to its end.
-		_world.setOrnithopters(arrived, +1);
+		if (!_riding)
+			_world.setOrnithopters(arrived, +1);
 		_room = 1;
 		refreshRooms();
-		if (!_world.floppy() && !isFastCapture())
+		if (_riding)
+			_log.line("Travel: the worm stops at the place");
+		else if (!_world.floppy() && !isFastCapture())
 			playArrivalVideo(_world.location(arrived).type);
 		else
 			animateOrni(-1);
@@ -667,7 +718,7 @@ void GameScreen::addRoomRows(RowAction *actions, int *arguments, uint16 *command
 		// 0x4f; worms are not built), WAIT FOR EVENING before period 11, else
 		// WAIT FOR MORNING. The way back is the ornithopter parked beside
 		// Paul (its hotspot, person 0x2f, gives TAKE AN ORNITHOPTER).
-		add(kRowWorm, 0, "CALL A WORM", true);
+		add(kRowWorm, 0, "CALL A WORM", false, phase < 0x4f);
 		if (_world.timeSlot() < 11)
 			add(kRowWait, 0, "WAIT FOR EVENING");
 		else
@@ -677,6 +728,14 @@ void GameScreen::addRoomRows(RowAction *actions, int *arguments, uint16 *command
 	}
 	const bool palace = _world.placeType() == Location::kPalace;
 	(void)canLeave;
+	if (_battle && _room == 1) {
+		// build_room_command_records (seg000:2efb) in a battle (ds:2b): no
+		// ornithopter, the two ways to fight and the worm.
+		add(kRowMassiveAttack, 0, "MASSIVE ATTACK");
+		add(kRowFightDay, 0, "FIGHT FOR A WHOLE DAY");
+		add(kRowWorm, 0, "CALL A WORM", false, phase < 0x4f);
+		return;
+	}
 	if (_room == 1) {
 		// The first room: TAKE AN ORNITHOPTER, greyed without one here.
 		add(kRowOrnithopter, 0, "TAKE AN ORNITHOPTER", parkedOrnis() == 0);
@@ -770,6 +829,22 @@ void GameScreen::panelAction(Panel::Action action, int row, int arrow) {
 		case kRowOrnithopter:
 			openMap(MapScreen::kFlat, true);
 			return;
+		case kRowWorm:
+			// seg000:42d1: the map, choosing where the worm goes.
+			_riding = true;
+			openMap(MapScreen::kFlat, true);
+			return;
+		case kRowMassiveAttack:
+			_world.massiveAttack(_world.currentLocation());
+			dumpScreen(_system, "battle-massive");
+			if (!battleCheck())
+				drawRoom();
+			return;
+		case kRowFightDay:
+			// seg000:0fc5: up to 16 periods, until the battle is over.
+			for (uint n = 0; n < 16 && _battle && _mode == kRoom; ++n)
+				passTime(1);
+			return;
 		case kRowContinue:
 			sceneStep();
 			return;
@@ -834,6 +909,10 @@ void GameScreen::panelAction(Panel::Action action, int row, int arrow) {
 		drawRoom(row, arrow);
 		_system->delayMillis(120);
 	}
+	enterRoom(exit & 0x7f);
+}
+
+void GameScreen::enterRoom(uint room) {
 	// ui_click_move_room (seg000:3f27): ds:26 cleared; the first move inside
 	// a place marks it visited (status bit 4), counts a sietch (ds:25) and
 	// flags the first entry (ds:26 = 0xff); ds:0c the new room; then
@@ -846,9 +925,9 @@ void GameScreen::panelAction(Panel::Action action, int row, int arrow) {
 			_state.setB(0x25, (byte)(_state.b(0x25) + 1));
 		_state.setB(0x26, 0xff);
 	}
-	_state.setB(0x0c, exit & 0x7f);
+	_state.setB(0x0c, (byte)room);
 	_state.setB(0x23, 5);
-	showRoom(exit & 0x7f);
+	showRoom(room);
 	if (_mode == kRoom)
 		roomEntryScan();
 }
@@ -899,8 +978,18 @@ void GameScreen::drawMapScreen() {
 		// phase 5; the ornithopter is greyed without one parked here.
 		const byte phase = _state.b(GameState::kPhase);
 		add(kRowExitMap, 0, "EXIT MAPS");
-		if (_map->selecting() && (_map->destination() >= 0 || _map->destination() == -2))
-			add(kRowFly, _map->destination(), "GO THERE FLYING AN ORNI");
+		if (_map->selecting() && _movingTroop) {
+			if (_map->destination() >= 0)
+				add(kRowMoveDone, _map->destination(), "  Done");
+		} else if (_map->selecting() && (_map->destination() >= 0 || _map->destination() == -2)) {
+			if (_riding)
+				add(kRowWormTravel, _map->destination(), "GO THERE RIDING A WORM");
+			else
+				add(kRowFly, _map->destination(), "GO THERE FLYING AN ORNI");
+		} else if (!_map->selecting() && _map->destination() >= 0 && (_state.b(World::kPaulEvents) & 0x40)) {
+			// seg000:5ff9: once a worm was ridden the place's popup offers it.
+			add(kRowWormTravel, _map->destination(), "GO THERE RIDING A WORM");
+		}
 		if (_world.contactRange() < 2)
 			add(kRowOrders, 0, "GIVE ORDERS TO TROOP", false, !hiredTroopAt(_world.currentLocation()));
 		else
@@ -1385,7 +1474,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		// stage 0x30) takes 0x20 from the accumulator; the first warns
 		// (ENTERING HARKONNEN ZONE, and SKIP TO DESTINATION stops), the
 		// eighth in a row brings the ornithopter down (room screen 2).
-		if (!isFastCapture()) {
+		if (!isFastCapture() && !_riding) {
 			const bool safe = destination >= 0 && _world.friendlyPlace((uint)destination);
 			if (!safe && _world.cellStage((uint16)lng, (int16)lat) == 0x30) {
 				if (!hostileSteps) {
@@ -1420,8 +1509,9 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 			_map->setFlight(true, (uint16)lng, (int16)lat, destination);
 			present();
 		}
-		// A findable sietch within four cells (the 9x9 block of seg000:40f9).
-		for (uint i = 0; i < _world.locationCount() && !skipping; ++i) {
+		// A findable place within four cells (the 9x9 block of seg000:40f9),
+		// spotted only by someone travelling with Paul (ds:10, seg000:4101).
+		for (uint i = 0; i < _world.locationCount() && !skipping && _state.w(GameState::kPersonsWith); ++i) {
 			if ((int)i == destination || i == declined || !_world.discoverable(i))
 				continue;
 			const Location s = _world.location(i);
@@ -1450,7 +1540,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 	if (destination < 0) {
 		// A flight to a point of the desert lands there (current_scene
 		// 0xff); the dump and harness runs keep the old nearest-place end.
-		if (!isFastCapture()) {
+		if (!skipsRules()) {
 			_log.line(Common::String::format("Flight: place %u -> the desert, %u cells", from, total));
 			return kDesertLanding;
 		}
@@ -1567,15 +1657,16 @@ bool GameScreen::arrivalIsFatal(uint place) {
 	// place in battle, or not the Atreides', Fremen attacking it start the
 	// night battle (not built: Paul arrives); otherwise any Harkonnen troop
 	// there means room screen 4, "he was immediately shot".
-	if (place >= _world.locationCount() || isFastCapture())
+	if (place >= _world.locationCount() || skipsRules())
 		return false;
 	const Location l = _world.location(place);
 	if (!(l.status & 2) && _world.friendlyPlace(place))
 		return false;
 	uint harkonnen = 0, attacking = 0;
 	_world.countHostiles(place, harkonnen, attacking);
-	if (attacking) {
-		_log.line(Common::String::format("Arrival: place %u is under attack (the night battle is not built)", place));
+	if (attacking || (l.status & 2)) {
+		_battle = true; // ds:2b
+		_log.line(Common::String::format("Arrival: place %u is in battle, Paul joins it", place));
 		return false;
 	}
 	if (!harkonnen)
@@ -1829,7 +1920,7 @@ void GameScreen::drawTroop() {
 			add(kRowAskMore, 0, "ASK FOR MORE INFORMATION");
 			add(kRowTroopOccupation, 0, job == Troop::kWaitingForOrders ? "SELECT TROOP OCCUPATION" : "CHANGE TROOP OCCUPATION");
 			add(kRowEquipment, 0, "MODIFY EQUIPMENT");
-			add(kRowNone, 0, "MOVE TROOP", true);
+			add(kRowMoveTroop, 0, "MOVE TROOP");
 			add(kRowTroopDone, 0, "NO MORE ORDERS");
 		}
 	} else {
@@ -1849,10 +1940,23 @@ void GameScreen::drawTroop() {
 				add(kRowSetOccupation, Troop::kSpiceMining, "Spice Mining");
 				add(kRowSetOccupation, Troop::kProspecting, "Spice Prospecting");
 				break;
-			case 4:
-				add(kRowSetOccupation, Troop::kMilitaryTraining, "Military Training");
-				add(kRowSetOccupation, Troop::kEspionage, "Espionage");
+			case 4: {
+				// menu ds:2182 for an army troop (seg000:69b3); on espionage
+				// the troop can attack instead (ds:219a).
+				if (job == Troop::kEspionage) {
+					add(kRowAttack, 0, "ATTACK");
+					break;
+				}
+				const int here = _world.troopPlace(_troopId);
+				uint dist = 0xffff;
+				if (here >= 0)
+					_world.nearestHiddenHarkonnen((uint)here, dist);
+				add(kRowNone, 0, "GO & SEARCH FOR EQUIPMENT", false, true);
+				add(kRowEspionage, 0, "ESPIONAGE", false, dist >= 0x1e);
+				add(kRowSetOccupation, Troop::kSpiceMining, "SPECIALIZE IN SPICE");
+				add(kRowSetOccupation, Troop::kIrrigation, "SPECIALIZE IN ECOLOGY", false, !(_state.b(World::kPaulEvents) & 0x20));
 				break;
+			}
 			default:
 				// menu_map_troop_change_troop_occupation_for_ecology_troop
 				// (ds:21a6): GO & SEARCH FOR EQUIPMENT (a march; not built),
@@ -2095,11 +2199,77 @@ bool GameScreen::loadDialogue() {
 	return true;
 }
 
+void GameScreen::workForMe() {
+	// seg000:95c1: the charisma check decides; the Fremen answer with their
+	// topic-5 line, and a pass rallies the troop.
+	const uint troop = _world.localTroop(false);
+	if (!troop)
+		return;
+	_talkRecruitOk = _world.troopAgreesToFollow(troop);
+	_state.setB(0x23, _talkRecruitOk ? 0 : 2); // pending_room_action: the check's outcome for the conditions
+	_talkRecruit = troop;
+	_log.line(Common::String::format("Troops: WORK FOR ME to troop %u: %s", troop, _talkRecruitOk ? "yes" : "no"));
+	presentVerb(5);
+}
+
+void GameScreen::companionVerb() {
+	// COME WITH ME / STAY HERE (seg000:95e2, 9533): the speaker's topic
+	// 5 or 6 line, then the travelling bit (ds:10).
+	const uint16 bit = (uint16)(1 << _talkWho);
+	const bool with = (_state.w(GameState::kPersonsWith) & bit) != 0;
+	presentVerb(with ? 6 : 5);
+	// The move happens unless the answer carried the refusal (event 2).
+	if (_conversation->gateHeld()) {
+		if (with) {
+			_state.setW(GameState::kPersonsWith, _state.w(GameState::kPersonsWith) & ~bit);
+			_world.settleCharacter(_talkWho);
+			_world.removeCompanion(_talkWho);
+		} else {
+			_state.setW(GameState::kPersonsWith, _state.w(GameState::kPersonsWith) | bit);
+			// seg000:9673: two at most; a third sends the first home.
+			const int home = _world.addCompanion(_talkWho);
+			if (home >= 0 && (uint)home < 16) {
+				_state.setW(GameState::kPersonsWith, _state.w(GameState::kPersonsWith) & ~(1 << home));
+				_world.settleCharacter((uint)home);
+				_log.line(Common::String::format("Talk: character %d goes home", home));
+			}
+		}
+	} else {
+		_log.line(Common::String::format("Talk: character %u refuses", _talkWho));
+	}
+}
+
+void GameScreen::answerQuestion(byte choice) {
+	// seg000:241a/2432/2453: the choice (ds:9f), then the dialogue goes on
+	// (loc_19472). Action 4 is the ACCEPT / REFUSE question of any speaker
+	// (Stilgar's final attack, the Water of Life); only Duncan's is the
+	// spice bargaining with its offer ladder.
+	if (_conversation->bargainParty() == 0 && _talkWho == 3) {
+		_world.bargainChoice(choice);
+	} else {
+		_state.setB(World::kChoice, choice);
+		_state.setB(World::kArguing, (byte)(_state.b(World::kArguing) + 1));
+	}
+	_log.line(Common::String::format("Talk: choice %d", choice));
+	_talkBargain = false;
+	_talkEnded = false;
+	_conversation->resume();
+	advanceConversation();
+}
+
 void GameScreen::startConversation(uint character) {
 	if (!loadDialogue()) {
 		showStatus("Dune: dialogue data missing");
 		return;
 	}
+	if (character == 2 && _state.b(0xc2) == 4 && _world.finalAttackReady()) {
+		// seg000:9f40 -> 1243: any line of Thufir at stage 4 with 10 000 men
+		// and atomics round the palace moves the final attack to stage 5.
+		_state.setB(0xc2, 5);
+		_log.line("Story: enough men round the palace, final attack stage 5");
+	}
+	if (character == World::kCaptain)
+		_world.prepareCaptain();
 	openTalk(character);
 	_conversation->start(MIN<uint>(character, World::kFremenChief));
 	advanceConversation();
@@ -2257,6 +2427,18 @@ void GameScreen::storyEvent(void *context, byte event, bool wasSaid, uint speake
 		} else if (speaker == 12) {
 			// Character 12 shows the hidden place whose pointer is at ds:11ce.
 			screen->_world.revealPointedPlace(0x11ce);
+		} else if (speaker == 13) {
+			// callback_event_dialogue_line_08_Smugglers (seg000:2388): the
+			// village chapter (phase 0x3c), then the trade is set up: ds:9e a
+			// roll of 0-3, the smugglers' record (ds:10b4) + 3 today's date,
+			// no argument yet. The goods and prices (23a5-23d4) are not built.
+			screen->setGamePhase(0x3c);
+			state.setB(0x9e, (byte)(screen->_world.lcgRandMasked(3)));
+			const uint16 smugglers = READ_LE_UINT16(&state.vars[screen->_world.ds(0x10b4)]);
+			if (smugglers >= World::kCharacterTable && smugglers + 3 < GameState::kSize)
+				state.vars[smugglers + 3] = (byte)(state.w(GameState::kGameTime) >> 4);
+			state.setB(World::kArguing, 0);
+			screen->_log.line("Story: the smugglers, phase 0x3c (their trade is not built yet)");
 		} else {
 			// 3 Duncan: seg000:2239 (the spice shipment); 5 Stilgar: arms
 			// the Water of Life scene (ds:227e = 0x2ccf); 13 the smugglers
@@ -2358,9 +2540,14 @@ void GameScreen::presentVerb(uint list) {
 	_talkEnded = false;
 	_talkLines.clear();
 	_talkLine = 0;
-	_conversation->start(MIN<uint>(_talkWho, World::kFremenChief), list, 0x20, true);
+	// One answer line (seg000:9f8b -> 9f9e: the first whose condition holds);
+	// its action counts before the gate is read (95f7), and ds:23 is then
+	// cleared (95f2).
+	_conversation->start(MIN<uint>(_talkWho, World::kFremenChief), list, 0x20, true, true);
 	_conversation->armGate(); // arm_dialogue_interrupt_gate
 	advanceConversation();
+	_conversation->finishPending();
+	_state.setB(0x23, 0);
 }
 void GameScreen::endConversation() {
 	// STOP TALKING.
@@ -2715,8 +2902,26 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 				_log.line(Common::String::format("Map command: %s", _panel.commandText(row) ? _panel.commandText(row) : "(none)"));
 				switch (_rowActions[row]) {
 				case kRowExitMap:
+					_riding = false;
+					if (_movingTroop) {
+						_movingTroop = 0;
+						openMap(MapScreen::kFlat, false);
+						break;
+					}
 					leaveMap();
 					break;
+				case kRowWormTravel:
+					rideWormTo(_rowArguments[row]);
+					break;
+				case kRowMoveDone: {
+					// seg000:8214: the troop acknowledges and marches.
+					const uint id = _movingTroop;
+					_movingTroop = 0;
+					if (_world.issueMoveOrder(id, (uint)_rowArguments[row]))
+						dumpScreen(_system, "troop-moving");
+					openMap(MapScreen::kFlat, false);
+					break;
+				}
 				case kRowFly:
 					if (_rowArguments[row] == -2)
 						travelToward(_map->pointLongitude(), _map->pointLatitude());
@@ -2919,6 +3124,29 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 				_recruiting = false;
 				showRoom(_world.room());
 				return false;
+			case kRowMoveTroop:
+				// seg000:8064: the map, choosing the troop's destination.
+				_movingTroop = _troopId;
+				_troopChoosing = false;
+				_mode = kMap;
+				openMap(MapScreen::kFlat, true);
+				return false;
+			case kRowEspionage:
+				_troopChoosing = false;
+				if (_world.startEspionage(_troopId))
+					_log.line(Common::String::format("Troops: troop %u goes spying", _troopId));
+				drawTroop();
+				dumpScreen(_system, "troop-espionage");
+				return false;
+			case kRowAttack: {
+				_troopChoosing = false;
+				const int here = _world.troopPlace(_troopId);
+				if (here >= 0)
+					_world.startAttack((uint)here);
+				drawTroop();
+				dumpScreen(_system, "troop-attack");
+				return false;
+			}
 			case kRowSetOccupation:
 				_world.setTroopOccupation(_troopId, (byte)_rowArguments[row]);
 				_log.line(Common::String::format("Troops: troop %u now %s", _troopId, _panel.commandText(row)));
@@ -3000,18 +3228,7 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 				endConversation();
 				break;
 			case kRowBargain:
-				// seg000:241a/2432/2453: the choice, then the dialogue goes on (loc_19472).
-				if (_conversation->bargainParty() == 0) {
-					_world.bargainChoice((byte)_rowArguments[row]);
-				} else {
-					_state.setB(World::kChoice, (byte)_rowArguments[row]);
-					_state.setB(World::kArguing, (byte)(_state.b(World::kArguing) + 1));
-				}
-				_log.line(Common::String::format("Talk: bargaining choice %d", _rowArguments[row]));
-				_talkBargain = false;
-				_talkEnded = false;
-				_conversation->resume();
-				advanceConversation();
+				answerQuestion((byte)_rowArguments[row]);
 				break;
 			case kRowWhat:
 				// " WHAT ? " (seg000:9ed5): the last line again.
@@ -3031,19 +3248,9 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 			case kRowViewed:
 				endConversation();
 				break;
-			case kRowWorkForMe: {
-				// seg000:95c1: the charisma check decides; the Fremen answer
-				// with their topic-5 line, and a pass rallies the troop.
-				const uint troop = _world.localTroop(false);
-				if (!troop)
-					break;
-				_talkRecruitOk = _world.troopAgreesToFollow(troop);
-				_state.setB(0x23, _talkRecruitOk ? 0 : 2); // pending_room_action: the check's outcome for the conditions
-				_talkRecruit = troop;
-				_log.line(Common::String::format("Troops: WORK FOR ME to troop %u: %s", troop, _talkRecruitOk ? "yes" : "no"));
-				presentVerb(5);
+			case kRowWorkForMe:
+				workForMe();
 				break;
-			}
 			case kRowGiveOrders: {
 				// seg000:5a03: the map opens on the troop behind this chief.
 				Common::Array<uint> ids;
@@ -3065,33 +3272,9 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 				}
 				break;
 			}
-			case kRowCompanion: {
-				// COME WITH ME / STAY HERE (seg000:95e2, 9533): the speaker's topic
-				// 5 or 6 line, then the travelling bit (ds:10).
-				const uint16 bit = (uint16)(1 << _talkWho);
-				const bool with = (_state.w(GameState::kPersonsWith) & bit) != 0;
-				presentVerb(with ? 6 : 5);
-				// The move happens unless the answer carried the refusal (event 2).
-				if (_conversation->gateHeld()) {
-					if (with) {
-						_state.setW(GameState::kPersonsWith, _state.w(GameState::kPersonsWith) & ~bit);
-						_world.settleCharacter(_talkWho);
-						_world.removeCompanion(_talkWho);
-					} else {
-						_state.setW(GameState::kPersonsWith, _state.w(GameState::kPersonsWith) | bit);
-						// seg000:9673: two at most; a third sends the first home.
-						const int home = _world.addCompanion(_talkWho);
-						if (home >= 0 && (uint)home < 16) {
-							_state.setW(GameState::kPersonsWith, _state.w(GameState::kPersonsWith) & ~(1 << home));
-							_world.settleCharacter((uint)home);
-							_log.line(Common::String::format("Talk: character %d goes home", home));
-						}
-					}
-				} else {
-					_log.line(Common::String::format("Talk: character %u refuses", _talkWho));
-				}
+			case kRowCompanion:
+				companionVerb();
 				break;
-			}
 			default:
 				break;
 			}

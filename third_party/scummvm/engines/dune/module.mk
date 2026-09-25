@@ -28,6 +28,9 @@ MODULE_OBJS := \
 	story.o \
 	story_scene.o \
 	ecology.o \
+	battle.o \
+	troops.o \
+	speedrun.o \
 	text.o \
 	world.o
 

@@ -137,6 +137,12 @@ Common::Error DuneEngine::run() {
 		debugEnd();
 		return Common::kNoError;
 	}
+	if (ConfMan.hasKey("dune_speedrun")) {
+		// Developer key: the speedrun check (notes/speedrun/route.md).
+		screen.speedrun(ConfMan.get("dune_speedrun"));
+		debugEnd();
+		return Common::kNoError;
+	}
 	if (ConfMan.hasKey("dune_story_setup"))
 		screen.storySetup(ConfMan.get("dune_story_setup")); // developer / regression key
 

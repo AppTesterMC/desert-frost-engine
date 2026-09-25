@@ -49,6 +49,20 @@ if [ "${1:-}" = "dump" ]; then
 	perl -e 'alarm 180; exec @ARGV' -- ./scummvm -c "$config" --gfx-mode=surface --no-fullscreen \
 		--path="${DUNE_DATA:-$repo_root}" dune >"$evidence_root/logs/sdl-dump.log" 2>&1 || true
 	ls -l "$dump_root"
+elif [ "${1:-}" = "speedrun" ]; then
+	# The speedrun check (notes/speedrun/route.md): a bot plays the route
+	# through the game's own actions and logs each milestone ("Speedrun:").
+	part=${2:-campaign}
+	seed=${3:-1}
+	mkdir -p "$evidence_root/logs"
+	printf '[scummvm]\nsavepath=%s\ndune_speedrun=%s\ndune_rng_seed=%s\ndune_no_music=1\n' \
+		"$run_root/saves" "$part" "$seed" > "$config"
+	log="$evidence_root/logs/speedrun-$part-$(basename -- "${DUNE_DATA:-cd}").log"
+	SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
+		perl -e 'alarm 900; exec @ARGV' -- ./scummvm -c "$config" --gfx-mode=surface --no-fullscreen \
+		--path="${DUNE_DATA:-$repo_root}" dune >"$log" 2>&1 || true
+	grep -E "Speedrun:|Battle:|BLOCKED" "$log" | tail -60
+	echo "log: $log"
 elif [ "${1:-}" = "harness" ]; then
 	input_script=${2:?harness requires an input script}
 	checkpoint_dir=${3:?harness requires a checkpoint directory}

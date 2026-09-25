@@ -60,7 +60,7 @@ for f in LICENSE NOTICE CONTRIBUTING.md Makefile; do put "$f"; done
 for f in \
 	scummvm_source.sh \
 	test_dune_scummvm_sdl.sh test_dune_scummvm_native.sh test_dune_scummvm_runtime.sh \
-	check_dune_build.sh build_dune_scummvm_ios.sh install_dune_scummvm_ios_devicectl.sh \
+	check_dune_build.sh check_speedrun.sh build_dune_scummvm_ios.sh install_dune_scummvm_ios_devicectl.sh \
 	ScummVM-iOS.xcscheme PREFLIGHT.md README-local-builds.md \
 	dune_regress.py dune_accept_golden.py dune_audio_level.py \
 	dune_sprite_sheet.py dune_hnm_frames.py dune_room.py dune_dat.py dune_unlzexe.py chani_grep.py dune_disasm.py asm_range.py dune_dialogue_dump.py \
@@ -72,9 +72,11 @@ tree scripts/patches
 # Regression scenarios; the golden images are game frames and stay out.
 tree tests/regression
 
-# Documentation and README media; of the research notes only the rules summary
-# the engine README links to (the raw extracts and videos stay private).
+# Documentation and README media; of the research notes only the write-ups the
+# engine and its checks cite (raw extracts, disassembly dumps and videos stay private).
 put notes/research/gameplay-rules.md
+put notes/speedrun/route.md
+put notes/speedrun/battle-worm-spec.md
 tree doc --include dune-intro.gif --include "screen-*.png" --exclude "*"
 tree docs --exclude 'desert-frost/'
 

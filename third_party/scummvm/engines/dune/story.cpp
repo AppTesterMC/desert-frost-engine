@@ -97,17 +97,23 @@ bool World::shipmentDay(uint16 &sighting) {
 		const uint16 late = (uint16)(today - eventDay);
 		if (!late)
 			return false;
-		if (late >= 4)
+		if (late >= 4) {
+			_log.line("Shipments: the demand went unanswered for four days, the Emperor strikes");
 			return true;
+		}
 		const byte c = MIN<byte>(fulfilmentClass(_state.b(kFulfilment)), 2);
 		const byte reminder = kReminders[late - 1][c];
-		if (!reminder)
+		if (!reminder) {
+			_log.line(Common::String::format("Shipments: day %u of the demand, class %u: no more reminders, the Emperor strikes", late, c));
 			return true;
+		}
 		sighting = (uint16)((reminder << 8) | 0x0b);
 		return false;
 	}
-	if (var(kUnpaid))
+	if (var(kUnpaid)) {
+		_log.line("Shipments: the Emperor was not paid (ds:11bb), he strikes");
 		return true;
+	}
 	if (today != eventDay) {
 		_state.setB(GameState::kDaysToShipment, (byte)(eventDay - today));
 		return false;
@@ -139,6 +145,10 @@ void World::rollDemand(uint16 &sighting) {
 	_state.vars[kShipmentFlags] |= 0x90;
 	sighting = (_state.b(kFulfilment) & 0x80) ? 0x20b : 0x30b;
 	_log.line(Common::String::format("Shipments: demand %u kg (demand %u)", demand * 10, count + 1));
+}
+
+int World::daysSinceDemand() const {
+	return (int)(_state.w(GameState::kGameTime) >> 4) - (int)word(kEventDay);
 }
 
 bool World::shipmentReminderDue() const {
@@ -532,7 +542,11 @@ void World::stageLocationForConditions(uint index) {
 		const byte occ = t[3];
 		if (occ & 0x20)
 			continue;
-		uint base = (occ & 0x40) ? 0x7f : 0x61;
+		// dx the block (0x61 settled, 0x7f moving); the side's counter is dx,
+		// or dx - 1 for the Fremen; the job counters stay at dx + 1 + job for
+		// both sides (seg000:34d9-3504), so ds:66 counts military training.
+		const uint dx = (occ & 0x40) ? 0x7f : 0x61;
+		uint base = dx;
 		if (!(t[16] & 0x80)) {
 			--base;
 			if (occ == 0x80) {
@@ -544,10 +558,10 @@ void World::stageLocationForConditions(uint index) {
 		byte job = occ & 0x0f;
 		if ((occ & 3) == 3)
 			job &= 0xfc;
-		const uint slot = base + job + 1;
+		const uint slot = dx + job + 1;
 		if (slot < 0x93)
 			_state.setB(slot, (byte)(_state.b(slot) + 1));
-		if (base + job < 0x7f) {
+		if (dx + job < 0x7f) {
 			const uint region = 0x71 + (t[0x12] & 0x0f);
 			_state.setB(region, (byte)(_state.b(region) + 1));
 		}
@@ -672,14 +686,23 @@ uint World::stilgarWaterOfLife() {
 }
 
 void World::finalAttackTroops(Common::Array<uint> &ids) {
+	// seg000:2d2c / 2d62: the hired troops with atomics training at the
+	// three places by the palace (locations 2-4) march on it.
 	ids.clear();
 	_state.setB(kShipmentPaused, (byte)(_state.b(kShipmentPaused) + 1));
-	for (uint id = 1; id <= kTroops; ++id) {
-		const byte *r = _state.vars + kTroopTable + (id - 1) * kTroopSize;
-		if (r[3] == 4 && (r[25] & 4))
-			ids.push_back(id);
+	for (uint index = 2; index <= 4; ++index) {
+		Common::Array<uint> here;
+		troopsAt(index, here);
+		for (uint i = 0; i < here.size(); ++i) {
+			const byte *r = _state.vars + kTroopTable + (here[i] - 1) * kTroopSize;
+			if (!(r[16] & 0x80) && r[3] == Troop::kMilitaryTraining && (r[25] & 4))
+				ids.push_back(here[i]);
+		}
 	}
-	_log.line(Common::String::format("Story: the final attack, %u troop(s) with atomics", ids.size()));
+	for (uint i = 0; i < ids.size(); ++i)
+		if (issueMoveOrder(ids[i], 1))
+			troopTravelStep(ids[i]);
+	_log.line(Common::String::format("Story: the final attack, %u troop(s) with atomics march on the palace", ids.size()));
 }
 
 void World::firstVision() {
