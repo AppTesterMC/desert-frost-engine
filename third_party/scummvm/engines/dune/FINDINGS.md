@@ -703,15 +703,15 @@ track.
 ## Platform and workflow decisions
 
 - **ScummVM engine rather than DOSBox or the C# hybrid**: `README_PLAN.MD`. The
-  DOSBox variant is parked (TrollStore registration error 181).
+  DOSBox variant is parked (the sideloaded app failed with registration error 181).
 - **Desktop first**: every change is checked on the SDL build with screenshot
   dumps before a device build, because a device round trip needs the user
-  (TrollStore install, AirDrop of logs).
+  (sideloading, AirDrop of logs).
 - **Device facts**: iPhone 14 Pro, iOS 16.4.1. `devicectl` can never pair
   (CoreDevice needs iOS 17). `pymobiledevice3` reads the syslog over USB but
-  cannot install an ad-hoc-signed IPA or open the app container (TrollStore
-  registers the app as a System app). The IPA is served over HTTP with an
-  `apple-magnifier://install?url=` link; logs come back by AirDrop.
+  cannot install an ad-hoc-signed IPA or open the app container (the sideloading
+  tool registers the app as a System app). The IPA is served over HTTP with an
+  install link; logs come back by AirDrop.
 - **Audio on iOS**: ScummVM's iOS backend sets no audio session category, so
   the app runs as SoloAmbient and the phone's ring/silent switch mutes it
   entirely; and a single failed `AudioQueueStart` (seen once in a device log as

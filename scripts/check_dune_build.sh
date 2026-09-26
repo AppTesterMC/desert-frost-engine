@@ -3,7 +3,7 @@
 # Pre-IPA check: builds the desktop (SDL) engine, screenshots every screen it
 # can reach, and captures the audio it actually produces. Run this and look at
 # the results BEFORE ./scripts/build_dune_scummvm_ios.sh; a device round-trip
-# costs the user a manual TrollStore install.
+# costs the user a manual sideload.
 #
 # Usage: ./scripts/check_dune_build.sh
 # Output: notes/temp/dune_scummvm_engine_20260916/results/preflight/

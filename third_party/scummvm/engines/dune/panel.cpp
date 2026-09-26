@@ -200,9 +200,12 @@ void Panel::draw(Graphics::ManagedSurface &surface, const bool exits[4], int pre
 	icons.drawFrame(_companions[1] != 0xff ? 0x41 + _companions[1] : 64, target, 58, 182);
 
 	// Compass: centre, the position marker, then only the lit directions.
-	icons.drawFrame(33, target, 255, 162);
-	icons.drawFrame(36, target, 269, 173);
-	for (uint arrow = 0; arrow < 4; ++arrow) {
+	// Scripted scenes and the mirror show its screen dark (the recordings).
+	if (!_compassBlank) {
+		icons.drawFrame(33, target, 255, 162);
+		icons.drawFrame(36, target, 269, 173);
+	}
+	for (uint arrow = 0; arrow < 4 && !_compassBlank; ++arrow) {
 		if (!exits[arrow])
 			continue;
 		const Common::Rect rect = arrowRect(arrow);
@@ -266,7 +269,8 @@ Panel::Action Panel::hitTest(int x, int y, int &row, int &arrow) const {
 	return kActionNone;
 }
 
-void Panel::wrapText(const Common::String &text, int width, bool small, Common::Array<Common::String> &lines) const {
+void Panel::wrapText(const Common::String &text, int width, bool small, Common::Array<Common::String> &lines,
+		bool markBreaks) const {
 	Common::String line, word;
 	const uint length = text.size();
 	for (uint i = 0; i <= length; ++i) {
@@ -286,7 +290,8 @@ void Panel::wrapText(const Common::String &text, int width, bool small, Common::
 			word.clear();
 		}
 		if (c == '\r') {
-			lines.push_back(line);
+			// A forced break ends a paragraph: its line is not justified.
+			lines.push_back(markBreaks ? line + '\x01' : line);
 			line.clear();
 		}
 	}

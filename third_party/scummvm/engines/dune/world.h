@@ -157,8 +157,14 @@ public:
 		 * and the game clock advances every 12000 ticks (seg000:ef6a).
 		 */
 		kPeriodMillis = 59906,
-		/** Real milliseconds per flight step (0x300 PIT ticks, seg000:4f0c); a step is one map cell. */
-		kFlightStepMillis = 3834
+		/**
+		 * Real milliseconds per map cell in flight. travel_pump (seg000:4f0c)
+		 * steps every 0x300 ticks of the 200 Hz counter (3.83 s), but the
+		 * floppy recordings show about 0.64 s a cell over several flights
+		 * (Palace -> Carthag-Tuek, 20 cells, about 12 s); the step's distance
+		 * is not decoded yet, so the recordings' pace is used.
+		 */
+		kFlightStepMillis = 640
 	};
 
 	World(GameState &state, Resource &resources, StartupLog &log);

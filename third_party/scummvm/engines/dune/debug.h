@@ -42,7 +42,7 @@ namespace Dune {
 /**
  * Bring-up aids shared by the whole engine. None of this is game logic.
  *
- * Why it exists: the target device (an iPhone, installed through TrollStore)
+ * Why it exists: the target device (an iPhone, the app sideloaded)
  * offers no debugger and no console, and screenshots cannot be taken from the
  * build machine's shell. So the engine writes a plain-text log through the
  * save manager, which the user can copy off the phone, and can dump its own

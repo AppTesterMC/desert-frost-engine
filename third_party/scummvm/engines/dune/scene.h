@@ -398,6 +398,7 @@ private:
 	void setTalkRows();
 	void drawBubble(const Common::Array<Common::String> &lines, uint first, uint count, const Common::Rect &box, byte ink);
 	uint bubbleLines() const;
+
 	void presentVerb(uint list);
 	/** set_game_phase_and_trigger_callbacks (seg000:121f). */
 	void setGamePhase(byte phase);

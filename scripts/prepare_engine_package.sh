@@ -94,7 +94,10 @@ if [ -n "$big" ]; then
 	printf 'Files over 2 MB:\n%s\n' "$big" >&2
 	fail=1
 fi
-private=$(grep -rIlE '/Volumes/|/Users/[a-z]|192\.168\.[0-9]+\.[0-9]+|/private/tmp/claude' "$REPO" \
+# Extra patterns (e.g. personal names) come from an untracked local file, so
+# the check itself publishes nothing personal: one extended regex per line.
+extra=$(grep -v '^#' "$ROOT/.package-private-patterns" 2>/dev/null | paste -sd'|' - || true)
+private=$(grep -rIilE "/Volumes/|/Users/[a-z]|192\\.168\\.[0-9]+\\.[0-9]+|/private/tmp/claude${extra:+|$extra}" "$REPO" \
 	--exclude='prepare_engine_package.sh' || true)
 if [ -n "$private" ]; then
 	printf 'Private paths or addresses in:\n%s\n' "$private" >&2

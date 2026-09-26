@@ -708,7 +708,7 @@ void GameScreen::addRoomRows(RowAction *actions, int *arguments, uint16 *command
 			if (((message & 0x80) != 0) == (_commList == 1))
 				add(kRowCommPick, i, characterName(message & 0x3f));
 		}
-		add(kRowCommCancel, 0, "  Cancel");
+		add(kRowCommCancel, 0, "Cancel", true);
 		return;
 	}
 	const byte phase = _state.b(GameState::kPhase);
@@ -796,7 +796,9 @@ void GameScreen::drawRoom(int pressedRow, int pressedArrow) {
 			exits[d] = false;
 	_panel.setLeftPanel(Panel::kLeftBook);
 	_panel.setCompanions(_world.companion(0), _world.companion(1));
+	_panel.setCompassBlank(_sceneActive);
 	_panel.draw(_surface, exits, pressedRow, pressedArrow, day());
+	_panel.setCompassBlank(false);
 
 	debugSetRoom((int)_room);
 	debugOverlay(*_surface.surfacePtr());
@@ -980,7 +982,7 @@ void GameScreen::drawMapScreen() {
 		add(kRowExitMap, 0, "EXIT MAPS");
 		if (_map->selecting() && _movingTroop) {
 			if (_map->destination() >= 0)
-				add(kRowMoveDone, _map->destination(), "  Done");
+				add(kRowMoveDone, _map->destination(), "Done", true); // "  Done" on the CD, "Done" on the floppy
 		} else if (_map->selecting() && (_map->destination() >= 0 || _map->destination() == -2)) {
 			if (_riding)
 				add(kRowWormTravel, _map->destination(), "GO THERE RIDING A WORM");
@@ -1180,11 +1182,13 @@ uint GameScreen::parkedOrnis() const {
 void GameScreen::drawOrni(Graphics::Surface &target, int x, int y, uint frame) {
 	// sub_13aa9: the body (ORNYTK 0), the hub (1) at +(6,30), the legs
 	// (2 + clamp(frame - 15, 0, 5)) at +(4,50), the wings (8 + min(frame, 14))
-	// at +(-81,-3). The sheet has no palette: it wears the room's colours.
+	// at +(-81,-3). The sheet's palette chunk sets 80-96, its brown body and
+	// green canopy (without it the outlines take the room's yellows).
 	Common::Array<byte> data;
 	if (!_resources.load("ORNYTK.HSQ", data))
 		return;
 	Sprite orni(_system, data);
+	orni.setPalette();
 	orni.drawFrame(0, &target, x, y);
 	orni.drawFrame(1, &target, x + 6, y + 30);
 	orni.drawFrame((uint16)(2 + CLIP<int>((int)frame - 15, 0, 5)), &target, x + 4, y + 50);
@@ -1252,13 +1256,16 @@ void GameScreen::openMirror() {
 
 void GameScreen::drawMirror() {
 	// callback_transition_look_at_mirror (seg000:0ed0): MIRROR.HSQ's
-	// reflected bedroom (frame 1), Paul's face, then the gilt frame (2);
+	// reflected bedroom (frames 0 and 1), Paul's face, then the gilt frame (2);
 	// the menu is RESTART / LOAD / SAVE / EXIT GAME and Look away (ds:1d1e).
 	_surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
 	Common::Array<byte> data, paul;
 	if (_resources.load("MIRROR.HSQ", data)) {
 		Sprite mirror(_system, data);
 		mirror.setPalette();
+		// The reflected bedroom is two frames: 0 (colours 129-141, the walls,
+		// door and shelves) and 1 (144-158); the recording shows both.
+		mirror.drawFrame(0, _surface.surfacePtr(), 0, 0);
 		mirror.drawFrame(1, _surface.surfacePtr(), 0, 0);
 		if (_resources.load("PAUL.HSQ", paul)) {
 			Sprite face(_system, paul);
@@ -1292,7 +1299,9 @@ void GameScreen::drawMirror() {
 	_panel.setLeftPanel(Panel::kLeftBook);
 	_panel.setCompanions(_world.companion(0), _world.companion(1));
 	const bool exits[4] = { false, false, false, false };
+	_panel.setCompassBlank(true); // the mirror's compass screen is dark
 	_panel.draw(_surface, exits, -1, -1, day());
+	_panel.setCompassBlank(false);
 	const byte black[3] = { 0, 0, 0 };
 	_system->getPaletteManager()->setPalette(black, 0, 1);
 	_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
@@ -1343,6 +1352,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		desert.dunes = dunes;
 	}
 	const uint32 flightStart = _system->getMillis();
+	uint32 lastTimedDump = 0;
 	const bool cdView = !skipping && !dunes && !_world.floppy() && startCdFlightView();
 	auto present = [&]() {
 		if (cdView) {
@@ -1379,6 +1389,9 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		Graphics::Surface view = _surface.surfacePtr()->getSubArea(Common::Rect(0, 0, 320, 152));
 		_surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
 		_panel.applyPalette();
+		// ONMAP's palette under the sky's: the minimap's terrain (20-31) and
+		// the lavender-blue panel and minimap frame of the recordings (240-254).
+		_map->applyPalette();
 		drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette());
 		desert.render(view, _system->getMillis() - flightStart);
 		_map->drawMinimap(_surface, Common::Rect(202, 3, 318, 61), _panel);
@@ -1394,6 +1407,11 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		_panel.draw(_surface, exits, -1, -1, day());
 		_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
 		_system->updateScreen();
+		// dune_dump_every samples the real-time flight too (flight-rt-<ms>).
+		if (dumpEveryMillis() && _system->getMillis() - lastTimedDump >= dumpEveryMillis()) {
+			lastTimedDump = _system->getMillis();
+			dumpScreen(_system, Common::String::format("flight-rt-%06u", lastTimedDump - flightStart).c_str());
+		}
 	};
 	uint32 next = _system->getMillis();
 	uint periods = 0;
@@ -1415,6 +1433,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 			Graphics::Surface view = _surface.surfacePtr()->getSubArea(Common::Rect(0, 0, 320, 152));
 			_surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
 			_panel.applyPalette();
+			_map->applyPalette();
 			drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette());
 			desert.render(view, frozen);
 			_map->drawMinimap(_surface, Common::Rect(202, 3, 318, 61), _panel);
@@ -1897,7 +1916,7 @@ void GameScreen::drawTroop() {
 			drawEquipmentPanel(Common::Rect(panel.left + 0x49, panel.top + 3, panel.left + 0x49 + 153, panel.top + 3 + 63));
 			RowAction a[1] = { kRowEquipDone };
 			int g[1] = { 0 };
-			uint16 c[1] = { _panel.findCommand("  Done") };
+			uint16 c[1] = { _panel.findCommand("Done", true) }; // "  Done" on the CD, "Done" on the floppy
 			setRows(a, g, c, c[0] != 0xffff ? 1 : 0);
 			_panel.setLeftPanel(Panel::kLeftGlobe);
 			const bool noExits[4] = { false, false, false, false };
@@ -2670,6 +2689,10 @@ void GameScreen::drawTalk() {
 		// (paddings 40/16/16/16, seg000:9f40). The balloon starts right of the
 		// speaker's mouth box (talking_head_mouth_box_table, ds:27fa), which
 		// is where the recording's balloons begin (Leto 135, the Fremen ~155).
+		// The three voice balloons (ds:2224): the first whose height fits
+		// (paddings 40/16/16/16, seg000:9f40). The balloon starts right of the
+		// speaker's mouth box (talking_head_mouth_box_table, ds:27fa). The
+		// user prefers these smaller balloons to the recordings' larger ones.
 		static const int16 kBalloons[3][4] = { { 80, 14, 192, 72 }, { 80, 16, 200, 86 }, { 80, 8, 208, 97 } };
 		static const int16 kMouthRight[17] = { 99, 105, 140, 101, 104, 114, 109, 114, 101, 113, 126, 120, 84, 86, 119, 137, 100 };
 		const uint count = MIN<uint>(bubbleLines(), _talkLines.size() - MIN<uint>(_talkLine, _talkLines.size()));
@@ -2694,10 +2717,19 @@ void GameScreen::drawTalk() {
 		}
 	}
 	setTalkRows();
-	const bool exits[4] = { false, false, false, false };
+	// The recordings keep the room's exits lit while someone talks; a
+	// scripted scene's lines show the compass dark.
+	bool exits[4] = { false, false, false, false };
+	if (const RoomRecord *record = currentRoom())
+		for (uint direction = 0; direction < 4 && !_sceneActive && !_desert; ++direction) {
+			const byte e = record->exits[direction];
+			exits[direction] = e != 0 && (e >= World::kExitLeave || !(e & 0x80));
+		}
 	_panel.setLeftPanel(Panel::kLeftBook);
 	_panel.setCompanions(_world.companion(0), _world.companion(1));
+	_panel.setCompassBlank(_sceneActive);
 	_panel.draw(_surface, exits, -1, -1, day());
+	_panel.setCompassBlank(false);
 	debugOverlay(*_surface.surfacePtr());
 	_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
 	_system->updateScreen();
@@ -2717,11 +2749,14 @@ void GameScreen::drawBubble(const Common::Array<Common::String> &lines, uint fir
 			_panel.drawIcon(tiles, 0x1c, x, y);
 	area.copyRectToSurface(*tiles.surfacePtr(), 0, 0, Common::Rect(0, 0, box.width(), box.height()));
 	tiles.free();
-	const int padding = 12, lineHeight = 10;
-	const int width = box.width() - 2 * padding;
+	const int lineHeight = 10, leftPad = 12, rightPad = 12;
+	const int width = box.width() - leftPad - rightPad;
 	int y = box.top + (box.height() - (int)count * lineHeight) / 2;
 	for (uint i = first; i < first + count && i < lines.size(); ++i, y += lineHeight) {
-		const Common::String &line = lines[i];
+		Common::String line = lines[i];
+		const bool paragraphEnd = !line.empty() && line.lastChar() == '\x01';
+		if (paragraphEnd)
+			line.deleteLastChar();
 		Common::Array<Common::String> words;
 		Common::String word;
 		for (uint k = 0; k <= line.size(); ++k) {
@@ -2733,13 +2768,13 @@ void GameScreen::drawBubble(const Common::Array<Common::String> &lines, uint fir
 				word += line[k];
 			}
 		}
-		const bool last = i + 1 >= lines.size();
+		const bool last = i + 1 >= lines.size() || paragraphEnd;
 		int used = 0;
 		for (uint k = 0; k < words.size(); ++k)
 			used += _panel.textWidth(words[k].c_str(), false);
 		const int gaps = (int)words.size() - 1;
 		const int space = (!last && gaps > 0) ? MAX(3, (width - used) / gaps) : _panel.textWidth(" ", false) + 1;
-		int x = box.left + padding;
+		int x = box.left + leftPad;
 		for (uint k = 0; k < words.size(); ++k) {
 			_panel.drawText(_surface, words[k].c_str(), x, y, ink, false);
 			x += _panel.textWidth(words[k].c_str(), false) + space;

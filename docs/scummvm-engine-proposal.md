@@ -39,7 +39,7 @@ The current prototype can:
 - play the HERAD OPL2/AdLib music format through ScummVM's OPL emulator;
 - draw the original pointer and accept direct touch on iOS;
 - reproduce the first portion of the floppy intro through the DUNE title; and
-- run native/null, SDL screenshot, audio-capture, and iOS/TrollStore checks.
+- run native/null, SDL screenshot, audio-capture, and iOS device checks.
 
 These are real format and renderer milestones, not a claim of complete game
 compatibility. Game logic, dialogue, command scripts, characters, saves,
@@ -77,7 +77,7 @@ The repository contains the following repeatable checks:
 
 The SDL dump produces intro and room screenshots. The audio smoke test
 confirms that a real Dune CD resource is decoded and submitted to the mixer.
-The iOS build is ad-hoc signed for development/TrollStore installation; the
+The iOS build is ad-hoc signed for development and sideloading; the
 device evidence is retained under
 `notes/temp/dune_scummvm_engine_20260916/`.
 

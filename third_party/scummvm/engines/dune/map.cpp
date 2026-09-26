@@ -77,7 +77,11 @@ byte MapRenderer::mapPixel(uint offset) const {
 }
 
 void MapRenderer::draw(Graphics::Surface &view, int16 latitude, uint16 longitude) {
-	const uint16 top = (uint16)(latitude + 75 + 5);
+	// A latitude is map row latitude + 98 (map_func, seg000:b58b: the TABLAT
+	// row is |latitude|; the globe does the same). The rows were once taken
+	// as latitude + 80, which drew the terrain 18 rows (72 pixels) north of
+	// the places (the floppy recordings: craters beside the palace).
+	const uint16 top = (uint16)(latitude + 98);
 	for (uint16 i = 0; i < kViewRows; ++i)
 		drawBand(view, i, top + i, longitude);
 }
@@ -257,7 +261,7 @@ bool MapRenderer::unproject(int16 latitude, uint16 longitude, int x, int y, int1
 	if (band < 0 || band >= kViewRows)
 		return false;
 	placeLatitude = (int16)(latitude + band);
-	const int row = placeLatitude + 75 + 5;
+	const int row = placeLatitude + 98; // as draw() and project()
 	if (row < kBandBegin || row >= kBandEnd)
 		return false;
 	const int len = rowLength((uint16)row);
@@ -283,8 +287,8 @@ bool MapRenderer::unproject(int16 latitude, uint16 longitude, int x, int y, int1
 
 bool MapRenderer::project(int16 latitude, uint16 longitude, int16 placeLatitude, uint16 placeLongitude,
 		int &x, int &y) const {
-	const int top = latitude + 75 + 5;
-	const int row = placeLatitude + 75 + 5;
+	const int top = latitude + 98;
+	const int row = placeLatitude + 98;
 	const int band = row - top;
 	if (band < 0 || band >= kViewRows || row < kBandBegin || row >= kBandEnd)
 		return false;

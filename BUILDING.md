@@ -160,7 +160,7 @@ ad-hoc signs
 - The SDK defaults to `iphoneos26.5`. Set `IOS_SDK=iphoneos<version>` to match
   your Xcode (`xcodebuild -showsdks`).
 - `DUNE_DEBUG=1` builds with the engine's debug overlay.
-- The IPA is ad-hoc signed. Install it with TrollStore, or re-sign it with
+- The IPA is ad-hoc signed. Sideload it, or re-sign it with
   your own development certificate. It contains no game data: copy the data
   into the app's documents folder (e.g. with the Files app) and add the game in
   ScummVM.

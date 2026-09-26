@@ -108,7 +108,7 @@ DUNE_DATA=/private/tmp/dune-data/floppy ./scripts/test_dune_scummvm_sdl.sh dump 
 # Null-backend build and detection test.
 ./scripts/test_dune_scummvm_native.sh
 
-# iOS IPA (ad-hoc signed, for TrollStore).
+# iOS IPA (ad-hoc signed, for sideloading).
 ./scripts/build_dune_scummvm_ios.sh
 ```
 

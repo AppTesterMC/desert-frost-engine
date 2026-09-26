@@ -104,6 +104,8 @@ public:
 	 * @param pressedArrow compass arrow to draw pressed, or -1
 	 * @param day          the day counter shown under the book
 	 */
+	/** The compass screen dark (scripted scenes, the mirror), until cleared. */
+	void setCompassBlank(bool blank) { _compassBlank = blank; }
 	void draw(Graphics::ManagedSurface &surface, const bool exits[4], int pressedRow = -1, int pressedArrow = -1,
 			  uint day = 1);
 	/** The period of the day (0-15) for the sun and moon in the book's window (seg000:1a34). */
@@ -125,7 +127,8 @@ public:
 	uint16 findCommand(const char *text, bool prefix = false) const;
 
 	/** Word-wraps @p text to @p width pixels in the small or the 9-row font; '\r' forces a line break. */
-	void wrapText(const Common::String &text, int width, bool small, Common::Array<Common::String> &lines) const;
+	void wrapText(const Common::String &text, int width, bool small, Common::Array<Common::String> &lines,
+			bool markBreaks = false) const;
 	/** The game font: 9-row glyphs at 256, or the 7-row small set at 1408. */
 	void drawText(Graphics::ManagedSurface &surface, const char *text, int x, int y, byte colour, bool small) const;
 	int textWidth(const char *text, bool small) const;
@@ -154,6 +157,7 @@ public:
 	const Common::Array<byte> &characterSheet() const { return _characters; }
 
 private:
+	bool _compassBlank = false;
 	enum {
 		kCommandLeft = 92,
 		kCommandRight = 228,

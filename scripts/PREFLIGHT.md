@@ -1,6 +1,6 @@
 # Preflight: check every build locally before making an IPA
 
-Installing an IPA costs the user a manual TrollStore transfer and a screen
+Installing an IPA costs the user a manual sideload and a screen
 recording. Never ask for that until the build has passed this check on the Mac.
 
 ## One command
@@ -64,7 +64,7 @@ and the `Audio:` line should say the mixer is ready.
 ## Then, and only then
 
 ```sh
-./scripts/build_dune_scummvm_ios.sh     # ad-hoc signed IPA for TrollStore
+./scripts/build_dune_scummvm_ios.sh     # ad-hoc signed IPA for sideloading
 ```
 
 Check the log ends in `** BUILD SUCCEEDED **`, note the printed SHA-256, and
@@ -75,8 +75,8 @@ cp notes/temp/dune_scummvm_engine_20260916/packages/ScummVM-ios-dune-prototype.i
 cd /tmp/serve && python3 -m http.server 8642 --bind 0.0.0.0
 ```
 
-and tell the user the `http://<LAN-ip>:8642/` link (the page offers a TrollStore
-`apple-magnifier://install?url=...` link). Keep the previous IPA alongside the
+and tell the user the `http://<LAN-ip>:8642/` link (the page offers an
+install link). Keep the previous IPA alongside the
 new one so a regression can be compared.
 
 ## Notes
