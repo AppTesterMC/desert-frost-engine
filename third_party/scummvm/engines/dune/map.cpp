@@ -404,6 +404,17 @@ void MapScreen::centreOn(uint locationIndex) {
 	_tilt = CLIP<int>(l.latitude, -96, 96);
 }
 
+void MapScreen::centreOnPosition(uint16 longitude, int16 latitude) {
+	_latitude = CLIP<int16>((int16)(latitude - 18), -75, 75);
+	_longitude = longitude;
+	_rotation = longitude;
+	_tilt = CLIP<int>(latitude, -96, 96);
+}
+
+bool MapScreen::projectPosition(uint16 longitude, int16 latitude, int &x, int &y) const {
+	return _mode == kFlat && _renderer && _renderer->project(_latitude, _longitude, latitude, longitude, x, y);
+}
+
 void MapScreen::scroll(int dx, int dy) {
 	_longitude = (uint16)(_longitude + dx * 0x1002);
 	_latitude = CLIP<int16>((int16)(_latitude + dy * 12), -75, 75);

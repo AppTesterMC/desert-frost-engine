@@ -79,6 +79,9 @@ void showStatus(const char *message);
 /** True when the "dune_dump" key is set, i.e. this is an automated dump run. */
 bool isDumpRun();
 
+/** A recorded run (dune_record=<folder>): the screen as a frame shown for @p millis. */
+bool isRecording();
+void recordFrame(OSystem *system, uint millis);
 /** On a dump run, write the current screen as <name>.bmp; otherwise nothing. */
 void dumpScreen(OSystem *system, const char *name);
 

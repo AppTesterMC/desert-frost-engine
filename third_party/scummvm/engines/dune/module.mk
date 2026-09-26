@@ -4,7 +4,9 @@ MODULE_OBJS := \
 	attack.o \
 	book.o \
 	cursor.o \
+	cockpit.o \
 	debug.o \
+	desert.o \
 	detection.o \
 	dialogue.o \
 	dune.o \

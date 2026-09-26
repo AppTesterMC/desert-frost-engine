@@ -37,6 +37,18 @@ fi
 
 make -j"$(sysctl -n hw.ncpu)"
 
+# Homebrew can replace sdl2 with sdl2-compat (SDL 3 underneath; it happened on
+# 2026-09-26). With it the dummy video driver cannot make a renderer and every
+# headless run quits before the engine starts, with no error. When the real
+# SDL2 is still in the Cellar, the binary is pointed at it. A DYLD_LIBRARY_PATH
+# would not work because perl and env are SIP-protected and drop it.
+sdl2_real=$(ls -d /opt/homebrew/Cellar/sdl2/*/lib/libSDL2-2.0.0.dylib 2>/dev/null | tail -1)
+sdl2_linked=$(otool -L scummvm | awk '/libSDL2-2.0.0.dylib/ {print $1}')
+if [ -n "$sdl2_real" ] && [ -n "$sdl2_linked" ] && [ "$sdl2_linked" != "$sdl2_real" ]; then
+	install_name_tool -change "$sdl2_linked" "$sdl2_real" scummvm 2>/dev/null
+	codesign --force -s - scummvm >/dev/null 2>&1
+fi
+
 config="$run_root/scummvm.ini"
 if [ "${1:-}" = "dump" ]; then
 	dump_root="$evidence_root/results/sdl-dump"

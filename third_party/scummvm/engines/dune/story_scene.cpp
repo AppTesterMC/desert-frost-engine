@@ -385,6 +385,15 @@ void GameScreen::playArrivalVideo(byte placeType) {
 
 void GameScreen::landInDesert() {
 	_desert = true;
+	_walking = false;
+	if (!_landAtSet) {
+		// No landing point given: the landscape around the current place.
+		const Location l = _world.location(_world.currentLocation());
+		_walkLng = l.longitude;
+		_walkLat = l.latitude;
+		_walkFine = 0;
+	}
+	_landAtSet = false;
 	_mode = kRoom;
 	_menu = kMenuNone;
 	_commList = -1;
@@ -398,14 +407,15 @@ void GameScreen::landInDesert() {
 }
 
 void GameScreen::drawDesert() {
-	// The sky over the sand. (The CD plays its MNT views here and the floppy
-	// draws DUNES pieces with the ornithopter beside Paul; ORNYTK has no
-	// palette of its own and the desert's is not recovered, so it is left
-	// out: TAKE AN ORNITHOPTER stands for its hotspot.)
+	// The sky over the sand and the landscape around the landing point
+	// (desert.cpp). The ornithopter beside Paul is not drawn: TAKE AN
+	// ORNITHOPTER stands for its hotspot.
 	_surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
 	_panel.applyPalette();
-	drawSky(_system, _resources, *_surface.surfacePtr(), kSkyNarrow, 320, skyPalette());
-	_surface.fillRect(Common::Rect(0, 78, 320, 152), 190);
+	Graphics::Surface view = _surface.surfacePtr()->getSubArea(Common::Rect(0, 0, 320, 152));
+	drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
+	_surface.fillRect(Common::Rect(0, 77, 320, 152), 0xbf); // floppy 3AF8: the sand from y 77
+	drawLandscape(view, _walkLng, _walkLat, 0, _walkLng, false);
 	const byte black[3] = { 0, 0, 0 };
 	_system->getPaletteManager()->setPalette(black, 0, 1);
 	_viewOk = true;

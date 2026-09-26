@@ -144,6 +144,7 @@ public:
 		kCharacterSize = 16,
 		kPointerTableEntries = 0x34,
 		kExitLeave = 252, ///< exits 252-254 leave the place
+		kExitWalkOut = 0xfb, ///< exits 0xFB-0xFF walk out into the desert (floppy 422C)
 		kTroopTable = 0x8aa,
 		kTroopSize = 27,
 		kTroops = 68,

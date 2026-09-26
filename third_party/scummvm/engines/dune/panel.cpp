@@ -199,19 +199,32 @@ void Panel::draw(Graphics::ManagedSurface &surface, const bool exits[4], int pre
 	icons.drawFrame(_companions[0] != 0xff ? 0x41 + _companions[0] : 64, target, 35, 182);
 	icons.drawFrame(_companions[1] != 0xff ? 0x41 + _companions[1] : 64, target, 58, 182);
 
-	// Compass: centre, the position marker, then only the lit directions.
-	// Scripted scenes and the mirror show its screen dark (the recordings).
-	if (!_compassBlank) {
-		icons.drawFrame(33, target, 255, 162);
-		icons.drawFrame(36, target, 269, 173);
+	// The navigation panel (floppy seg000:329F, drawn by D135): the compass
+	// screen is cleared to colour 240, then the layout's records are drawn.
+	surface.fillRect(Common::Rect(254, 162, 297, 194), 240);
+	switch (_navMode) {
+	case kNavBlank:
+		break;
+	case kNavFlight:
+		// Steerable flight: turn left, straight on, turn right.
+		icons.drawFrame(42, target, 258, 172);
+		icons.drawFrame(43, target, 270, 170);
+		icons.drawFrame(44, target, 283, 172);
+		break;
+	default: {
+		icons.drawFrame(_navMode == kNavRoom ? 33 : _navMode == kNavFront ? 34 : 35, target, 255, 162);
+		if (_navMode == kNavRoom && _navDot)
+			icons.drawFrame(36, target, 269, 173);
+		for (uint arrow = 0; arrow < 4; ++arrow) {
+			if (!exits[arrow] && _navMode != kNavDesert)
+				continue;
+			const Common::Rect rect = arrowRect(arrow);
+			if ((int)arrow == pressedArrow)
+				surface.fillRect(rect, 0);
+			icons.drawFrame(29 + arrow, target, rect.left, rect.top);
+		}
+		break;
 	}
-	for (uint arrow = 0; arrow < 4 && !_compassBlank; ++arrow) {
-		if (!exits[arrow])
-			continue;
-		const Common::Rect rect = arrowRect(arrow);
-		if ((int)arrow == pressedArrow)
-			surface.fillRect(rect, 0);
-		icons.drawFrame(29 + arrow, target, rect.left, rect.top);
 	}
 
 	// Command box: the row bars form its dark background; a pressed row is

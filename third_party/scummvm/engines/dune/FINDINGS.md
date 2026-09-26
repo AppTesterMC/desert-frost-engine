@@ -599,6 +599,70 @@ Implemented in `troops.cpp`, `battle.cpp` and `scene.cpp` from the CD 3.7 disass
 - **Final attack** (`ds:c2`), all from the dialogue data: 1 when the last fort falls; Thufir's COME WITH ME answer (topic 5, action 0x0e) 2; his STAY HERE answer (topic 6) 3; Gurney's entry line with Jessica, Thufir, Gurney, Stilgar and Chani in the room (`w[12] & 0xb6`) starts the council scene cs:12db, whose Thufir line makes it 4; any Thufir line with 10 000 men and atomics training at locations 2-4 makes 5 (`1243`); Stilgar's question, ACCEPT, action 9 marches them and makes 6; the palace falls on the first attack period with no roll (`73a9`, 7).
 - **Engine corrections found on the way**: a new job writes the whole occupation byte (`6aea`, it clears captured/moving/not hired) and shows its skill class in the troop's lines (`6b06`); the per-job troop counts are `dx + 1 + job` for both sides (`34d9`-`3504`, `ds:66` counts military training); a verb's answer is one line whose action counts before the gate is read (`95e2`-`95f7`); rallying the `ds:1178`-th troop opens phase 0x4c (`66e1`); a flight spots any findable hidden place (villages too) and only with someone travelling with Paul (`40f9`, `4101`); a village of appearance 0x21 has the smuggler in every room (`3157`) and its record is staged (`2318`); the smugglers' event 8 opens phase 0x3c (`2388`); walking into a room sets `ds:23 = 5` for the entry lines (`3f27`).
 
+## The navigation panel, outdoor colours and the desert walk
+
+The details, with addresses, are in `notes/desert-walk-spec.md`. They were
+checked against DOSBox-X recordings of the floppy release
+(`~/Dune-DOS-reference/capture/duneprg_000.avi`).
+
+- **Navigation panel** (floppy `329F`). Inside a room it shows box 33 with its
+  lit exits; the red dot appears only in the Atreides palace. Room 1 shows box
+  34. The desert and villages show box 35 with all four arrows. Scripted scenes
+  blank the box with colour 240. Exits 0x80..0xFA are doors the story has not
+  opened yet: they are never lit.
+- **Outdoor panel colours** (floppy `3B13`). A SKY.HSQ record holds 95
+  colours: 80 for the sky (128..207) and 15 for the panel (240..254). That is
+  why the panel turns blue-grey, orange or purple outdoors with the time of day.
+- **Walking out** (floppy `422C`, `B4CC`). An exit 0xFB..0xFF leaves the place
+  on foot. Each arrow then moves 1/256 of a latitude row north or south, or one
+  longitude unit east or west, so on foot Paul can only walk back into the
+  place he left. He arrives in room 1 when the fine latitude is 0 on the place's
+  cell and longitude. The sun's glare (SUN.HSQ) shows at steps 20, 36 and 52.
+  At step 68 Paul faints: five periods pass and he wakes in the palace
+  (room 10) or the sietch (room 2), with `ds:E7` raised. There is no TAKE AN
+  ORNITHOPTER on foot.
+- **Landscape** (floppy `57FA`, `5A8D`). Up to 29 rows of DUNES3 dunes and
+  rocks are placed by an LCG seeded from the position
+  ($\mathit{seed}_{n+1} = 58733\,\mathit{seed}_n + 1 \bmod 2^{16}$) and
+  projected with $T[z] \approx \lfloor 256/z \rfloor$. The place's building
+  (DUNES2) appears at depth $\mathit{fine}+1$.
+- **Where the landscape is drawn.** It is used for the walk and for a landing
+  in the open desert. Sietch and fortress entrances are drawn over it at the
+  place's own position (floppy `3C5C`). The sand fill starts at y 77, colour
+  191.
+- **Not yet done:**
+  - the harvester overlay (`56DE`, partly inferred);
+  - the decay of `ds:F4` when time passes;
+  - the CD's desert stills (`380c`); the CD draws the floppy landscape.
+
+## The ornithopter: cockpit, steering and sightings
+
+Details are in `notes/orni-cockpit-spec.md` and `notes/orni-flight-spec.md`. They were checked against the DOSBox-X captures `duneprg_003.png` to `duneprg_005.png`.
+
+- **Destination screen** (CD `430b`). TAKE AN ORNITHOPTER opens the cockpit instead of the full-screen map:
+  - ORNYPAN 0 and 1, then the flat map in the window (81,45)–(241,134), then ORNYPAN 2's green grid on top;
+  - "SELECT DESTINATION ON MAP" typed out one glyph per 0x18 ticks (the capture's "0" is the O of ON);
+  - the blinking ICONES 0x4c ornithopter, the orange scroll pad, and a single Cancel row.
+
+  A tap in the window takes off at once; the GO THERE step is gone. Cancel returns to the pad or to the desert. CHANGE DESTINATION reopens the same screen during a flight and re-aims the flight.
+- **Route** (floppy `5FB7`). The heading uses 256 units a turn. Each step moves one map cell along it: the major axis a whole cell, the minor axis its share. A homing flight re-aims every step, and the polar guard and pole flip apply.
+- **Free flight** (floppy `51C7`). A desert point picked in the cockpit sets a fixed heading. The flight never lands there:
+  - the rows are BACK TO STARTING POINT, TOWARDS NEAREST PLACE (from phase 0x32) and CHANGE DESTINATION;
+  - the compass shows the steering arrows ICONES 42/43/44; a press, and every 50 ticks while held, turns the heading by 4 units and pans the landscape 4 px.
+
+  A homing flight shows SKIP TO DESTINATION and CHANGE DESTINATION over a dark compass. The worm and the check runs still land at the point.
+- **Flight landscape** (floppy `57FA`, `54ED`). It uses the desert walk's object engine with DUNES.HSQ, which also has 6-byte frame headers, and perspective height 0x48:
+  - 40 rows of 4 objects;
+  - a new row at $z=40$ every 16 ticks, each row seeded from the map 5 steps ahead.
+- **Sightings** (floppy `4353`, `3924`). The check needs someone travelling with Paul (ds:10). A findable place counts when it is in the 9×9 block and within 135° of the heading; the last one found wins. It is marked discovered and the flight homes on it at once. The companion then speaks PHRASE12 0x1A0 in the ORNYCAB cabin, with the place's kind and side substituted. The single row is GO TOWARDS THIS PLACE. The old GO TOWARDS / RESUME FLIGHT choice is gone.
+- **Globe access.** The planet at the bottom left of the flat map opens the globe and its game menu, as in the original. Paul's head still works too.
+- **Save files** read raw. A save begins with the game time, so a time such as 0x0178 writes `78 01`, a valid zlib header, and `openForLoading()` returned an empty stream. The speedrun check found this after the route timing changed.
+- **Not yet done:**
+  - the zoomed-globe renderer (`b6c3`) that draws the cockpit window and the minimap at a finer scale;
+  - hover labels in the cockpit;
+  - the take-off blink of the chosen label;
+  - the CD's two-way side split and its " WHAT ? " row.
+
 ## The speedrun check
 
 `scripts/check_speedrun.sh [campaign|full] [seeds]` runs the engine's bot (`speedrun.cpp`, developer key `dune_speedrun`) on the floppy and CD data. It plays through the same actions as the menu rows and logs each route step. A shortcut the bot had to take is logged `FORCED`.

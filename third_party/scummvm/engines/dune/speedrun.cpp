@@ -30,6 +30,7 @@
 #include "dune/scene.h"
 
 #include "common/config-manager.h"
+#include "common/events.h"
 #include "common/system.h"
 
 #include "dune/debug.h"
@@ -49,13 +50,43 @@ enum {
 } // namespace
 
 void GameScreen::speedrunLog(const Common::String &what) {
+	// Watched runs show each milestone on screen too.
+	if (ConfMan.hasKey("dune_speedrun_watch") &&
+			(what.contains("OK") || what.contains("BLOCKED") || what.contains("FORCED") || what.contains("taken") ||
+			 what.contains("story phase") || what.contains("recruited") || what.contains("works for")))
+		showStatus(Common::String::format("Day %u: %s", _world.day(), what.c_str()).c_str());
 	_log.line(Common::String::format("Speedrun: day %u %02u:%02u, phase %#x, charisma %u, rallied %u, stage %u: %s",
 			_world.day(), _world.timeSlot() * 3 / 2, (_world.timeSlot() & 1) ? 30 : 0,
 			_state.b(GameState::kPhase), _state.b(World::kCharisma), _state.b(GameState::kFremenTroops),
 			_state.b(kFinalStage), what.c_str()));
 }
 
+void GameScreen::speedrunPause(uint millis) {
+	// Watched runs (dune_speedrun_watch): the screen stays up for a moment
+	// and the window keeps answering; closing it stops the run.
+	if (!ConfMan.hasKey("dune_speedrun_watch") || _quitRequested)
+		return;
+	const uint scale = MAX(1, ConfMan.getInt("dune_speedrun_watch"));
+	if (isRecording()) {
+		// Headless recording: the screen held for the pause, no waiting.
+		_system->updateScreen();
+		recordFrame(_system, millis * scale / 100);
+		return;
+	}
+	const uint32 until = _system->getMillis() + millis * scale / 100;
+	while (_system->getMillis() < until && !_quitRequested) {
+		Common::Event event;
+		while (_system->getEventManager()->pollEvent(event))
+			if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER)
+				_quitRequested = true;
+		_system->updateScreen();
+		_system->delayMillis(10);
+	}
+}
+
 bool GameScreen::speedrunAlive() {
+	if (_quitRequested)
+		return false;
 	if (_ending) {
 		speedrunLog(Common::String::format("BLOCKED Paul's game ended (\"%s\")", _endingText.c_str()));
 		return false;
@@ -143,6 +174,7 @@ bool GameScreen::speedrunFight(uint place) {
 	saveSlot(1);
 	for (uint attempt = 0; attempt < 32; ++attempt) {
 		for (uint round = 0; round < 8 && _battle && !_ending; ++round) {
+			speedrunPause(900);
 			_world.massiveAttack(place);
 			battleCheck();
 			if (_battle && !_ending && _world.captainTroop(place)) {
@@ -608,6 +640,7 @@ void GameScreen::speedrunConverse() {
 			continue;
 		}
 		if (_sceneActive) {
+			speedrunPause(1400);
 			if (_mode == kTalk)
 				advanceConversation();
 			else
@@ -615,6 +648,7 @@ void GameScreen::speedrunConverse() {
 			continue;
 		}
 		if (talking() || _talkRecruit) {
+			speedrunPause(1400); // read the page
 			advanceConversation();
 			continue;
 		}
@@ -693,6 +727,7 @@ void GameScreen::speedrunVisitPlace(uint place, Common::Array<uint> &newTroops) 
 			showRoom(room);
 		else
 			enterRoom(room); // as walking in: the entry lines speak (ds:23 = 5)
+		speedrunPause(700);
 		speedrunTalkHere(newTroops);
 		if (_world.placeType() == Location::kPalace && room == 8 && _world.sightingCount()) {
 			// The COMM room: the messages (seg000:290b).

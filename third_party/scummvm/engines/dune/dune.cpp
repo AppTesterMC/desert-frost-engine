@@ -138,15 +138,21 @@ Common::Error DuneEngine::run() {
 		return Common::kNoError;
 	}
 	if (ConfMan.hasKey("dune_speedrun")) {
-		// Developer key: the speedrun check (notes/speedrun/route.md).
+		// Developer key: the speedrun check (notes/speedrun/route.md). A
+		// watched run (dune_speedrun_watch) leaves the game playable after it.
 		screen.speedrun(ConfMan.get("dune_speedrun"));
-		debugEnd();
-		return Common::kNoError;
+		if (!ConfMan.hasKey("dune_speedrun_watch") || screen.quitRequested() || isRecording()) {
+			debugEnd();
+			return Common::kNoError;
+		}
+		ConfMan.removeKey("dune_speedrun", Common::ConfigManager::kApplicationDomain);
 	}
 	if (ConfMan.hasKey("dune_story_setup"))
 		screen.storySetup(ConfMan.get("dune_story_setup")); // developer / regression key
+	if (ConfMan.hasKey("dune_test_cockpit"))
+		screen.testCockpit(ConfMan.getInt("dune_test_cockpit")); // developer key: the orni cockpit, for a scripted real-time test
 
-	if (isDumpRun()) {
+	if (isDumpRun() && !ConfMan.hasKey("dune_test_cockpit")) {
 		// Screenshot every palace room, then leave.
 		for (uint room = 1; room <= kPalaceRoomCount; ++room)
 			if (!(palaceRoom(room).code & 0x80))
@@ -186,6 +192,8 @@ Common::Error DuneEngine::run() {
 		// Last, so it cannot disturb the pictures above: the story systems.
 		screen.dumpStillsuit();
 		screen.dumpStory();
+		screen.dumpDesertWalk();
+		screen.dumpCockpit();
 		debugEnd();
 		return Common::kNoError;
 	}

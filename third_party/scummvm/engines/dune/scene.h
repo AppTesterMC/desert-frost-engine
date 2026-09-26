@@ -143,6 +143,16 @@ public:
 	/** Dump runs: the scripted scenes, the first vision, the COMM room and Duncan's bargaining (story_scene.cpp). */
 	void dumpStory();
 	void dumpStillsuit();
+	/** Dump runs: the walk out of the palace into the desert (desert.cpp). */
+	void dumpDesertWalk();
+	/** Dump runs: the orni cockpit's destination screen, then a flight from it (cockpit.cpp). */
+	void dumpCockpit();
+	/**
+	 * Developer key dune_test_cockpit (a scripted real-time test): 1 the palace
+	 * front and TAKE AN ORNITHOPTER; 2 Gurney aboard on a free flight toward
+	 * the nearest hidden place, made findable, for the sighting.
+	 */
+	void testCockpit(int mode);
 	/**
 	 * Developer key dune_story_setup (the story regression scenario): "comm"
 	 * = after the first vision, in the COMM room with Duncan and 2000 kg in
@@ -239,12 +249,15 @@ private:
 		kRowProspectors,///< FIND PROSPECTORS (map)
 		kRowEquipment,  ///< MODIFY EQUIPMENT (troop contact)
 		kRowEquipDone,  ///< "  Done" under the equipment panel
+		kRowCockpitCancel, ///< "  Cancel" on the orni cockpit (menu_multiple_cancel)
 		kRowStatus      ///< anything not implemented: shows its name
 	};
 
 	void composeView();
 	bool drawVideoBackdrop(byte placeType);
 	void drawRoom(int pressedRow = -1, int pressedArrow = -1);
+	/** The navigation panel's layout and lit exits for the room (floppy seg000:329F). */
+	void roomNav(bool exits[4], bool &canLeave);
 	void refreshRooms();
 	const RoomRecord *currentRoom() const;
 	void setRows(const RowAction *actions, const int *arguments, const uint16 *commands, uint count);
@@ -282,6 +295,63 @@ private:
 	bool roomEntryScan();
 	void landInDesert();
 	void drawDesert();
+	// ---- The walk out into the desert (desert.cpp, notes/desert-walk-spec.md) ----
+	/** Leave the place on foot through exit @p exit (0xFB-0xFF; floppy 422C). */
+	void walkOut(byte exit);
+	/** One arrow in the desert (1 north, 2 east, 3 south, 4 west; floppy 424F). */
+	void desertStep(uint direction, bool counted);
+	/** The sun's glare and the faint (floppy 39C2). */
+	void thirstCheck();
+	void drawWalkView();
+	/** The landscape of build_landscape / project_and_draw (floppy 57FA, 5A8D) into @p view. */
+	void drawLandscape(Graphics::Surface &view, uint16 longitude, int16 latitude, byte fine, uint16 key, bool inPlace);
+	uint16 landRandom();
+	uint landPick(byte terrain);
+	void drawLandObject(Graphics::Surface &view, const Common::Array<byte> &sheet, uint sprite, uint z, int x, uint height);
+	// The flight's landscape: the same objects, 4 a row, nearing one step a frame.
+	struct LandObject {
+		int16 z;
+		int16 x;
+		uint16 sprite;
+	};
+	Common::Array<LandObject> _flightObjects;
+	byte _flightTerrain = 0;
+	uint32 _flightFrameAt = 0;
+	void flightLandscapeStart(const uint16 *longitudes, const int16 *latitudes);
+	void flightLandscapeReseed(uint16 longitude, int16 latitude);
+	void flightLandscapeRow(uint z);
+	void flightLandscapeTick();
+	void flightLandscapePan(int direction);
+	void flightLandscapeDraw(Graphics::Surface &view, const Common::Array<byte> &dunes);
+	bool _walking = false;  ///< Paul walked out on foot (no ornithopter beside him)
+	uint16 _walkLng = 0;    ///< ds:4 in the desert: the longitude
+	int16 _walkLat = 0;     ///< ds:6 low byte: the latitude row
+	byte _walkFine = 0;     ///< ds:6 high byte: 1/256 of a row
+	byte _walkSteps = 0;    ///< the step counter (floppy ds:4291)
+	int _walkFrom = -1;     ///< last_location_ptr: the place walked out of
+	uint16 _landSeed = 0;   ///< ds:20E3
+	// ---- The orni cockpit's destination screen (cockpit.cpp, notes/orni-cockpit-spec.md) ----
+	void openCockpit(bool changing);
+	void drawCockpit();
+	void cockpitTap(int x, int y);
+	void cockpitCancel();
+	void updateCockpit(uint32 now);
+	bool cockpitPlayer(int &x, int &y) const;
+	void cockpitCrop(int &cropX, int &cropY) const;
+	bool _cockpit = false;          ///< the map is shown in the cockpit's window
+	bool _cockpitChanging = false;  ///< opened by CHANGE DESTINATION during a flight
+	uint32 _cockpitStart = 0;
+	uint32 _cockpitDrawn = 0;
+	// A companion sights a place (notes/orni-flight-spec.md 7): the cabin, the line, GO TOWARDS THIS PLACE.
+	bool _cabinView = false;
+	void drawCabin();
+	void showSighting(uint place, byte relativeBearing);
+	uint16 _flightLng = 0;          ///< the flight's position when CHANGE DESTINATION opens the cockpit
+	int16 _flightLat = 0;
+	int _changeTarget = -1;         ///< CHANGE DESTINATION's pick: a place, -2 a desert point, -1 none
+	uint16 _changeLongitude = 0;
+	int16 _changeLatitude = 0;
+	bool _landAtSet = false; ///< travelToward set the landing point for landInDesert()
 	void drawKiss();
 	void checkIdle(uint32 now);
 	void presentVision(bool dream);
@@ -320,6 +390,7 @@ private:
 	/** A worm journey (seg000:4703, travel mode 2). */
 	void rideWormTo(int destination);
 	void speedrunLog(const Common::String &what);
+	void speedrunPause(uint millis);
 	bool speedrunAlive();
 	void speedrunCampaignSetup();
 	void speedrunCampaign();
@@ -378,7 +449,6 @@ private:
 	void animateOrni(int step);
 	void openMirror();
 	void drawMirror();
-	bool askFlightStop(uint sietch);
 	void drawResults();
 	void openTroop(uint troopId, bool fromMap);
 	void drawTroop();

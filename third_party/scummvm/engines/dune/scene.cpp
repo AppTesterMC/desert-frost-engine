@@ -56,7 +56,10 @@ namespace {
 // Dump and harness runs capture pictures as fast as possible: no real-time
 // clock, no flight or panel animations (as intro_scenes.cpp).
 bool isFastCapture() {
-	return (isDumpRun() && !dumpEveryMillis()) || isDuneHarnessRun() || ConfMan.hasKey("dune_speedrun");
+	// The speedrun check runs as fast as a capture, unless it is watched
+	// (dune_speedrun_watch: real-time flights and animations, pauses).
+	return (isDumpRun() && !dumpEveryMillis()) || isDuneHarnessRun() ||
+		   (ConfMan.hasKey("dune_speedrun") && !ConfMan.hasKey("dune_speedrun_watch"));
 }
 
 // The capture runs also skip some rules (deaths, the ending, desert
@@ -257,6 +260,7 @@ void GameScreen::startNewGame() {
 	_cast.clear();
 	_finalPicture = 0;
 	_desert = false;
+	_walking = false;
 	_commList = -1;
 	_troopEquipment = false;
 	_state.newGame();
@@ -363,6 +367,7 @@ void GameScreen::showRoom(uint number) {
 	_mode = kRoom;
 	_menu = kMenuNone;
 	_desert = false;
+	_walking = false;
 	_commList = -1;
 	_world.setPosition(_world.currentLocation(), number);
 	_room = number;
@@ -400,6 +405,7 @@ void GameScreen::travelToward(uint16 longitude, int16 latitude) {
 	_log.line(Common::String::format("Travel: toward the desert at %u/%d", longitude, latitude));
 	const bool fromDesert = _desert;
 	_desert = false;
+	_walking = false;
 	if (!fromDesert && !_riding) {
 		if (_world.room() != 1 && parkedOrnis())
 			_world.setPosition(from, 1);
@@ -410,6 +416,10 @@ void GameScreen::travelToward(uint16 longitude, int16 latitude) {
 	}
 	const uint arrived = flyToward(longitude, latitude, -1);
 	if (arrived == kDesertLanding) {
+		_walkLng = longitude; // the landscape around the landing point
+		_walkLat = latitude;
+		_walkFine = 0;
+		_landAtSet = true;
 		landInDesert();
 		return;
 	}
@@ -441,6 +451,7 @@ void GameScreen::travelTo(uint locationIndex) {
 	const uint from = _world.currentLocation();
 	const bool fromDesert = _desert;
 	_desert = false;
+	_walking = false;
 	if (from != locationIndex && !fromDesert && !_riding) {
 		// play_travel_departure_transition: Paul's orni takes off from the pad
 		// (seen from the place's first room), then leaves it (map_confirm_travel).
@@ -500,7 +511,10 @@ void GameScreen::composeView() {
 		return;
 	}
 	if (_desert) {
-		drawDesert();
+		if (_walking)
+			drawWalkView();
+		else
+			drawDesert();
 		return;
 	}
 	const RoomRecord *record = currentRoom();
@@ -547,11 +561,23 @@ void GameScreen::composeView() {
 			_panel.applyPalette(); // the interface colours over the video's
 		} else if (outdoors) {
 			if (palace && salRoom == 11)
-				drawSky(_system, _resources, *_surface.surfacePtr(), kSkyLarge, 200, skyPalette());
+				drawSky(_system, _resources, *_surface.surfacePtr(), kSkyLarge, 200, skyPalette(), true);
 			else
-				drawSky(_system, _resources, *_surface.surfacePtr(), kSkyNarrow, 320, skyPalette());
-			if (!palace)
-				_surface.fillRect(Common::Rect(0, 78, 320, 152), 190);
+				drawSky(_system, _resources, *_surface.surfacePtr(), kSkyNarrow, 320, skyPalette(), true);
+			if (!palace) {
+				_surface.fillRect(Common::Rect(0, 77, 320, 152), 0xbf); // floppy 3AF8
+				const bool landscape = floppy && _room == 1 &&
+						(placeType <= Location::kSietchMax ||
+						 (placeType >= Location::kFortressMin && placeType <= Location::kFortressMax));
+				if (landscape) {
+					// floppy 3C5C: a sietch's or fortress's entrance stands in the
+					// desert landscape at its own position (desert.cpp), keyed by
+					// location_and_room.
+					const Location here = _world.location(_world.currentLocation());
+					Graphics::Surface view = _surface.surfacePtr()->getSubArea(Common::Rect(0, 0, 320, 152));
+					drawLandscape(view, here.longitude, here.latitude, 0, (uint16)((placeType << 8) | _room), true);
+				}
+			}
 		}
 
 		Sprite sheet(_system, sheetData);
@@ -723,7 +749,9 @@ void GameScreen::addRoomRows(RowAction *actions, int *arguments, uint16 *command
 			add(kRowWait, 0, "WAIT FOR EVENING");
 		else
 			add(kRowWait, 1, "WAIT FOR MORNING");
-		add(kRowOrnithopter, 0, "TAKE AN ORNITHOPTER");
+		// On foot (walked out of a place) there is no ornithopter to take.
+		if (!_walking)
+			add(kRowOrnithopter, 0, "TAKE AN ORNITHOPTER");
 		return;
 	}
 	const bool palace = _world.placeType() == Location::kPalace;
@@ -756,22 +784,43 @@ void GameScreen::addRoomRows(RowAction *actions, int *arguments, uint16 *command
 		add(kRowTalk, people[i], characterName(people[i]));
 }
 
+void GameScreen::roomNav(bool exits[4], bool &canLeave) {
+	// rebuild_and_draw_room_nav_panel (floppy seg000:329F): inside a place
+	// (not a village) the room's exits light the arrows (0x01-0x7F and
+	// 0xFB-0xFF; 0x80-0xFA are doors still shut), room 1 shows box 34 and
+	// only the Atreides palace shows the red dot; the desert and villages
+	// show box 35 with all four arrows.
+	canLeave = false;
+	for (uint d = 0; d < 4; ++d)
+		exits[d] = false;
+	const RoomRecord *record = currentRoom();
+	if (_desert || _world.placeType() == Location::kVillageMin) {
+		for (uint d = 0; d < 4; ++d)
+			exits[d] = true;
+		canLeave = true;
+		_panel.setNavMode(Panel::kNavDesert);
+		return;
+	}
+	if (record)
+		for (uint d = 0; d < 4; ++d) {
+			const byte e = record->exits[d];
+			exits[d] = e != 0 && (e < 0x80 || e >= 0xfb);
+			if (e >= 0xfb)
+				canLeave = true;
+		}
+	if (_room == 1)
+		_panel.setNavMode(Panel::kNavFront);
+	else
+		_panel.setNavMode(Panel::kNavRoom, _world.currentLocation() == 0);
+}
+
 void GameScreen::drawRoom(int pressedRow, int pressedArrow) {
 	composeView();
 	const RoomRecord *record = currentRoom();
 
 	bool exits[4] = { false, false, false, false };
 	bool canLeave = false;
-	if (record) {
-		for (uint direction = 0; direction < 4; ++direction) {
-			// Bit 7 marks a door still hidden: the story opens it (the phase
-			// callbacks clear the bit, seg000:1027 and following).
-			const byte e = record->exits[direction];
-			exits[direction] = e != 0 && (e >= World::kExitLeave || !(e & 0x80));
-			if (record->exits[direction] >= World::kExitLeave)
-				canLeave = true;
-		}
-	}
+	roomNav(exits, canLeave); // bit 7 marks a door still hidden: the story opens it (seg000:1027)
 
 	if (pressedRow < 0 && pressedArrow < 0)
 		_log.line(Common::String::format("Room %u of place %u (type %#x, %s #%u): %s", _room,
@@ -791,14 +840,14 @@ void GameScreen::drawRoom(int pressedRow, int pressedArrow) {
 	for (uint i = 0; i < count; ++i)
 		if (greyed[i])
 			_panel.setRowDisabled(i, true);
-	if (_sceneActive || _desert)
+	if (_sceneActive || (_desert && !_walking))
 		for (uint d = 0; d < 4; ++d)
 			exits[d] = false;
 	_panel.setLeftPanel(Panel::kLeftBook);
 	_panel.setCompanions(_world.companion(0), _world.companion(1));
-	_panel.setCompassBlank(_sceneActive);
+	if (_sceneActive)
+		_panel.setNavMode(Panel::kNavBlank);
 	_panel.draw(_surface, exits, pressedRow, pressedArrow, day());
-	_panel.setCompassBlank(false);
 
 	debugSetRoom((int)_room);
 	debugOverlay(*_surface.surfacePtr());
@@ -829,7 +878,7 @@ void GameScreen::panelAction(Panel::Action action, int row, int arrow) {
 			openMirror();
 			return;
 		case kRowOrnithopter:
-			openMap(MapScreen::kFlat, true);
+			openCockpit(false);
 			return;
 		case kRowWorm:
 			// seg000:42d1: the map, choosing where the worm goes.
@@ -894,16 +943,21 @@ void GameScreen::panelAction(Panel::Action action, int row, int arrow) {
 		return;
 	}
 
+	if (_desert) {
+		// ui_click_move_room in the desert (floppy 418B): each arrow is a step.
+		if (_walking && action >= Panel::kActionUp && action <= Panel::kActionLeft)
+			desertStep((uint)(action - Panel::kActionUp) + 1, true);
+		return;
+	}
 	const RoomRecord *record = currentRoom();
 	if (!record)
 		return;
 	const byte exit = record->exits[action - Panel::kActionUp];
-	if (!exit || (exit < World::kExitLeave && (exit & 0x80)))
+	if (!exit || (exit < World::kExitWalkOut && (exit & 0x80)))
 		return;
-	if (exit >= World::kExitLeave) {
-		// 252-254 leave the place (by foot, ornithopter or worm: not decoded);
-		// the map chooses the destination.
-		openMap(MapScreen::kFlat, true);
+	if (exit >= World::kExitWalkOut) {
+		// 0xFB-0xFF: Paul walks out into the desert (floppy 422C).
+		walkOut(exit);
 		return;
 	}
 	if (row >= 0 || arrow >= 0) {
@@ -937,6 +991,7 @@ void GameScreen::enterRoom(uint room) {
 // ---- The map and the globe --------------------------------------------------
 
 void GameScreen::openMap(MapScreen::Mode mode, bool selectDestination) {
+	_cockpit = false;
 	loadDialogue(); // the sentences: place names and the box text
 	if (!_map)
 		_map = new MapScreen(_system, _resources, _log, _world);
@@ -951,6 +1006,10 @@ void GameScreen::openMap(MapScreen::Mode mode, bool selectDestination) {
 }
 
 void GameScreen::drawMapScreen() {
+	if (_cockpit) {
+		drawCockpit();
+		return;
+	}
 	_map->draw(_surface, _panel, _sentences, _state.b(GameState::kFremenTroops));
 	if (_map->mode() == MapScreen::kGlobe && _map->results() >= 100)
 		drawResults();
@@ -1058,6 +1117,10 @@ void GameScreen::drawMapScreen() {
 void GameScreen::mapTap(int x, int y) {
 	if (_mode != kMap || !_map)
 		return;
+	if (_cockpit) {
+		cockpitTap(x, y);
+		return;
+	}
 	const int hit = _map->hitLocation(x, y);
 	if (hit < 0) {
 		// A desert point: the flight goes that way, and whatever the
@@ -1080,6 +1143,7 @@ void GameScreen::mapTap(int x, int y) {
 }
 
 void GameScreen::leaveMap() {
+	_cockpit = false;
 	_panel.setLeftPanel(Panel::kLeftBook);
 	_panel.setCompanions(_world.companion(0), _world.companion(1));
 	_menu = kMenuNone;
@@ -1088,71 +1152,6 @@ void GameScreen::leaveMap() {
 }
 
 // ---- Flight, results, troops ------------------------------------------------------
-
-namespace {
-
-/**
- * The floppy's flight view: the desert seen from the ornithopter, dune
- * pieces (DUNES.HSQ) streaming from the horizon under the sky of the hour,
- * as the intro's flight (Flight.swift) draws it; the gameplay recording shows
- * the same view with the minimap in the top right corner.
- */
-struct DesertFlight {
-	struct Piece {
-		uint16 sprite;
-		int16 endX, endY;
-		uint32 born;
-	};
-	Sprite *dunes = nullptr;
-	Common::Array<Piece> pieces;
-	Common::RandomSource rng{"dune-game-flight"};
-	uint32 nextSpawn = 0;
-	bool evenSet = true;
-
-	void render(Graphics::Surface &view, uint32 elapsed) {
-		const int originX = 160, originY = 70, radius = 300;
-		view.fillRect(Common::Rect(0, 78, 320, 152), 190);
-		while (elapsed >= nextSpawn) {
-			uint rays[7];
-			uint rayCount = 0;
-			for (uint k = evenSet ? 0 : 1; k < 13; k += 2)
-				rays[rayCount++] = k;
-			evenSet = !evenSet;
-			for (uint i = 0; i < 5 && rayCount; ++i) {
-				const uint pick = rng.getRandomNumber(rayCount - 1);
-				const uint ray = rays[pick];
-				rays[pick] = rays[--rayCount];
-				const double angle = (ray == 12 ? 11.5 : (ray == 0 ? 0.5 : (double)ray)) * M_PI / 12.0;
-				Piece p;
-				p.sprite = (uint16)rng.getRandomNumber(7);
-				p.endX = (int16)(originX + radius * cos(angle));
-				p.endY = (int16)(originY + radius * sin(angle));
-				p.born = nextSpawn;
-				pieces.push_back(p);
-			}
-			nextSpawn += 1000;
-		}
-		for (uint i = 0; i < pieces.size();) {
-			const Piece &p = pieces[i];
-			const double t = (elapsed - p.born) / 1000.0;
-			const double progress = MIN(1.0, t * t * t / 2.0);
-			const int x = originX + (int)((p.endX - originX) * progress);
-			const int y = originY + (int)((p.endY - originY) * progress);
-			if (y >= 152 || progress >= 1.0) {
-				pieces.remove_at(i);
-				continue;
-			}
-			++i;
-			const int scalePercent = (int)(120.0 * (y - 80) / 72.0);
-			uint16 width, height;
-			if (y < 78 || scalePercent <= 0 || !dunes->frameSize(p.sprite, width, height))
-				continue;
-			dunes->drawFrameScaled(p.sprite, &view, x - width * scalePercent / 100, y, 25600 / (uint)scalePercent);
-		}
-	}
-};
-
-} // namespace
 
 bool GameScreen::hiredTroopAt(uint location) const {
 	Common::Array<uint> ids;
@@ -1240,7 +1239,10 @@ void GameScreen::animateOrni(int step) {
 		}
 		_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 152);
 		_system->updateScreen();
-		_system->delayMillis(100);
+		if (isRecording())
+			recordFrame(_system, 100); // a recorded run keeps the frame's time
+		else
+			_system->delayMillis(100);
 	}
 	clean.free();
 }
@@ -1318,9 +1320,8 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 	// seg000:4f0c): a step of one map cell every 0x300 PIT ticks (3.83 s),
 	// one time period every 16 steps (seg000:4b3b), the view following Paul's
 	// position with its trail. A tap skips to the destination (SKIP TO
-	// DESTINATION, seg000:4ffb). Passing near a sietch the story lets the
-	// player find offers GO TOWARDS THIS PLACE / RESUME FLIGHT (seg000:40f9).
-	// The CD's MNT videos and the floppy's cockpit are not shown yet.
+	// DESTINATION, seg000:4ffb). A companion may sight a place on the way
+	// (seg000:40f9, showSighting).
 	const uint from = _world.currentLocation();
 	int destination = target;
 	if ((int)from == destination)
@@ -1329,11 +1330,12 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 	b.longitude = targetLongitude;
 	b.latitude = targetLatitude;
 	int lng = a.longitude, lat = a.latitude;
+	const uint16 a0Lng = a.longitude;
+	const int16 a0Lat = a.latitude;
 	uint total = _world.cellDistance(a.longitude, a.latitude, b.longitude, b.latitude);
-	uint step = 0, steps = MAX<uint>(1, total);
-	uint hostileSteps = 0;
+	uint step = 0;
+	const uint32 kTurnRepeatMillis = 250; // 0x32 ticks between repeats of a held turn
 	bool skipping = isFastCapture();
-	uint declined = 0xffff;
 	if (!skipping) {
 		if (!_map)
 			_map = new MapScreen(_system, _resources, _log, _world);
@@ -1345,33 +1347,121 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 	// The floppy draws the flight as the desert view; the CD plays its MNT
 	// videos (not yet), so it keeps the flat map with the trail.
 	Common::Array<byte> dunesData;
-	DesertFlight desert;
-	Sprite *dunes = nullptr;
-	if (!skipping && _resources.load("DUNES.HSQ", dunesData)) {
+	Sprite *dunes = nullptr; // set when the floppy's landscape is drawn (DUNES.HSQ)
+	if (!skipping && _resources.load("DUNES.HSQ", dunesData))
 		dunes = new Sprite(_system, dunesData);
-		desert.dunes = dunes;
-	}
+	// The route (travel_step_position, floppy 5FB7): a heading of 256 units
+	// a turn, re-aimed at the destination every step while homing; a free
+	// flight (a desert point picked in the cockpit) keeps its heading, can be
+	// steered, and never lands (seg000:4944): it flies on until BACK TO
+	// STARTING POINT, TOWARDS NEAREST PLACE, CHANGE DESTINATION or a sighting.
+	// The worm, the dump and the speedrun runs keep the old landing.
+	uint16 destLng = targetLongitude;
+	int16 destLat = targetLatitude;
+	int latFix = lat * 256 + 128;
+	bool freeFlight = target < 0 && !_riding && !isFastCapture();
+	auto rowUnits = [&](int latitude) { return 65536.0 / MAX<uint>(1, _world.rowCells(latitude)); };
+	auto headingTo = [&](uint16 fromLng, int fromLat, uint16 toLng, int toLat) -> byte {
+		const double dx = (int16)(toLng - fromLng) / rowUnits(fromLat), dy = toLat - fromLat;
+		if (dx == 0 && dy == 0)
+			return 0;
+		double angle = atan2(dx, -dy) * 128.0 / M_PI;
+		if (angle < 0)
+			angle += 256;
+		return (byte)((int)(angle + 0.5) & 0xff);
+	};
+	auto advance = [&](uint16 &stepLng, int &stepLatFix, byte &stepHeading) {
+		// One map cell along the heading: the major axis a whole cell, the minor its share.
+		const int rowNow = stepLatFix >> 8;
+		if (freeFlight && ABS(rowNow) > 0x4d && ((stepHeading + 0x40) & 0x80) == (rowNow > 0 ? 0x80 : 0))
+			stepHeading = (stepHeading & 0x80) | 0x40; // the polar guard: due east or west
+		const double theta = stepHeading * M_PI / 128.0;
+		double sx = sin(theta), sy = -cos(theta);
+		const double m = MAX(ABS(sx), ABS(sy));
+		sx /= m;
+		sy /= m;
+		stepLng = (uint16)(stepLng + (int)lround(sx * rowUnits(rowNow)));
+		stepLatFix += (int)lround(sy * 256);
+		if (ABS(stepLatFix >> 8) >= 0x60) {
+			// Over the pole: the heading turns round, half a turn of longitude.
+			stepLatFix = (stepLatFix > 0 ? 0x5f : -0x5f) * 256 + 128;
+			stepHeading = (byte)(stepHeading + 0x80);
+			stepLng = (uint16)(stepLng + 0x8000);
+		}
+	};
+	byte heading = headingTo(a.longitude, a.latitude, destLng, destLat);
+	uint hostileSteps = 0;
+	// The flight's verbs (build_room_command_records, floppy 327B): homing
+	// SKIP TO DESTINATION (greyed while the hostile-zone count runs) and
+	// CHANGE DESTINATION; free BACK TO STARTING POINT, TOWARDS NEAREST PLACE
+	// from phase 0x32, CHANGE DESTINATION.
+	enum FlightVerb { kVerbSkip, kVerbChange, kVerbBack, kVerbNearest };
+	FlightVerb verbs[Panel::kCommandRows];
+	uint verbCount = 0;
+	auto setFlightRows = [&]() {
+		static const char *const kVerbText[4] = { "SKIP TO DESTINATION", "CHANGE DESTINATION", "BACK TO STARTING POINT",
+												  "TOWARDS NEAREST PLACE" };
+		verbCount = 0;
+		if (freeFlight) {
+			verbs[verbCount++] = kVerbBack;
+			if (_state.b(GameState::kPhase) >= 0x32)
+				verbs[verbCount++] = kVerbNearest;
+		} else {
+			verbs[verbCount++] = kVerbSkip;
+		}
+		verbs[verbCount++] = kVerbChange;
+		RowAction actions[Panel::kCommandRows];
+		int arguments[Panel::kCommandRows];
+		uint16 commands[Panel::kCommandRows];
+		for (uint i = 0; i < verbCount; ++i) {
+			actions[i] = kRowNone;
+			arguments[i] = 0;
+			commands[i] = _panel.findCommand(kVerbText[verbs[i]]);
+		}
+		setRows(actions, arguments, commands, verbCount);
+		if (!freeFlight && hostileSteps)
+			_panel.setRowDisabled(0, true);
+		// rebuild_and_draw_room_nav_panel in travel (floppy 516F): the steering
+		// arrows in a free flight, the dark screen while homing.
+		_panel.setNavMode(freeFlight ? Panel::kNavFlight : Panel::kNavBlank);
+	};
+	// The landscape (floppy 4F63): its rows follow the route five steps ahead.
+	const uint32 kLandFrameMillis = 80; // a frame per 16 ticks (the frame task at 546D)
+	auto startLandscape = [&]() {
+		uint16 longitudes[5];
+		int16 latitudes[5];
+		uint16 aheadLng = (uint16)lng;
+		int aheadLatFix = latFix;
+		byte aheadHeading = heading;
+		for (uint k = 0; k < 5; ++k) {
+			longitudes[k] = aheadLng;
+			latitudes[k] = (int16)(aheadLatFix >> 8);
+			advance(aheadLng, aheadLatFix, aheadHeading);
+		}
+		flightLandscapeStart(longitudes, latitudes);
+	};
+	if (dunes)
+		startLandscape();
 	const uint32 flightStart = _system->getMillis();
 	uint32 lastTimedDump = 0;
 	const bool cdView = !skipping && !dunes && !_world.floppy() && startCdFlightView();
 	auto present = [&]() {
 		if (cdView) {
 			// The terrain six cells ahead on the route (travel_probe_terrain_ahead, seg000:4e8e).
-			const uint ahead = MIN<uint>(steps, step + 6);
-			const uint16 aLng = (uint16)(a.longitude + (int)(int16)(b.longitude - a.longitude) * (int)ahead / (int)steps);
-			const int16 aLat = (int16)(a.latitude + (b.latitude - a.latitude) * (int)ahead / (int)steps);
+			uint16 aLng = (uint16)lng;
+			int aLatFix = latFix;
+			byte aHeading = heading;
+			for (uint k = 0; k < 6; ++k)
+				advance(aLng, aLatFix, aHeading);
+			const int16 aLat = (int16)(aLatFix >> 8);
 			const int c0 = _world.mapCell((uint16)lng, (int16)lat), c1 = _world.mapCell(aLng, aLat);
 			const Common::Array<byte> &m = _world.map();
 			const byte t0 = c0 >= 0 ? (m[c0] & 0x0f) : 0, t1 = c1 >= 0 ? (m[c1] & 0x0f) : 0;
 			drawCdFlightView((byte)((t0 + t1) / 2));
 			_map->drawMinimap(_surface, Common::Rect(202, 3, 318, 61), _panel);
-			RowAction actions[Panel::kCommandRows] = { kRowNone, kRowNone };
-			int arguments[Panel::kCommandRows] = { 0, 0 };
-			uint16 commands[Panel::kCommandRows] = { _panel.findCommand("SKIP TO DESTINATION"), _panel.findCommand("CHANGE DESTINATION") };
-			setRows(actions, arguments, commands, 2);
-			_panel.setRowDisabled(1, true);
+			setFlightRows();
 			_panel.setLeftPanel(Panel::kLeftBook);
-	_panel.setCompanions(_world.companion(0), _world.companion(1));
+			_panel.setCompanions(_world.companion(0), _world.companion(1));
 			const bool exits[4] = { false, false, false, false };
 			_panel.draw(_surface, exits, -1, -1, day());
 			_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
@@ -1392,17 +1482,19 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		// ONMAP's palette under the sky's: the minimap's terrain (20-31) and
 		// the lavender-blue panel and minimap frame of the recordings (240-254).
 		_map->applyPalette();
-		drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette());
-		desert.render(view, _system->getMillis() - flightStart);
+		drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
+		const uint32 nowMillis = _system->getMillis();
+		for (uint n = 0; nowMillis - _flightFrameAt >= kLandFrameMillis && n < 40; ++n) {
+			flightLandscapeTick();
+			_flightFrameAt += kLandFrameMillis;
+		}
+		if (nowMillis - _flightFrameAt >= kLandFrameMillis)
+			_flightFrameAt = nowMillis;
+		flightLandscapeDraw(view, dunesData);
 		_map->drawMinimap(_surface, Common::Rect(202, 3, 318, 61), _panel);
-		// The flight's verbs (seg000:4ffb, 497a).
-		RowAction actions[Panel::kCommandRows] = { kRowNone, kRowNone };
-		int arguments[Panel::kCommandRows] = { 0, 0 };
-		uint16 commands[Panel::kCommandRows] = { _panel.findCommand("SKIP TO DESTINATION"), _panel.findCommand("CHANGE DESTINATION") };
-		setRows(actions, arguments, commands, 2);
-		_panel.setRowDisabled(1, true);
+		setFlightRows();
 		_panel.setLeftPanel(Panel::kLeftBook);
-	_panel.setCompanions(_world.companion(0), _world.companion(1));
+		_panel.setCompanions(_world.companion(0), _world.companion(1));
 		const bool exits[4] = { false, false, false, false };
 		_panel.draw(_surface, exits, -1, -1, day());
 		_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
@@ -1422,20 +1514,18 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		if (_map->open(MapScreen::kFlat, false) && _resources.load("DUNES.HSQ", dunesData)) {
 			loadDialogue();
 			dunes = new Sprite(_system, dunesData);
-			desert.dunes = dunes;
 			_map->addFlightTrail(a.longitude, a.latitude);
 			_map->setFlight(true, (uint16)(a.longitude + (int16)(b.longitude - a.longitude) / 3),
 					(int16)(a.latitude + (b.latitude - a.latitude) / 3), destination);
-			desert.render(*_surface.surfacePtr(), 0); // seeds the pieces; the frame below shows them in flight
-			desert.pieces.clear();
-			desert.nextSpawn = 0;
-			const uint32 frozen = 1000;
+			startLandscape();
+			for (uint n = 0; n < 20; ++n)
+				flightLandscapeTick(); // the frame below shows the rows in flight
 			Graphics::Surface view = _surface.surfacePtr()->getSubArea(Common::Rect(0, 0, 320, 152));
 			_surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
 			_panel.applyPalette();
 			_map->applyPalette();
-			drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette());
-			desert.render(view, frozen);
+			drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
+			flightLandscapeDraw(view, dunesData);
 			_map->drawMinimap(_surface, Common::Rect(202, 3, 318, 61), _panel);
 			uint16 commands[Panel::kCommandRows] = { _panel.findCommand("SKIP TO DESTINATION"), _panel.findCommand("CHANGE DESTINATION") };
 			RowAction actions[Panel::kCommandRows] = { kRowNone, kRowNone };
@@ -1452,22 +1542,136 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 			dunes = nullptr;
 		}
 	}
+	// CHANGE DESTINATION (floppy 51FD): the cockpit again over the flight; a
+	// pick re-aims the flight under way, Cancel carries on.
+	auto changeDestination = [&]() {
+		_flightLng = (uint16)lng;
+		_flightLat = (int16)lat;
+		openCockpit(true);
+		while (_cockpit && !_quitRequested) {
+			Common::Event event;
+			while (_cockpit && pollDuneEvent(_system, event)) {
+				if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER) {
+					_quitRequested = true;
+				} else if (event.type == Common::EVENT_KEYDOWN && event.kbd.keycode == Common::KEYCODE_ESCAPE) {
+					cockpitCancel();
+				} else if (event.type == Common::EVENT_LBUTTONDOWN) {
+					const int arrow = _map->hitArrow(event.mouse.x, event.mouse.y);
+					int row, arrowHit;
+					if (arrow >= 0) {
+						static const int dx[5] = { 0, 1, 0, -1, 0 }, dy[5] = { -1, 0, 1, 0, 0 };
+						if (arrow == 4)
+							_map->centreOnPosition(_flightLng, _flightLat);
+						else
+							_map->scroll(dx[arrow], dy[arrow]);
+						drawMapScreen();
+					} else if (_panel.hitTest(event.mouse.x, event.mouse.y, row, arrowHit) == Panel::kActionCommand && row == 0) {
+						cockpitCancel();
+					} else if (event.mouse.y < 152) {
+						cockpitTap(event.mouse.x, event.mouse.y);
+					}
+				}
+			}
+			updateCockpit(_system->getMillis());
+			_system->delayMillis(10);
+		}
+		_cockpit = false;
+		_mode = kMap;
+		if (_changeTarget >= 0) {
+			destination = _changeTarget;
+			const Location d = _world.location((uint)destination);
+			destLng = d.longitude;
+			destLat = d.latitude;
+			freeFlight = false;
+		} else if (_changeTarget == -2) {
+			destination = -1;
+			destLng = _changeLongitude;
+			destLat = _changeLatitude;
+			freeFlight = !_riding;
+			heading = headingTo((uint16)lng, lat, destLng, destLat);
+		}
+		_changeTarget = -1;
+		next = _system->getMillis() + World::kFlightStepMillis;
+	};
+	auto aimAt = [&](uint place) {
+		destination = (int)place;
+		const Location d = _world.location(place);
+		destLng = d.longitude;
+		destLat = d.latitude;
+		freeFlight = false;
+	};
+	auto arrived = [&]() {
+		return (uint)lat == (uint)destLat && _world.cellDistance((uint16)lng, (int16)lat, destLng, destLat) == 0;
+	};
+	// The steering arrows (ui_nav_panel_flight, floppy ds:2404): press and
+	// hold turns 4 units every 50 ticks; the middle one resumes the flight.
+	const Common::Rect kTurnLeft(258, 172, 267, 183), kResume(270, 170, 280, 183), kTurnRight(283, 172, 292, 183);
+	int turning = 0;
+	uint32 nextTurn = 0;
+	const uint cap = 4 * total + 64;
 	for (;;) {
-		if (step >= steps)
+		if (!freeFlight && arrived())
 			break;
+		if (!freeFlight && step >= cap) {
+			lng = destLng; // a route that cannot close in: the destination
+			lat = destLat;
+			break;
+		}
 		if (!skipping) {
-			while (_system->getMillis() < next && !skipping && !_quitRequested) {
+			while (_system->getMillis() < next && !skipping && !_quitRequested && !isRecording()) {
 				Common::Event event;
 				while (pollDuneEvent(_system, event)) {
-					if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER)
+					if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER) {
 						_quitRequested = true;
-					else if (event.type == Common::EVENT_LBUTTONDOWN) {
+					} else if (event.type == Common::EVENT_LBUTTONUP) {
+						turning = 0;
+					} else if (event.type == Common::EVENT_LBUTTONDOWN) {
 						int row, arrow;
-						// SKIP TO DESTINATION, or a tap on the view.
-						if (event.mouse.y < 152 ||
-								(_panel.hitTest(event.mouse.x, event.mouse.y, row, arrow) == Panel::kActionCommand && row == 0))
-							skipping = true;
+						const Common::Point at(event.mouse.x, event.mouse.y);
+						if (freeFlight && (kTurnLeft.contains(at) || kTurnRight.contains(at))) {
+							turning = kTurnLeft.contains(at) ? -4 : 4;
+							nextTurn = _system->getMillis();
+						} else if (freeFlight && kResume.contains(at)) {
+							// RESUME FLIGHT (floppy 5CE5): nothing is paused here.
+						} else if (_panel.hitTest(event.mouse.x, event.mouse.y, row, arrow) == Panel::kActionCommand &&
+								   row >= 0 && row < (int)verbCount) {
+							switch (verbs[row]) {
+							case kVerbSkip:
+								if (!hostileSteps)
+									skipping = true;
+								break;
+							case kVerbChange:
+								changeDestination();
+								break;
+							case kVerbBack:
+								_log.line("Flight: BACK TO STARTING POINT");
+								aimAt(from);
+								break;
+							case kVerbNearest: {
+								uint best = from, bestDistance = 0xffff;
+								for (uint i = 0; i < _world.locationCount(); ++i) {
+									const Location c = _world.location(i);
+									const uint d = _world.cellDistance((uint16)lng, (int16)lat, c.longitude, c.latitude);
+									if (!c.hidden() && d < bestDistance) {
+										bestDistance = d;
+										best = i;
+									}
+								}
+								_log.line(Common::String::format("Flight: TOWARDS NEAREST PLACE, place %u", best));
+								aimAt(best);
+								break;
+							}
+							}
+						} else if (!freeFlight && event.mouse.y < 152) {
+							skipping = true; // a tap on the view skips, as SKIP TO DESTINATION
+						}
 					}
+				}
+				if (turning && freeFlight && _system->getMillis() >= nextTurn) {
+					// adjust_travel_heading (floppy 5ECA): +-4 of 256, fixed-heading mode.
+					heading = (byte)(heading + turning);
+					flightLandscapePan(turning < 0 ? -1 : 1); // the floppy pans the view 4 px a turn
+					nextTurn = _system->getMillis() + kTurnRepeatMillis;
 				}
 				if (dunes || cdView)
 					present();
@@ -1477,13 +1681,24 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		}
 		if (_quitRequested)
 			break;
-		// One cell along the straight line (the executable re-aims its
-		// heading every step; a straight line is what that converges to).
 		++step;
-		const uint16 stepLng = (uint16)(a.longitude + (int)(int16)(b.longitude - a.longitude) * (int)step / (int)steps);
-		const int16 stepLat = (int16)(a.latitude + (b.latitude - a.latitude) * (int)step / (int)steps);
-		lng = stepLng;
-		lat = stepLat;
+		if (!freeFlight)
+			heading = headingTo((uint16)lng, lat, destLng, destLat);
+		{
+			uint16 stepLng = (uint16)lng;
+			advance(stepLng, latFix, heading);
+			lng = stepLng;
+			lat = latFix >> 8;
+		}
+		if (dunes) {
+			// 5BF2: the rows now come from five steps further on.
+			uint16 aheadLng = (uint16)lng;
+			int aheadLatFix = latFix;
+			byte aheadHeading = heading;
+			for (uint k = 0; k < 5; ++k)
+				advance(aheadLng, aheadLatFix, aheadHeading);
+			flightLandscapeReseed(aheadLng, (int16)(aheadLatFix >> 8));
+		}
 		if (step % 16 == 0) {
 			_world.advanceTime(1);
 			++periods;
@@ -1500,16 +1715,8 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 					skipping = false;
 					if (!dunes)
 						present();
-					if (!askHostileZone()) {
-						// BACK TO STARTING POINT: re-aimed at the place left.
-						destination = (int)from;
-						a = _world.location(from);
-						a.longitude = (uint16)lng;
-						a.latitude = (int16)lat;
-						b = _world.location(from);
-						steps = MAX<uint>(1, _world.cellDistance(a.longitude, a.latitude, b.longitude, b.latitude));
-						step = 0;
-					}
+					if (!askHostileZone())
+						aimAt(from); // BACK TO STARTING POINT
 					next = _system->getMillis() + World::kFlightStepMillis;
 				}
 				if (++hostileSteps >= 8) {
@@ -1525,30 +1732,41 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		}
 		if (!skipping) {
 			_map->addFlightTrail((uint16)lng, (int16)lat);
-			_map->setFlight(true, (uint16)lng, (int16)lat, destination);
+			_map->setFlight(true, (uint16)lng, (int16)lat, freeFlight ? (int)from : destination);
 			present();
+			recordFrame(_system, World::kFlightStepMillis); // a recorded run: one frame a cell
 		}
-		// A findable place within four cells (the 9x9 block of seg000:40f9),
-		// spotted only by someone travelling with Paul (ds:10, seg000:4101).
-		for (uint i = 0; i < _world.locationCount() && !skipping && _state.w(GameState::kPersonsWith); ++i) {
-			if ((int)i == destination || i == declined || !_world.discoverable(i))
-				continue;
-			const Location s = _world.location(i);
-			if (_world.cellDistance((uint16)lng, (int16)lat, s.longitude, s.latitude) > 4)
-				continue;
-			if (askFlightStop(i)) {
-				destination = (int)i;
-				a = _world.location(from);
-				a.longitude = (uint16)lng;
-				a.latitude = (int16)lat;
-				b = s;
-				steps = MAX<uint>(1, _world.cellDistance(a.longitude, a.latitude, b.longitude, b.latitude));
-				step = 0;
-			} else {
-				declined = i;
-			}
-			next = _system->getMillis() + World::kFlightStepMillis;
+		if (freeFlight && step > 1 && _world.mapCell((uint16)lng, (int16)lat) == _world.mapCell(a0Lng, a0Lat)) {
+			// The route crossed the starting cell, the free flight's destination.
+			destination = (int)from;
 			break;
+		}
+		// travel_scan_nearby_location (floppy 4353): with someone travelling
+		// with Paul (ds:10), a findable place in the 9x9 block round him and
+		// within 135 degrees of the heading; the last one found. It is marked
+		// discovered, the flight homes on it at once, and the companion says
+		// so in the cabin (3924). The speedrun bot finds places itself.
+		if (!skipping && _state.w(GameState::kPersonsWith) && !ConfMan.hasKey("dune_speedrun")) {
+			int sighted = -1;
+			byte sightedBearing = 0;
+			for (uint i = 0; i < _world.locationCount(); ++i) {
+				if ((int)i == destination || !_world.discoverable(i))
+					continue;
+				const Location sl = _world.location(i);
+				if (_world.cellDistance((uint16)lng, (int16)lat, sl.longitude, sl.latitude) > 4)
+					continue;
+				const byte bearing = (byte)(headingTo((uint16)lng, lat, sl.longitude, sl.latitude) - heading);
+				if ((byte)(bearing + 0x60) >= 0xc0)
+					continue;
+				sighted = (int)i;
+				sightedBearing = bearing;
+			}
+			if (sighted >= 0) {
+				_world.markDiscovered((uint)sighted);
+				aimAt((uint)sighted);
+				showSighting((uint)sighted, sightedBearing);
+				next = _system->getMillis() + World::kFlightStepMillis;
+			}
 		}
 	}
 	if (_map)
@@ -1576,49 +1794,8 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		}
 		destination = (int)best;
 	}
-	_log.line(Common::String::format("Flight: place %u -> %d, %u cells, %u period(s)", from, destination, total, periods));
+	_log.line(Common::String::format("Flight: place %u -> %d, %u cells, %u steps, %u period(s)", from, destination, total, step, periods));
 	return (uint)destination;
-}
-
-bool GameScreen::askFlightStop(uint sietch) {
-	// pending_room_action 3 (seg000:3555): the verbs GO TOWARDS THIS PLACE / RESUME FLIGHT.
-	RowAction actions[Panel::kCommandRows];
-	int arguments[Panel::kCommandRows];
-	uint16 commands[Panel::kCommandRows];
-	uint count = 0;
-	const uint16 go = _panel.findCommand("GO TOWARDS THIS PLACE"), resume = _panel.findCommand("RESUME FLIGHT");
-	if (go == 0xffff || resume == 0xffff)
-		return false;
-	actions[count] = kRowFly;
-	arguments[count] = (int)sietch;
-	commands[count++] = go;
-	actions[count] = kRowNone;
-	arguments[count] = 0;
-	commands[count++] = resume;
-	setRows(actions, arguments, commands, count);
-	_panel.setLeftPanel(Panel::kLeftGlobe);
-	const bool exits[4] = { false, false, false, false };
-	_map->draw(_surface, _panel, _sentences, _state.b(GameState::kFremenTroops));
-	_panel.draw(_surface, exits, -1, -1, day());
-	_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
-	_system->updateScreen();
-	_log.line(Common::String::format("Flight: passing near place %u", sietch));
-	dumpScreen(_system, "flight-sietch-near");
-	for (;;) {
-		Common::Event event;
-		while (pollDuneEvent(_system, event)) {
-			if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER) {
-				_quitRequested = true;
-				return false;
-			}
-			if (event.type != Common::EVENT_LBUTTONDOWN)
-				continue;
-			int row, arrow;
-			if (_panel.hitTest(event.mouse.x, event.mouse.y, row, arrow) == Panel::kActionCommand && row >= 0 && row < 2)
-				return row == 0;
-		}
-		_system->delayMillis(10);
-	}
 }
 
 bool GameScreen::askHostileZone() {
@@ -1626,6 +1803,10 @@ bool GameScreen::askHostileZone() {
 	// ENTERING HARKONNEN ZONE" over the view; the flight goes on or turns
 	// back (the original also offers CHANGE DESTINATION, not built here).
 	// Returns true to resume.
+	if (ConfMan.hasKey("dune_speedrun")) {
+		_log.line("Speedrun: turns back from the Harkonnen zone");
+		return false; // the bot never flies on into Harkonnen land
+	}
 	const uint16 resume = _panel.findCommand("RESUME FLIGHT"), back = _panel.findCommand("BACK TO STARTING POINT");
 	const uint16 warning = _panel.findCommand("  ****  WARNING", true);
 	if (resume == 0xffff)
@@ -2617,6 +2798,7 @@ void GameScreen::update() {
 		else if (now - _clockStart >= World::kPeriodMillis)
 			passTime(1);
 		checkIdle(now);
+		updateCockpit(now);
 		// The DUNE MAP popup goes 1000 ticks after the view opened (seg000:5c03).
 		if (_mode == kMap && _map && _map->caption() && now - _map->captionStart() >= MapScreen::kCaptionMillis) {
 			_map->setCaption(false);
@@ -2652,6 +2834,8 @@ void GameScreen::drawTalk() {
 		}
 		const byte black[3] = { 0, 0, 0 };
 		_system->getPaletteManager()->setPalette(black, 0, 1);
+	} else if (_cabinView) {
+		drawCabin();
 	} else {
 		composeView();
 	}
@@ -2659,7 +2843,7 @@ void GameScreen::drawTalk() {
 		// While a line is spoken the view zooms twice onto the speaker (the
 		// room pixel-doubled, as the recording shows), the portrait comes up
 		// on the left and the line sits in a balloon.
-		if (!_visionDream) {
+		if (!_visionDream && !_cabinView) {
 		Common::Point p = _talkWho < ARRAYSIZE(_personPos) ? _personPos[_talkWho] : Common::Point(-1, -1);
 		if (p.x < 0)
 			p = Common::Point(160, 60);
@@ -2720,16 +2904,24 @@ void GameScreen::drawTalk() {
 	// The recordings keep the room's exits lit while someone talks; a
 	// scripted scene's lines show the compass dark.
 	bool exits[4] = { false, false, false, false };
-	if (const RoomRecord *record = currentRoom())
-		for (uint direction = 0; direction < 4 && !_sceneActive && !_desert; ++direction) {
-			const byte e = record->exits[direction];
-			exits[direction] = e != 0 && (e >= World::kExitLeave || !(e & 0x80));
-		}
+	bool canLeave = false;
+	roomNav(exits, canLeave);
+	if (_sceneActive)
+		_panel.setNavMode(Panel::kNavBlank);
+	if (_cabinView) {
+		// menu_go_towards_this_place (floppy ds:2618): one row; the flight
+		// already homes on the place, so the compass is dark.
+		RowAction actions[Panel::kCommandRows] = { kRowNone };
+		int arguments[Panel::kCommandRows] = { 0 };
+		uint16 commands[Panel::kCommandRows] = { _panel.findCommand("GO TOWARDS THIS PLACE") };
+		setRows(actions, arguments, commands, 1);
+		for (uint d = 0; d < 4; ++d)
+			exits[d] = false;
+		_panel.setNavMode(Panel::kNavBlank);
+	}
 	_panel.setLeftPanel(Panel::kLeftBook);
 	_panel.setCompanions(_world.companion(0), _world.companion(1));
-	_panel.setCompassBlank(_sceneActive);
 	_panel.draw(_surface, exits, -1, -1, day());
-	_panel.setCompassBlank(false);
 	debugOverlay(*_surface.surfacePtr());
 	_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
 	_system->updateScreen();
@@ -3006,10 +3198,11 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 					openMap(MapScreen::kFlat, false);
 					break;
 				case kRowOrnithopter:
-					// seg000:42e9: the map again, now choosing a destination.
-					openMap(MapScreen::kFlat, true);
-					_map->setCaption(false);
-					drawMapScreen();
+					// seg000:42e9: the orni cockpit, choosing a destination.
+					openCockpit(false);
+					break;
+				case kRowCockpitCancel:
+					cockpitCancel();
 					break;
 				case kRowProspectors:
 					findProspectors();
@@ -3069,9 +3262,20 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 				}
 				return false;
 			}
+			if (!_cockpit && _map->mode() == MapScreen::kFlat &&
+					Common::Rect(22, 161, 68, 196).contains(event.mouse.x, event.mouse.y)) {
+				// The planet in the flat map's left panel (ICONES 0x0d, drawn by
+				// drawPanelExtras) opens the globe and its game menu; Paul's
+				// head does too.
+				openMap(MapScreen::kGlobe, false);
+				return false;
+			}
 			if (action == Panel::kActionHead || action == Panel::kActionBook) {
 				// Paul's head and the book close the globe as they open it.
-				leaveMap();
+				if (_cockpit)
+					cockpitCancel();
+				else
+					leaveMap();
 				return false;
 			}
 			if (event.mouse.y < 152)
@@ -3079,6 +3283,8 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 		} else if (event.type == Common::EVENT_KEYDOWN && event.kbd.keycode == Common::KEYCODE_ESCAPE) {
 			if (_menu != kMenuNone)
 				openMenu(kMenuNone);
+			else if (_cockpit)
+				cockpitCancel();
 			else
 				leaveMap();
 		}

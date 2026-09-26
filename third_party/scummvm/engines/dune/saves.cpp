@@ -93,7 +93,10 @@ void SaveGame::pack(const Common::Array<byte> &body, Common::Array<byte> &packed
 bool SaveGame::readFile(uint slot, Common::Array<byte> &packed) const {
 	const bool floppy = _world.layoutShift() != 0;
 	const Common::String name = fileName(slot, floppy);
-	Common::SeekableReadStream *stream = g_system->getSavefileManager()->openForLoading(name);
+	// Raw: a save begins with the game time, and a time such as 0x0178
+	// writes 78 01, a zlib header, which openForLoading() would try to
+	// inflate (the speedrun check found it at game time 376).
+	Common::SeekableReadStream *stream = g_system->getSavefileManager()->openRawFile(name);
 	if (!stream) {
 		// A save of the DOS game in the game directory works too.
 		Common::File *file = new Common::File();
@@ -176,7 +179,8 @@ bool SaveGame::load(uint slot) {
 	const uint dialogueSize = _dialogue.data().size();
 	const uint expected = kMapFlagBytes + extraSize + dialogueSize + _world.savedSize();
 	if (body.size() < expected) {
-		_log.line(Common::String::format("Saves: slot %u holds %u bytes, %u expected", slot, body.size(), expected));
+		_log.line(Common::String::format("Saves: slot %u holds %u bytes (%u packed), %u expected", slot, body.size(),
+				packed.size(), expected));
 		return false;
 	}
 	for (uint i = 0; i < kMapFlagBytes; ++i)

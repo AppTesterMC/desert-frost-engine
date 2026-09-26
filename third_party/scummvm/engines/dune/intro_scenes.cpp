@@ -56,7 +56,8 @@ namespace Dune {
 namespace {
 
 bool isFastCapture() {
-	return (isDumpRun() && !dumpEveryMillis()) || isDuneHarnessRun() || ConfMan.hasKey("dune_speedrun");
+	return (isDumpRun() && !dumpEveryMillis()) || isDuneHarnessRun() ||
+		   (ConfMan.hasKey("dune_speedrun") && !ConfMan.hasKey("dune_speedrun_watch"));
 }
 
 // The original's 4x4 dissolve order (Effects.swift pixelTransitionOffsets).

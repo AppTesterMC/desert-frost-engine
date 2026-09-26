@@ -116,6 +116,10 @@ public:
 	int destination() const { return _destination; }
 
 	void centreOn(uint locationIndex);
+	/** Centre on a map position (the desert: the orni cockpit's window, seg000:5b5d). */
+	void centreOnPosition(uint16 longitude, int16 latitude);
+	/** Where a map position falls in the flat view (rows 0-151); false off the view. */
+	bool projectPosition(uint16 longitude, int16 latitude, int &x, int &y) const;
 	void scroll(int dx, int dy);
 	void rotate(int deltaRotation, int deltaTilt);
 	/** Place under a view position (0-151 rows), or -1. */

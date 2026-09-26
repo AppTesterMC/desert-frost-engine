@@ -104,8 +104,20 @@ public:
 	 * @param pressedArrow compass arrow to draw pressed, or -1
 	 * @param day          the day counter shown under the book
 	 */
+	/**
+	 * The navigation panel's layout (rebuild_and_draw_room_nav_panel, floppy
+	 * seg000:329F): a room's box with its exits (33, the red dot only in the
+	 * Atreides palace), a place's first room (34), the desert and villages
+	 * (35, all four arrows), a steerable flight (42-44), or blank (the
+	 * compass screen dark: scenes, the mirror, homing flights).
+	 */
+	enum NavMode { kNavRoom, kNavFront, kNavDesert, kNavFlight, kNavBlank };
+	void setNavMode(NavMode mode, bool dot = false) {
+		_navMode = mode;
+		_navDot = dot;
+	}
 	/** The compass screen dark (scripted scenes, the mirror), until cleared. */
-	void setCompassBlank(bool blank) { _compassBlank = blank; }
+	void setCompassBlank(bool blank) { _navMode = blank ? kNavBlank : kNavRoom; }
 	void draw(Graphics::ManagedSurface &surface, const bool exits[4], int pressedRow = -1, int pressedArrow = -1,
 			  uint day = 1);
 	/** The period of the day (0-15) for the sun and moon in the book's window (seg000:1a34). */
@@ -157,7 +169,8 @@ public:
 	const Common::Array<byte> &characterSheet() const { return _characters; }
 
 private:
-	bool _compassBlank = false;
+	NavMode _navMode = kNavRoom;
+	bool _navDot = true;
 	enum {
 		kCommandLeft = 92,
 		kCommandRight = 228,

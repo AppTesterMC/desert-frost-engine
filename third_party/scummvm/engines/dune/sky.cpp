@@ -23,25 +23,43 @@
  */
 
 #include "common/array.h"
+#include "common/system.h"
 
 #include "graphics/surface.h"
 
 #include "dune/resource.h"
 #include "dune/sky.h"
+
+#include "graphics/paletteman.h"
 #include "dune/sprite.h"
 
 namespace Dune {
 
 bool drawSky(OSystem *system, Resource &resources, Graphics::Surface &target, SkyType type, int width,
-		uint palette) {
+		uint palette, bool panelTail) {
 	Common::Array<byte> data;
 	if (!resources.load("SKY.HSQ", data))
 		return false;
 
 	Sprite sky(system, data);
 	const uint firstPaletteRecord = 8;
-	if (!sky.setPaletteRecord(firstPaletteRecord + palette))
+	if (panelTail) {
+		// In the game (floppy seg000:3B13): a record's 95 colours are the
+		// sky's 80 (128-207) and then the panel's 15 (240-254), which is why
+		// the panel is blue-grey by day, orange at sunset and purple at night
+		// outdoors. Written contiguously they would land on the characters'
+		// colours (208-222).
+		byte rgb[256 * 3];
+		uint start = 0, count = 0;
+		if (!sky.getPaletteRecord((uint16)(firstPaletteRecord + palette), rgb, start, count))
+			return false;
+		const uint skyCount = MIN<uint>(count, 80);
+		system->getPaletteManager()->setPalette(rgb, start, skyCount);
+		if (count > 80)
+			system->getPaletteManager()->setPalette(rgb + 80 * 3, 240, MIN<uint>(count - 80, 15));
+	} else if (!sky.setPaletteRecord(firstPaletteRecord + palette)) {
 		return false;
+	}
 
 	const uint firstTile = type == kSkyNarrow ? 0 : 4;
 	const int tileHeight = type == kSkyNarrow ? 20 : 30;

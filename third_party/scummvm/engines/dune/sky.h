@@ -69,7 +69,7 @@ enum SkyType {
  * before the foreground's palette if that overlaps 128-222.
  */
 bool drawSky(OSystem *system, Resource &resources, Graphics::Surface &target, SkyType type, int width,
-			 uint palette);
+			 uint palette, bool panelTail = false);
 
 } // namespace Dune
 

@@ -181,6 +181,9 @@ are documented in `engines/dune/debug.h`:
 | `dune_skip_cd_story=1` | CD only: stop the intro after TITLE instead of playing the story scenes |
 | `dune_speedrun=<campaign\|full>` | the speedrun bot (used by `check_speedrun.sh`) |
 | `dune_rng_seed=<n>` | fix the random seed so runs are reproducible |
+| `dune_record=<dir>` | save every shown frame as a BMP with its duration, to make a video of a run |
+| `dune_speedrun_watch=1` | show the speedrun bot's run on screen and leave the game playable afterwards |
+| `dune_test_cockpit=<n>` | open the ornithopter cockpit for a scripted real-time test |
 | `dune_hnm_dump_frame=<n>` | on a dump run, the video frame at which each intro video is screenshotted (default 40) |
 | `dune_story_setup=<name>` | start from a prepared story state (`comm`, `gathering`, `ecology`, `stillsuit`; used by the story scenarios) |
 | `dune_input=<file>`, `dune_checkpoint_dir=<dir>` | scripted input and checkpoints (used by the harness) |
@@ -196,6 +199,7 @@ To check audio without listening, run the SDL build with
 | Game is not detected | the directory lacks `DUNE.DAT` (CD) or `DUNES.HSQ` (floppy) |
 | Intro plays, but after it places, exits or characters are missing or wrong | the executable (`DNCDPRG.EXE` / `DUNEPRG.EXE`) is not next to the data |
 | Compile errors in `engines/dune` against newer ScummVM | build at the pinned commit above and open an issue with the error |
+| Headless runs (`dump`, `make verify`, the speedrun check) exit at once with no error, while the game window works | Homebrew's `sdl2` is now `sdl2-compat` (SDL 3 underneath), whose dummy video driver cannot create a renderer. The checks need the real SDL 2. `test_dune_scummvm_sdl.sh` relinks the binary to `/opt/homebrew/Cellar/sdl2/<version>` when that is still installed; otherwise install an SDL 2.x release from [libsdl.org](https://github.com/libsdl-org/SDL/releases) and rebuild |
 | No sound on iPhone | the ring/silent switch; the iOS patch in `scripts/patches/` fixes this, so make sure it was applied |
 
 For the engine's architecture, conventions and status, see

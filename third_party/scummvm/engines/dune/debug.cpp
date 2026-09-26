@@ -83,6 +83,31 @@ uint dumpEveryMillis() {
 	return ConfMan.hasKey("dune_dump_every") ? (uint)MAX(0, ConfMan.getInt("dune_dump_every")) : 0;
 }
 
+bool isRecording() {
+	return ConfMan.hasKey("dune_record") && !ConfMan.get("dune_record").empty();
+}
+
+void recordFrame(OSystem *system, uint millis) {
+	// dune_record=<folder>: the screen as fNNNNNN-dMMMMM.bmp, shown for MMMMM
+	// ms (scripts/record_speedrun.sh joins them into a video).
+	if (!isRecording() || !millis)
+		return;
+	static uint frame = 0;
+	byte palette[256 * 3];
+	system->getPaletteManager()->grabPalette(palette, 0, 256);
+	Graphics::Surface *screen = system->lockScreen();
+	if (!screen)
+		return;
+	Graphics::Surface *rgb = screen->convertTo(Graphics::PixelFormat(3, 8, 8, 8, 0, 16, 8, 0, 0), palette);
+	system->unlockScreen();
+	Common::DumpFile file;
+	const Common::String name = Common::String::format("f%06u-d%05u.bmp", frame++, MIN<uint>(millis, 99999));
+	if (file.open(Common::Path(ConfMan.get("dune_record")).appendComponent(name)))
+		Image::writeBMP(file, *rgb);
+	rgb->free();
+	delete rgb;
+}
+
 void dumpScreen(OSystem *system, const char *name) {
 	if (!isDumpRun() && !isDuneHarnessRun())
 		return;
