@@ -317,6 +317,7 @@ private:
 	Common::Array<LandObject> _flightObjects;
 	byte _flightTerrain = 0;
 	uint32 _flightFrameAt = 0;
+	uint _flightTicks = 0; ///< landscape frames since the last step (ds:4286)
 	void flightLandscapeStart(const uint16 *longitudes, const int16 *latitudes);
 	void flightLandscapeReseed(uint16 longitude, int16 latitude);
 	void flightLandscapeRow(uint z);

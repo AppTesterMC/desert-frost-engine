@@ -60,7 +60,7 @@ for f in LICENSE NOTICE CONTRIBUTING.md Makefile; do put "$f"; done
 for f in \
 	scummvm_source.sh \
 	test_dune_scummvm_sdl.sh test_dune_scummvm_native.sh test_dune_scummvm_runtime.sh \
-	check_dune_build.sh check_speedrun.sh build_dune_scummvm_ios.sh install_dune_scummvm_ios_devicectl.sh \
+	check_dune_build.sh check_speedrun.sh check_flight_landscape.sh build_dune_scummvm_ios.sh install_dune_scummvm_ios_devicectl.sh \
 	ScummVM-iOS.xcscheme PREFLIGHT.md README-local-builds.md \
 	dune_regress.py dune_accept_golden.py dune_audio_level.py \
 	dune_sprite_sheet.py dune_hnm_frames.py dune_room.py dune_dat.py dune_unlzexe.py chani_grep.py dune_disasm.py asm_range.py dune_dialogue_dump.py \

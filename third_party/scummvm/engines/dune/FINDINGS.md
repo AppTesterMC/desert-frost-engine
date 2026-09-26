@@ -602,8 +602,8 @@ Implemented in `troops.cpp`, `battle.cpp` and `scene.cpp` from the CD 3.7 disass
 ## The navigation panel, outdoor colours and the desert walk
 
 The details, with addresses, are in `notes/desert-walk-spec.md`. They were
-checked against DOSBox-X recordings of the floppy release
-(`~/Dune-DOS-reference/capture/duneprg_000.avi`).
+checked against a DOSBox-X recording of a desert walk in the floppy
+release.
 
 - **Navigation panel** (floppy `329F`). Inside a room it shows box 33 with its
   lit exits; the red dot appears only in the Atreides palace. Room 1 shows box
@@ -645,15 +645,27 @@ Details are in `notes/orni-cockpit-spec.md` and `notes/orni-flight-spec.md`. The
   - the blinking ICONES 0x4c ornithopter, the orange scroll pad, and a single Cancel row.
 
   A tap in the window takes off at once; the GO THERE step is gone. Cancel returns to the pad or to the desert. CHANGE DESTINATION reopens the same screen during a flight and re-aims the flight.
-- **Route** (floppy `5FB7`). The heading uses 256 units a turn. Each step moves one map cell along it: the major axis a whole cell, the minor axis its share. A homing flight re-aims every step, and the polar guard and pole flip apply.
-- **Free flight** (floppy `51C7`). A desert point picked in the cockpit sets a fixed heading. The flight never lands there:
-  - the rows are BACK TO STARTING POINT, TOWARDS NEAREST PLACE (from phase 0x32) and CHANGE DESTINATION;
-  - the compass shows the steering arrows ICONES 42/43/44; a press, and every 50 ticks while held, turns the heading by 4 units and pans the landscape 4 px.
+- **Route** (IDA `sub_7E87`, seg000 `5FB7`; `World::travelStep`, `compassAngle`, `unitsPerCell`). It was checked step by step against the original's memory.
+  - Before every step, a homing flight re-aims from the current position (`7E4C`, `7DB4`).
+  - The heading splits into a major component of 0x20 and the in-octant remainder (`7E19`). Both are scaled by the units per cell at the latitude: round(65536 / cells in the TABLAT row), which matches ds:43C7 on all 99 rows.
+  - The latitude's fraction (ds:11D9) starts at 0x80. A step moves at most one row.
+  - A flight arrives when its map cell is the destination's.
+- **Free flight** (floppy `51C7`). A desert point picked in the cockpit sets a fixed heading, and the flight never lands there.
+  - The rows are BACK TO STARTING POINT, TOWARDS NEAREST PLACE (from phase 0x32) and CHANGE DESTINATION.
+  - The compass shows the steering arrows ICONES 42/43/44. A press turns the heading by 4 units, and so does every 50 ticks of holding. The fraction resets to 0x80 and the landscape pans 4 px.
 
   A homing flight shows SKIP TO DESTINATION and CHANGE DESTINATION over a dark compass. The worm and the check runs still land at the point.
-- **Flight landscape** (floppy `57FA`, `54ED`). It uses the desert walk's object engine with DUNES.HSQ, which also has 6-byte frame headers, and perspective height 0x48:
-  - 40 rows of 4 objects;
-  - a new row at $z=40$ every 16 ticks, each row seeded from the map 5 steps ahead.
+- **Flight landscape** (IDA `76CA`, `7AC2`, `7833`). The desert walk's object engine is used with DUNES.HSQ and perspective height 0x48. The original's memory was dumped every 80 ms of a palace → Carthag-Tuek flight on Spice86, and this model reproduces:
+  - its object ring (ds:1989) row by row;
+  - its seed (ds:20E3) at every step;
+  - its screen: 1 % of landscape pixels differ, which is the mouse cursor.
+
+  In detail:
+  - The take-off takes the first step. The rows are then laid out in 5 groups of 8 (z 1–40). Group g is seeded lng ^ lat (the latitude as a word) at the position g register-steps ahead.
+  - Every 80 ms a frame: the objects move one step nearer and a row of 4 comes in at $z=40$.
+  - The first frame already brings a step, then every 8th frame. The step's row still uses the old seed.
+  - After a step, the seed is lng ^ lat five register-steps ahead, with the heading re-aimed from the new position. The picker comes from that cell's map byte, so the dunes and rocks are the terrain the route is about to cross.
+  - `scripts/check_flight_landscape.sh` compares the engine's seeds with the original's (`tests/regression/flight-seeds-floppy.txt`).
 - **Sightings** (floppy `4353`, `3924`). The check needs someone travelling with Paul (ds:10). A findable place counts when it is in the 9×9 block and within 135° of the heading; the last one found wins. It is marked discovered and the flight homes on it at once. The companion then speaks PHRASE12 0x1A0 in the ORNYCAB cabin, with the place's kind and side substituted. The single row is GO TOWARDS THIS PLACE. The old GO TOWARDS / RESUME FLIGHT choice is gone.
 - **Globe access.** The planet at the bottom left of the flat map opens the globe and its game menu, as in the original. Paul's head still works too.
 - **Save files** read raw. A save begins with the game time, so a time such as 0x0178 writes `78 01`, a valid zlib header, and `openForLoading()` returned an empty stream. The speedrun check found this after the route timing changed.

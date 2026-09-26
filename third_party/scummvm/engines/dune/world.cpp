@@ -1154,6 +1154,88 @@ uint World::rowCells(int latitude) const {
 	return 2u * READ_BE_UINT16(_tablat.data() + 8 * row + 2);
 }
 
+uint World::unitsPerCell(int latitude) const {
+	// Built at startup from TABLAT; checked against the floppy's ds:43C7 on all 99 rows.
+	const uint cells = rowCells(latitude);
+	return cells ? (131072 + cells) / (2 * cells) : 65535;
+}
+
+namespace {
+
+/** x86 idiv: the quotient truncated toward zero. */
+int truncDiv(int a, int b) {
+	const int q = ABS(a) / ABS(b);
+	return (a >= 0) == (b > 0) ? q : -q;
+}
+
+} // namespace
+
+bool World::compassAngle(uint16 fromLng, int16 fromLat, uint16 toLng, int16 toLat, byte &angle) {
+	int bx = (int16)(toLat - fromLat), dx = (int16)(toLng - fromLng);
+	if (bx < -0x80 || bx >= 0x80) {
+		bx >>= 1;
+		dx >>= 1;
+	}
+	bx = (int16)((bx & 0xff) << 8); // the latitude in the units of a longitude cell (x256)
+	const int ax = ABS(bx), cx = ABS(dx);
+	if (cx >= ax) {
+		if (cx < 1)
+			return false;
+		const byte al = (byte)truncDiv(0x20 * bx, dx);
+		angle = (byte)(dx >= 0 ? al + 0x40 : al + 0xc0);
+		return true;
+	}
+	if (ax < 1)
+		return false;
+	byte al = (byte)truncDiv(0x20 * dx, bx);
+	if (bx >= 0)
+		al = (byte)(al - 0x80);
+	angle = (byte)-al;
+	return true;
+}
+
+void World::travelStep(uint16 &longitude, int16 &latitude, byte &fraction, byte &heading) const {
+	// 7E19: the heading as a major component of 0x20 and a minor one.
+	int cdx, cbx;
+	const byte bl = (byte)(heading + 0x20);
+	if ((bl & 0x7f) >= 0x40) {
+		byte a = (byte)(heading - 0x40);
+		cdx = 0x20;
+		if (bl & 0x80) {
+			cdx = -0x20;
+			a = (byte)-(byte)(a - 0x80);
+		}
+		cbx = (int8)a;
+	} else {
+		byte a = heading;
+		cbx = -0x20;
+		if (bl & 0x80) {
+			a = (byte)-(byte)(a - 0x80);
+			cbx = 0x20;
+		}
+		cdx = (int8)a;
+	}
+	// 7E87: both scaled by the units per cell at this latitude.
+	const int bp = (int)unitsPerCell(latitude);
+	int lngDelta = truncDiv(bp * cdx, 0x20);
+	const int latDelta = truncDiv(cbx * bp, 0x20);
+	int ax = ABS(latDelta) + fraction;
+	if ((ax >> 8) > 1) {
+		lngDelta = truncDiv(lngDelta * 256, ax);
+		ax = 0x100;
+	}
+	fraction = (byte)(ax & 0xff);
+	int rows = ax >> 8;
+	if (latDelta < 0)
+		rows = -rows;
+	latitude = (int16)(latitude + rows);
+	longitude = (uint16)(longitude + lngDelta);
+	if ((uint16)(latitude + 0x60) >= 0xc0) {
+		heading = (byte)(heading + 0x80);
+		longitude = (uint16)(longitude + 0x8000);
+	}
+}
+
 uint World::cellDistance(uint16 lng0, int16 lat0, uint16 lng1, int16 lat1) const {
 	// seg000:7c8f: max(|dlng| / units per cell at the first latitude, |dlat|).
 	const uint cells = MAX<uint>(1, rowCells(lat0));

@@ -286,6 +286,9 @@ void GameScreen::flightLandscapeReseed(uint16 longitude, int16 latitude) {
 	const int cell = _world.mapCell(longitude, latitude);
 	const Common::Array<byte> &m = _world.map();
 	_flightTerrain = cell >= 0 && (uint)cell < m.size() ? m[cell] : 0;
+	if (dumpEveryMillis()) // test runs: the seeds, to compare with the original's ds:20E3
+		_log.line(Common::String::format("Land: seed %04x from %04x/%d, map byte %02x", _landSeed, longitude, latitude,
+				_flightTerrain));
 }
 
 void GameScreen::flightLandscapeRow(uint z) {

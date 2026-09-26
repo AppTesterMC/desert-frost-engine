@@ -1329,9 +1329,9 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 	Location a = _world.location(from), b = a;
 	b.longitude = targetLongitude;
 	b.latitude = targetLatitude;
-	int lng = a.longitude, lat = a.latitude;
-	const uint16 a0Lng = a.longitude;
-	const int16 a0Lat = a.latitude;
+	uint16 lng = a.longitude;
+	int16 lat = a.latitude;
+	const int startCell = _world.mapCell(a.longitude, a.latitude);
 	uint total = _world.cellDistance(a.longitude, a.latitude, b.longitude, b.latitude);
 	uint step = 0;
 	const uint32 kTurnRepeatMillis = 250; // 0x32 ticks between repeats of a held turn
@@ -1350,46 +1350,38 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 	Sprite *dunes = nullptr; // set when the floppy's landscape is drawn (DUNES.HSQ)
 	if (!skipping && _resources.load("DUNES.HSQ", dunesData))
 		dunes = new Sprite(_system, dunesData);
-	// The route (travel_step_position, floppy 5FB7): a heading of 256 units
-	// a turn, re-aimed at the destination every step while homing; a free
-	// flight (a desert point picked in the cockpit) keeps its heading, can be
-	// steered, and never lands (seg000:4944): it flies on until BACK TO
-	// STARTING POINT, TOWARDS NEAREST PLACE, CHANGE DESTINATION or a sighting.
-	// The worm, the dump and the speedrun runs keep the old landing.
+	// The route (travel_step_position, floppy 7E87 in IDA numbering; see
+	// World::travelStep): a heading of 256 units a turn, re-aimed from the
+	// current position at the destination before every step while homing
+	// (7E4C). A free flight (a desert point picked in the cockpit) keeps its
+	// heading, can be steered, and never lands (seg000:4944): it flies on
+	// until BACK TO STARTING POINT, TOWARDS NEAREST PLACE, CHANGE DESTINATION
+	// or a sighting. The worm, the dump and the speedrun runs keep the old
+	// landing. Checked step by step against the original's memory in a
+	// palace -> Carthag-Tuek flight (Spice86 memory dumps).
 	uint16 destLng = targetLongitude;
 	int16 destLat = targetLatitude;
-	int latFix = lat * 256 + 128;
+	byte fraction = 0x80; // travel_step_accum at take-off
 	bool freeFlight = target < 0 && !_riding && !isFastCapture();
-	auto rowUnits = [&](int latitude) { return 65536.0 / MAX<uint>(1, _world.rowCells(latitude)); };
-	auto headingTo = [&](uint16 fromLng, int fromLat, uint16 toLng, int toLat) -> byte {
-		const double dx = (int16)(toLng - fromLng) / rowUnits(fromLat), dy = toLat - fromLat;
-		if (dx == 0 && dy == 0)
-			return 0;
-		double angle = atan2(dx, -dy) * 128.0 / M_PI;
-		if (angle < 0)
-			angle += 256;
-		return (byte)((int)(angle + 0.5) & 0xff);
-	};
-	auto advance = [&](uint16 &stepLng, int &stepLatFix, byte &stepHeading) {
-		// One map cell along the heading: the major axis a whole cell, the minor its share.
-		const int rowNow = stepLatFix >> 8;
-		if (freeFlight && ABS(rowNow) > 0x4d && ((stepHeading + 0x40) & 0x80) == (rowNow > 0 ? 0x80 : 0))
-			stepHeading = (stepHeading & 0x80) | 0x40; // the polar guard: due east or west
-		const double theta = stepHeading * M_PI / 128.0;
-		double sx = sin(theta), sy = -cos(theta);
-		const double m = MAX(ABS(sx), ABS(sy));
-		sx /= m;
-		sy /= m;
-		stepLng = (uint16)(stepLng + (int)lround(sx * rowUnits(rowNow)));
-		stepLatFix += (int)lround(sy * 256);
-		if (ABS(stepLatFix >> 8) >= 0x60) {
-			// Over the pole: the heading turns round, half a turn of longitude.
-			stepLatFix = (stepLatFix > 0 ? 0x5f : -0x5f) * 256 + 128;
-			stepHeading = (byte)(stepHeading + 0x80);
-			stepLng = (uint16)(stepLng + 0x8000);
+	bool fixedHeading = false; // ds:11D5: set by steering
+	byte heading = 0;
+	World::compassAngle(lng, lat, destLng, destLat, heading);
+	auto routeStep = [&](uint16 &stepLng, int16 &stepLat, byte &stepFraction, uint16 fromLng, int16 fromLat) {
+		// 7E4C: homing re-aims from where the ornithopter is (ds:4/ds:6, even
+		// during the look-ahead); a fixed heading only gets the polar guard.
+		if (freeFlight || fixedHeading) {
+			if (stepLat < -0x4d || stepLat > 0x4d) {
+				const byte ah = (byte)((byte)(heading - 0x40) ^ (byte)((uint16)stepLat >> 8));
+				if (!(ah & 0x80))
+					heading = (byte)((heading & 0x80) | 0x40);
+			}
+		} else {
+			byte aim;
+			if (World::compassAngle(fromLng, fromLat, destLng, destLat, aim))
+				heading = aim;
 		}
+		_world.travelStep(stepLng, stepLat, stepFraction, heading);
 	};
-	byte heading = headingTo(a.longitude, a.latitude, destLng, destLat);
 	uint hostileSteps = 0;
 	// The flight's verbs (build_room_command_records, floppy 327B): homing
 	// SKIP TO DESTINATION (greyed while the hostile-zone count runs) and
@@ -1427,34 +1419,50 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 	};
 	// The landscape (floppy 4F63): its rows follow the route five steps ahead.
 	const uint32 kLandFrameMillis = 80; // a frame per 16 ticks (the frame task at 546D)
+	uint landFrames = 0; // landscape frames since the rows were laid out
 	auto startLandscape = [&]() {
+		// 76CA: five groups of rows, each seeded one register step further on
+		// (the fraction kept).
 		uint16 longitudes[5];
 		int16 latitudes[5];
-		uint16 aheadLng = (uint16)lng;
-		int aheadLatFix = latFix;
-		byte aheadHeading = heading;
+		uint16 aheadLng = lng;
+		int16 aheadLat = lat;
+		byte aheadFraction = fraction;
 		for (uint k = 0; k < 5; ++k) {
 			longitudes[k] = aheadLng;
-			latitudes[k] = (int16)(aheadLatFix >> 8);
-			advance(aheadLng, aheadLatFix, aheadHeading);
+			latitudes[k] = aheadLat;
+			routeStep(aheadLng, aheadLat, aheadFraction, lng, lat);
 		}
 		flightLandscapeStart(longitudes, latitudes);
+		// The step counter (ds:4286) is 0 after the take-off: the first frame
+		// already brings a step, then one every 8 frames (reloaded with 7).
+		_flightTicks = 7;
+		landFrames = 0;
 	};
-	if (dunes)
-		startLandscape();
+	auto reseedLandscape = [&]() {
+		// 7AC2: five register steps ahead (the fraction kept, the heading
+		// re-aimed from here), seed = longitude ^ latitude there.
+		uint16 aheadLng = lng;
+		int16 aheadLat = lat;
+		byte aheadFraction = fraction;
+		for (uint k = 0; k < 5; ++k)
+			routeStep(aheadLng, aheadLat, aheadFraction, lng, lat);
+		flightLandscapeReseed(aheadLng, aheadLat);
+	};
 	const uint32 flightStart = _system->getMillis();
 	uint32 lastTimedDump = 0;
 	const bool cdView = !skipping && !dunes && !_world.floppy() && startCdFlightView();
 	auto present = [&]() {
 		if (cdView) {
 			// The terrain six cells ahead on the route (travel_probe_terrain_ahead, seg000:4e8e).
-			uint16 aLng = (uint16)lng;
-			int aLatFix = latFix;
-			byte aHeading = heading;
+			uint16 aLng = lng;
+			int16 aLat = lat;
+			byte aFraction = fraction;
+			const byte keepHeading = heading;
 			for (uint k = 0; k < 6; ++k)
-				advance(aLng, aLatFix, aHeading);
-			const int16 aLat = (int16)(aLatFix >> 8);
-			const int c0 = _world.mapCell((uint16)lng, (int16)lat), c1 = _world.mapCell(aLng, aLat);
+				routeStep(aLng, aLat, aFraction, lng, lat);
+			heading = keepHeading;
+			const int c0 = _world.mapCell(lng, lat), c1 = _world.mapCell(aLng, aLat);
 			const Common::Array<byte> &m = _world.map();
 			const byte t0 = c0 >= 0 ? (m[c0] & 0x0f) : 0, t1 = c1 >= 0 ? (m[c1] & 0x0f) : 0;
 			drawCdFlightView((byte)((t0 + t1) / 2));
@@ -1484,12 +1492,19 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		_map->applyPalette();
 		drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
 		const uint32 nowMillis = _system->getMillis();
-		for (uint n = 0; nowMillis - _flightFrameAt >= kLandFrameMillis && n < 40; ++n) {
+		// A frame every 16 ticks (546D); the eighth frame since the last step
+		// makes the next one due (the counter at ds:4286), so rows and steps
+		// keep the original's order: the step's row is drawn with the old seed.
+		bool ticked = false;
+		while (nowMillis - _flightFrameAt >= kLandFrameMillis && _flightTicks < 8) {
 			flightLandscapeTick();
 			_flightFrameAt += kLandFrameMillis;
+			++_flightTicks;
+			++landFrames;
+			ticked = true;
 		}
-		if (nowMillis - _flightFrameAt >= kLandFrameMillis)
-			_flightFrameAt = nowMillis;
+		if (nowMillis - _flightFrameAt >= 8 * kLandFrameMillis)
+			_flightFrameAt = nowMillis - kLandFrameMillis; // after a pause, no rush of frames
 		flightLandscapeDraw(view, dunesData);
 		_map->drawMinimap(_surface, Common::Rect(202, 3, 318, 61), _panel);
 		setFlightRows();
@@ -1499,7 +1514,11 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		_panel.draw(_surface, exits, -1, -1, day());
 		_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
 		_system->updateScreen();
-		// dune_dump_every samples the real-time flight too (flight-rt-<ms>).
+		// dune_dump_every samples the real-time flight too (flight-rt-<ms>),
+		// and names each landscape frame by its number since the rows were laid
+		// out (flight-frame-<n>), to set beside the original's.
+		if (dumpEveryMillis() && ticked)
+			dumpScreen(_system, Common::String::format("flight-frame-%03u", landFrames).c_str());
 		if (dumpEveryMillis() && _system->getMillis() - lastTimedDump >= dumpEveryMillis()) {
 			lastTimedDump = _system->getMillis();
 			dumpScreen(_system, Common::String::format("flight-rt-%06u", lastTimedDump - flightStart).c_str());
@@ -1520,6 +1539,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 			startLandscape();
 			for (uint n = 0; n < 20; ++n)
 				flightLandscapeTick(); // the frame below shows the rows in flight
+			_flightTicks = 0;
 			Graphics::Surface view = _surface.surfacePtr()->getSubArea(Common::Rect(0, 0, 320, 152));
 			_surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
 			_panel.applyPalette();
@@ -1588,10 +1608,12 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 			destLng = _changeLongitude;
 			destLat = _changeLatitude;
 			freeFlight = !_riding;
-			heading = headingTo((uint16)lng, lat, destLng, destLat);
+			World::compassAngle(lng, lat, destLng, destLat, heading);
+			fraction = 0x80;
 		}
 		_changeTarget = -1;
 		next = _system->getMillis() + World::kFlightStepMillis;
+		_flightFrameAt = _system->getMillis();
 	};
 	auto aimAt = [&](uint place) {
 		destination = (int)place;
@@ -1599,16 +1621,18 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		destLng = d.longitude;
 		destLat = d.latitude;
 		freeFlight = false;
+		fixedHeading = false;
 	};
-	auto arrived = [&]() {
-		return (uint)lat == (uint)destLat && _world.cellDistance((uint16)lng, (int16)lat, destLng, destLat) == 0;
-	};
+	// The pump's arrival test (floppy 5D1A): the cell under the ornithopter
+	// is the destination's.
+	auto arrived = [&]() { return _world.mapCell(lng, lat) == _world.mapCell(destLng, destLat); };
 	// The steering arrows (ui_nav_panel_flight, floppy ds:2404): press and
 	// hold turns 4 units every 50 ticks; the middle one resumes the flight.
 	const Common::Rect kTurnLeft(258, 172, 267, 183), kResume(270, 170, 280, 183), kTurnRight(283, 172, 292, 183);
 	int turning = 0;
 	uint32 nextTurn = 0;
 	const uint cap = 4 * total + 64;
+	auto stepDue = [&]() { return dunes ? _flightTicks >= 8 : _system->getMillis() >= next; };
 	for (;;) {
 		if (!freeFlight && arrived())
 			break;
@@ -1617,8 +1641,9 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 			lat = destLat;
 			break;
 		}
-		if (!skipping) {
-			while (_system->getMillis() < next && !skipping && !_quitRequested && !isRecording()) {
+		if (!skipping && step > 0) {
+			// The take-off already took the first step (floppy 4F63).
+			while (!stepDue() && !skipping && !_quitRequested && !isRecording()) {
 				Common::Event event;
 				while (pollDuneEvent(_system, event)) {
 					if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER) {
@@ -1668,8 +1693,11 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 					}
 				}
 				if (turning && freeFlight && _system->getMillis() >= nextTurn) {
-					// adjust_travel_heading (floppy 5ECA): +-4 of 256, fixed-heading mode.
+					// adjust_travel_heading (floppy 5ECA): +-4 of 256, fixed-heading
+					// mode, the fraction back to 0x80.
 					heading = (byte)(heading + turning);
+					fixedHeading = true;
+					fraction = 0x80;
 					flightLandscapePan(turning < 0 ? -1 : 1); // the floppy pans the view 4 px a turn
 					nextTurn = _system->getMillis() + kTurnRepeatMillis;
 				}
@@ -1682,22 +1710,18 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		if (_quitRequested)
 			break;
 		++step;
-		if (!freeFlight)
-			heading = headingTo((uint16)lng, lat, destLng, destLat);
+		if (step > 1)
+			_flightTicks = 0;
 		{
-			uint16 stepLng = (uint16)lng;
-			advance(stepLng, latFix, heading);
-			lng = stepLng;
-			lat = latFix >> 8;
+			const uint16 fromLng = lng;
+			const int16 fromLat = lat;
+			routeStep(lng, lat, fraction, fromLng, fromLat);
 		}
 		if (dunes) {
-			// 5BF2: the rows now come from five steps further on.
-			uint16 aheadLng = (uint16)lng;
-			int aheadLatFix = latFix;
-			byte aheadHeading = heading;
-			for (uint k = 0; k < 5; ++k)
-				advance(aheadLng, aheadLatFix, aheadHeading);
-			flightLandscapeReseed(aheadLng, (int16)(aheadLatFix >> 8));
+			if (step == 1)
+				startLandscape(); // 4F63: the rows are laid out after the first step
+			else
+				reseedLandscape();
 		}
 		if (step % 16 == 0) {
 			_world.advanceTime(1);
@@ -1718,6 +1742,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 					if (!askHostileZone())
 						aimAt(from); // BACK TO STARTING POINT
 					next = _system->getMillis() + World::kFlightStepMillis;
+					_flightFrameAt = _system->getMillis();
 				}
 				if (++hostileSteps >= 8) {
 					_log.line("Flight: shot down over Harkonnen land");
@@ -1736,7 +1761,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 			present();
 			recordFrame(_system, World::kFlightStepMillis); // a recorded run: one frame a cell
 		}
-		if (freeFlight && step > 1 && _world.mapCell((uint16)lng, (int16)lat) == _world.mapCell(a0Lng, a0Lat)) {
+		if (freeFlight && step > 1 && _world.mapCell(lng, lat) == startCell) {
 			// The route crossed the starting cell, the free flight's destination.
 			destination = (int)from;
 			break;
@@ -1755,7 +1780,9 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 				const Location sl = _world.location(i);
 				if (_world.cellDistance((uint16)lng, (int16)lat, sl.longitude, sl.latitude) > 4)
 					continue;
-				const byte bearing = (byte)(headingTo((uint16)lng, lat, sl.longitude, sl.latitude) - heading);
+				byte angle = heading;
+				World::compassAngle(lng, lat, sl.longitude, sl.latitude, angle);
+				const byte bearing = (byte)(angle - heading);
 				if ((byte)(bearing + 0x60) >= 0xc0)
 					continue;
 				sighted = (int)i;
@@ -1766,6 +1793,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 				aimAt((uint)sighted);
 				showSighting((uint)sighted, sightedBearing);
 				next = _system->getMillis() + World::kFlightStepMillis;
+				_flightFrameAt = _system->getMillis();
 			}
 		}
 	}

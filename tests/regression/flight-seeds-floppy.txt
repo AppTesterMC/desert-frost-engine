@@ -1,0 +1,30 @@
+# The original floppy DUNEPRG.EXE's flight landscape seeds (ds:20E3) for a new
+# game's flight from the palace to Carthag-Tuek (place 12): the five groups of
+# the initial fill (floppy 76CA), then the reseed after each travel step
+# (7AC2). Read from Spice86 memory dumps taken every 80 ms of emulated time
+# during that flight.
+e652
+e5b3
+e513
+e473
+e3d4
+1d36
+1de4
+1e9a
+1f07
+1fb0
+2080
+20dd
+21a5
+21f2
+22b0
+2380
+23cb
+248d
+255f
+259a
+2687
+2671
+276e
+2840
+27b5

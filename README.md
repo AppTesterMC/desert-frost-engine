@@ -68,7 +68,7 @@ floppy releases are detected. The table shows what works; the full status is in
 | Gameplay | the game clock, flight, hiring Fremen troops (WORK FOR ME) and giving them orders, spice harvest and prospecting, rallying (charisma), the results screen, all following the executable's rules ([gameplay-rules.md](notes/research/gameplay-rules.md)) |
 | Story | story phases and their callbacks, Jessica's lessons, the Emperor's spice demands bargained with Duncan in the COMM room, Paul's visions, the scripted scenes, the sietch chiefs' story lines (the stillsuit maker) and Stilgar's Water of Life |
 | Ecology and ending | the ecology route (wind traps, bulbs, irrigation, vegetation spreading on the map, fortresses taken, MODIFY EQUIPMENT), the Harkonnen zone, deaths on arrival, and the final scene |
-| Desert and flight | walking in the desert with its landscape, the ornithopter cockpit and destination screen, steering in free flight, CHANGE DESTINATION, the flight landscape and sightings of companions |
+| Desert and flight | walking in the desert with its landscape, the ornithopter cockpit and destination screen, steering in free flight, CHANGE DESTINATION, the flight landscape (seeded row by row as the original, checked against its memory) and sightings of companions |
 | War and the ending | troop marches and espionage, fort battles, MASSIVE ATTACK and FIGHT FOR A WHOLE DAY, the Harkonnen captain, worm riding, the smugglers' village and the final attack on the Harkonnen palace |
 | Not yet | full command lists per room; a complete play-through from a new game is still being checked (see below) |
 

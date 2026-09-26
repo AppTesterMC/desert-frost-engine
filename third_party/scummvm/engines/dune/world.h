@@ -318,6 +318,20 @@ public:
 	uint cellDistance(uint16 lng0, int16 lat0, uint16 lng1, int16 lat1) const;
 	/** The row length in cells at a latitude (TABLAT), 0 before prepareNewGame. */
 	uint rowCells(int latitude) const;
+	/** The longitude units of one map cell at a latitude (ds:43C7): round(65536 / cells in the row). */
+	uint unitsPerCell(int latitude) const;
+	/**
+	 * compass_angle (floppy 7DB4): the heading (256 a turn, 0 north,
+	 * clockwise) from one position to another; false when they coincide.
+	 */
+	static bool compassAngle(uint16 fromLng, int16 fromLat, uint16 toLng, int16 toLat, byte &angle);
+	/**
+	 * travel_step_position without its heading update (floppy 7E87): one
+	 * step along @p heading, the major axis a whole cell and the minor its
+	 * share, the latitude's fraction kept in @p fraction (ds:11D9), at most
+	 * one row a step; over a pole the heading turns round.
+	 */
+	void travelStep(uint16 &longitude, int16 &latitude, byte &fraction, byte &heading) const;
 
 	const GameState &state() const { return _state; }
 	GameState &mutableState() { return _state; }
