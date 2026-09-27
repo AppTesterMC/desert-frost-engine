@@ -55,7 +55,7 @@ class StartupLog;
 
 /** Render the map screen: FRESK frame and the MAP/GLOBDATA globe. */
 bool drawDuneGlobe(OSystem *system, Graphics::Surface &surface, Resource &resources,
-		uint16 rotation = 0, int tilt = 0);
+		const Common::Array<byte> &map, uint16 rotation, int tilt, uint results, const Location &player);
 /**
  * Render only the globe, centred at (159, 79), with whatever palette is in
  * place: the prologue draws it over the star field, whose palette entries

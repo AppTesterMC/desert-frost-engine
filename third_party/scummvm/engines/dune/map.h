@@ -96,9 +96,8 @@ private:
 /**
  * The map screens: the flat map with the location icons of ONMAP.HSQ
  * (frames 58 + place kind, +5 for sietches out of reach, as the executable's
- * sub_15DCE draws them) and the globe of FRESK.HSQ with the same icons in
- * their large versions (122 + kind). Both keep an index map so a tap finds
- * the place under it.
+ * sub_15DCE draws them) and the globe of FRESK.HSQ with live territory
+ * colours in results mode. Only the flat map has place icons and hit boxes.
  */
 class MapScreen {
 public:

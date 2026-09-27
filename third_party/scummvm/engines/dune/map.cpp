@@ -402,6 +402,10 @@ void MapScreen::centreOn(uint locationIndex) {
 	_longitude = l.longitude;
 	_rotation = l.longitude;
 	_tilt = CLIP<int>(l.latitude, -96, 96);
+	// Floppy CS:B983-B995 starts the globe at least 32 rows from the
+	// equator, exposing the territory around Paul's latitude.
+	if (_mode == kGlobe)
+		_tilt = _tilt < 0 ? MIN(_tilt, -32) : MAX(_tilt, 32);
 }
 
 void MapScreen::centreOnPosition(uint16 longitude, int16 latitude) {
@@ -752,11 +756,14 @@ void MapScreen::draw(Graphics::ManagedSurface &surface, const Panel &panel, cons
 			surface.vLine(319 - i, i, 151 - i, colour);
 		}
 	} else {
-		drawDuneGlobe(_system, *target, _resources, _rotation, _tilt);
+		drawDuneGlobe(_system, *target, _resources, _world.map(), _rotation, _tilt, _results,
+				_world.location(_world.currentLocation()));
+		memset(_index, 0xff, sizeof(_index)); // the globe has no location markers or hit boxes
 	}
-	if (_mode == kFlat)
+	if (_mode == kFlat) {
 		drawVegetation(surface, panel);
-	drawIcons(surface);
+		drawIcons(surface);
+	}
 	drawFlight(surface, panel);
 	if (_mode == kFlat && _destination == -2 && _renderer) {
 		int x, y;
@@ -767,14 +774,6 @@ void MapScreen::draw(Graphics::ManagedSurface &surface, const Panel &panel, cons
 		drawLocationPopup(surface, panel, sentences, (uint)_destination);
 	if (_mode == kFlat && (_caption || _density))
 		drawInfoBox(surface, panel, sentences, rallied);
-	else if (_results && _fresk) {
-		// SEE RESULTS (seg000:b96b): the house panels slide open, uncovering
-		// the stats overlay the scene draws on the black behind them.
-		target->fillRect(Common::Rect(0, 0, 106, 152), 0);
-		target->fillRect(Common::Rect(214, 0, 320, 152), 0);
-		_fresk->drawFrame(0, target, -(int)_results, 0);
-		_fresk->drawFrame(1, target, 214 + (int)_results, 0);
-	}
 }
 
 void MapScreen::drawPanelExtras(Graphics::ManagedSurface &surface, const Panel &panel) const {

@@ -79,7 +79,7 @@ enum GlobeSection { kFarNorth, kNearNorth, kNearSouth, kFarSouth };
 struct GlobeSectionLatitude { GlobeSection section; byte latitude; };
 
 bool drawRecoveredGlobe(Graphics::Surface &surface, const Common::Array<byte> &globdata,
-		const Common::Array<byte> &map, const Common::Array<byte> &tablat, uint16 rotation, int tilt) {
+		const Common::Array<byte> &map, const Common::Array<byte> &tablat, uint16 rotation, int tilt, bool results = false) {
 	// A faithful transcription of madmoose's GlobeRenderer (dune-rust
 	// globe_renderer.rs), itself from the original's globe routine.
 	// GLOBDATA: an outline stream (per row: ~length, then one latitude byte
@@ -123,7 +123,12 @@ bool drawRecoveredGlobe(Graphics::Surface &surface, const Common::Array<byte> &g
 		const int address = (int)kMapStart + offset;
 		if (address < 0 || address >= (int)map.size())
 			return 0;
-		return (map[address] & 0x0f) + 0x10;
+		const byte cell = map[address];
+		// Floppy DUNEVGA:1DA3 uses the live map's ownership bits in results:
+		// neutral 0x10, Atreides (including vegetation) 0x20, Harkonnen 0x30.
+		const byte stage = cell & 0x30;
+		const byte bank = results && stage ? (stage == 0x30 ? 0x30 : 0x20) : 0x10;
+		return (cell & 0x0f) | bank;
 	};
 
 	const int centerX = 159, centerY = 79;
@@ -181,20 +186,142 @@ bool drawRecoveredGlobe(Graphics::Surface &surface, const Common::Array<byte> &g
 	return true;
 }
 
+// Floppy CS:B9F1-BB0A: invert the globe lookup for the single player marker.
+bool projectGlobePlayer(const Common::Array<byte> &globdata,
+		const Common::Array<byte> &tablat, uint16 rotationIndex, int tilt,
+		uint16 longitude, int latitude, int &x, int &y) {
+	const uint table = 3290;
+	const uint latitudeRow = ABS(latitude);
+	if (latitudeRow >= 99 || globdata.size() < table + 64 * 200 || tablat.size() < 99 * 8)
+		return false;
+	const uint half = (tablat[latitudeRow * 8 + 2] << 8) | tablat[latitudeRow * 8 + 3];
+	const uint32 unit = (((uint32)rotationIndex << 16) + 0x8000) / 398;
+	const uint rowRotation = latitudeRow == 0 ? rotationIndex : (2 * unit * half) >> 16;
+	int delta = (int)(((uint32)(2 * half) * longitude + 0x8000) >> 16) - rowRotation;
+	bool negative = delta < 0;
+	delta = ABS(delta);
+	if (delta >= (int)half) {
+		delta = 2 * half - delta;
+		negative = !negative;
+	}
+	const bool far = delta >= (int)(half / 2);
+	if (far)
+		delta = 2 * (half / 2) - delta;
+
+	// BA55..BA7F: scan the same 64 column blocks, retaining the found
+	// latitude position when moving to the next block.
+	uint offset = table, remaining = 100, column = 0, previousRemaining = 100;
+	bool selected = false;
+	while (offset < table + 64 * 200) {
+		bool found = false;
+		while (remaining) {
+			const byte v = globdata[offset++];
+			--remaining;
+			if (v == latitudeRow * 2) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			remaining = previousRemaining;
+			selected = true;
+			break;
+		}
+		++remaining;
+		if (delta <= globdata[offset + 99]) {
+			selected = true;
+			break;
+		}
+		previousRemaining = remaining;
+		++column;
+		offset += 199;
+	}
+	if (!selected)
+		return false;
+	uint16 lookup = (uint16)(100 - remaining);
+	if (far)
+		lookup = (byte)-lookup;
+	if (latitude < 0)
+		lookup |= 0xff00;
+
+	// BA8F..BAAD: inverse search of DS:8702..8802, a128-word subset of
+	// the196-word tilt table atDS:86BE. Formula matches B92C and all196
+	// words of explore08/09 original DS snapshots.
+	auto tiltEntry = [&](int index) -> uint16 {
+		const int n = tilt + 98 - index;
+		if (n > 98)
+			return (byte)(n - 197);
+		if (n >= 0)
+			return (uint16)n;
+		if (n >= -98)
+			return 0xff00 | (uint16)-n;
+		return 0xff00 | (byte)(-197 - n);
+	};
+	int tableIndex = -1;
+	for (int i = 34; i < 162; ++i) {
+		if (tiltEntry(i) == lookup) {
+			tableIndex = i;
+			break;
+		}
+	}
+	if (tableIndex < 0)
+		return false;
+	const int vertical = tableIndex - 98;
+	const bool south = vertical < 0;
+	const uint target = ABS(vertical);
+
+	// BAAF..BAE3: find the outline row whose column sample is closest,
+	// accepting an unsigned error of at most2, as the original does.
+	uint stream = 0, best = 255, bestRow = 0;
+	for (uint row = 0; row < 54; ++row) {
+		const uint width = (byte)~globdata[stream++];
+		if (!width || width <= column)
+			break;
+		const uint difference = (byte)(globdata[stream + column] - target);
+		stream += width;
+		if (difference < best) {
+			best = difference;
+			bestRow = row;
+			if (!difference)
+				break;
+		}
+	}
+	if (best > 2)
+		return false;
+	x = 160 + (negative ? -(int)column : (int)column);
+	y = 79 + (south ? (int)bestRow : -(int)bestRow);
+	return true;
+}
+
 } // namespace
 
-bool drawDuneGlobe(OSystem *system, Graphics::Surface &surface, Resource &resources, uint16 rotation, int tilt) {
-	Common::Array<byte> mapData, globeData, tablatData, freskData;
-	if (!resources.load("MAP.HSQ", mapData) || !resources.load("GLOBDATA.HSQ", globeData)
+bool drawDuneGlobe(OSystem *system, Graphics::Surface &surface, Resource &resources,
+		const Common::Array<byte> &mapData, uint16 rotation, int tilt, uint results, const Location &player) {
+	Common::Array<byte> globeData, tablatData, freskData;
+	if (!resources.load("GLOBDATA.HSQ", globeData)
 			|| !resources.load("TABLAT.BIN", tablatData) || !resources.load("FRESK.HSQ", freskData))
 		return false;
 	Sprite fresk(system, freskData);
 	if (!fresk.setPalette())
 		return false;
-	fresk.drawFrame(0, &surface, 0, 0);
-	fresk.drawFrame(1, &surface, 214, 0);
+	// Floppy CS:B749 fills with F1, draws the ring and globe, then B77D
+	// draws the sliding house panels. Never erase rectangles over the sphere.
+	surface.fillRect(Common::Rect(0, 0, 320, 152), 0xf1);
 	fresk.drawFrame(2, &surface, 91, 20);
-	const bool ok = drawRecoveredGlobe(surface, globeData, mapData, tablatData, rotation, tilt);
+	// The recovered sampler's tilt convention is opposite to DS:297C;
+	// retain its existing convention for the prologue's separate caller.
+	const bool ok = drawRecoveredGlobe(surface, globeData, mapData, tablatData, rotation, -tilt, results != 0);
+	const int slide = (int)MIN<uint>(results, 100) * 112 / 100;
+	fresk.drawFrame(0, &surface, -slide, 0);
+	fresk.drawFrame(1, &surface, 214 + slide, 0);
+	int playerX, playerY;
+	Common::Array<byte> iconData;
+	if (ok && projectGlobePlayer(globeData, tablatData, (uint16)((398u * rotation) >> 16), tilt,
+			player.longitude, player.latitude, playerX, playerY) && resources.load("ICONES.HSQ", iconData)) {
+		// Floppy CS:BB0B: the player's arrow, with its bottom at the projection.
+		Sprite icons(system, iconData);
+		icons.drawFrame(0x36, &surface, playerX, playerY - 16);
+	}
 	uint lit = 0;
 	for (int y = 20; y < 140; ++y)
 		for (int x = 100; x < 220; ++x)
