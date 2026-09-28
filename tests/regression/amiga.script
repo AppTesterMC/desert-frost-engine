@@ -1,0 +1,88 @@
+# Amiga release (DUNE_DATA_AMIGA: the files scripts/dune_amiga_extract.py
+# writes from the three ADFs). No intro is ported: the game opens in the
+# throne room. The checkpoints cover the Amiga conversions (amiga.cpp,
+# amiga_gfx.cpp): room pictures and sheet sprites, the panel in the second
+# palette, the talk balloon, the map's and globe's colours with FRESK's
+# planar sprites, the book's pictures, the mirror picture, and an exterior
+# with the copper sky gradient and the parked ornithopter.
+#
+# Comments after '#' on a command line say what a click hits and what a
+# wait lets finish; scripts/dune_script_trace.py prints what each line did.
+wait 6000               # the Amiga data converts and the throne room draws
+checkpoint amiga-landing
+# Duke Leto (second row): three pages, then STOP TALKING (third row).
+move 160 171
+click left 160 171      # row 2: DUKE LETO ATREIDES: his first page
+wait 1500               # the balloon shows
+checkpoint amiga-leto-1
+click left 160 80       # view: the next page
+wait 1500               # the balloon shows
+checkpoint amiga-leto-2
+click left 160 80       # view: the next page
+wait 1500               # the balloon shows
+click left 160 80       # view: the last page, the rows come back
+wait 1500               # the rows show
+move 160 179
+click left 160 179      # row 3: STOP TALKING: back to the throne room
+wait 1500               # the room draws
+# The box's top edge under Paul's head opens the globe with the game menu
+# (a click on the head itself is inert, as in the original); SAVE GAME
+# (third row) lists Log 1, Log 2 and Cancel; Cancel returns to the menu,
+# EXIT GLOBE (first row) to the flat map and EXIT MAPS to the room.
+move 160 155
+click left 160 155      # under Paul's head: the globe
+wait 3000               # the globe opens
+checkpoint amiga-globe
+move 160 179
+click left 160 179      # row 3: SAVE GAME: the save list
+wait 1500               # the list opens
+checkpoint amiga-menu-save
+move 160 179
+click left 160 179      # row 3: Cancel: back to the globe menu
+wait 1500               # the menu comes back
+move 160 163
+click left 160 163      # row 1: EXIT GLOBE: the flat map
+wait 3000               # the map draws with its DUNE MAP popup
+checkpoint amiga-map-flat
+move 160 163
+click left 160 163      # row 1: EXIT MAPS: back to the throne room
+wait 1500               # the room draws
+# The book: its cover, then ALL TOPICS; the book icon again closes it.
+move 45 165
+click left 45 165       # the book icon: the cover
+wait 2000               # the cover draws
+checkpoint amiga-book-cover
+move 160 163
+click left 160 163      # row 1: ALL TOPICS: the first page
+wait 1500               # the page draws
+checkpoint amiga-book-page
+move 45 165
+click left 45 165       # the book icon: the book closes
+wait 1500               # the room draws
+# Up: Paul's bedroom; LOOK AT MIRROR (second row); Look away (last row).
+move 274 167
+click left 274 167      # the pad's up arrow: Paul's bedroom
+wait 1500               # the bedroom draws
+checkpoint amiga-bedroom
+move 160 171
+click left 160 171      # row 2: LOOK AT MIRROR
+wait 2000               # the mirror draws
+checkpoint amiga-mirror
+move 160 195
+click left 160 195      # last row: Look away: back to the bedroom
+wait 1500               # the bedroom draws
+# Down to the throne room, then four more down: the palace front.
+move 274 186
+click left 274 186      # the pad's down arrow: the throne room
+wait 1200               # the room draws
+click left 274 186      # down: the hall
+wait 1200               # the room draws
+checkpoint amiga-hall
+click left 274 186      # down: the next room
+wait 1200               # the room draws
+click left 274 186      # down: the next room
+wait 1200               # the room draws
+click left 274 186      # down: the palace front
+wait 2000               # the exterior draws with its sky and the orni
+checkpoint amiga-palace-front
+quit

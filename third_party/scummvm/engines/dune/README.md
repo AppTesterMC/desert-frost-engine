@@ -16,6 +16,7 @@ or learn something.
 | Area | State |
 | --- | --- |
 | `DUNE.DAT` archive, loose floppy files, HSQ compression | done (`resource.cpp`) |
+| Amiga release: files, sheets (pictures, planar sprites), `.SAM` rooms, 32+32 colours, copper sky, data segment | converted to the DOS layouts on load (`amiga.cpp`, `amiga_gfx.cpp`); rooms, dialogue, map, globe, book, mirror, flights and the story screens work; intro, music, the desert landscape not ported |
 | Sprite sheets: 4-bit, 8-bit, RLE, scaling, flipping | done (`sprite.cpp`) |
 | HNM (first generation) video with VOC soundtrack | done for the CD codec (`hnm.cpp`) |
 | HERAD AdLib music through ScummVM's OPL emulator | done, version 1 / OPL2 (`music.cpp`) |
@@ -32,6 +33,7 @@ or learn something.
 | Map screen and globe | flat map from MAP/TABLAT with the places' icons, scrolling, picking a destination and flying there; the original's DUNE MAP title popup, map menu (contact range, greyed rows) and planet panel; the globe with the game menu (`map.cpp`) |
 | Saves | the original's four logs in their own format, save and load from the globe menu (`saves.cpp`) |
 | Options | music on/off, restart, exit with confirmation | done |
+| Sega CD / Mega CD release | detected (extracted `DUNE.DAT` or the data-track image); the disc's index, text, tile screens and the initial game data (converted to the PC layout); the original room screens from the room tables; the original panel (book, day, companions, commands, exit pad; place tints); conversations with measured portraits, close-up backdrops and the text box; the map (zoomed terrain, markers, travel); no verbs, videos, sound, flight or battles yet (`segacd_*.cpp`, FINDINGS.md "Sega CD / Mega CD release") |
 | Characters and troops | who stands on which marker as the executable decides; sietch Fremen and chiefs; hiring by talking to the Fremen; troop orders (occupations) | done; hiring and harvest rules are ours (`world.cpp`) |
 | Clock, flight, spice, rallying, results | the executable's rules: clock rate, flight steps, harvest and prospecting formulas, charisma check, results layout (`world.cpp`, `notes/research/gameplay-rules.md`) | done for those; story phases and callbacks, Jessica's contact-range lessons, the Emperor's shipments bargained with Duncan, the COMM room, visions, the first vision in the desert, the scripted scenes, Stilgar's Water of Life, the ecology route (wind traps, bulbs, irrigation, vegetation, fortresses taken, MODIFY EQUIPMENT), the Harkonnen zone, arrival deaths and the final scene run; troop marches, espionage, fort battles (MASSIVE ATTACK, FIGHT FOR A WHOLE DAY), the Harkonnen captain, worm riding and the final attack on the Harkonnen palace run (`troops.cpp`, `battle.cpp`); the smugglers' village and chapter run, their trade, Harkonnen raids and GO & SEARCH FOR EQUIPMENT not yet |
 
@@ -39,7 +41,9 @@ or learn something.
 
 | File | Responsibility |
 | --- | --- |
-| `detection.cpp`, `metaengine.cpp` | ScummVM glue: recognise the CD (`DUNE.DAT`) and floppy (`DUNES.HSQ`) releases |
+| `detection.cpp`, `metaengine.cpp` | ScummVM glue: recognise the CD (`DUNE.DAT`), floppy (`DUNES.HSQ`), Amiga (`dune`, `dunechar.hsq`) and Sega CD (`DUNE.DAT` or the data-track image) releases |
+| `amiga.cpp/.h`, `amiga_ds_table.h` | The Amiga release: file names, sheet/room/picture conversion to the DOS layouts, the executable's hunks and its data segment converted to the CD layout |
+| `amiga_gfx.cpp` | Amiga screen effects: the time-of-day records, the copper's sky gradient in colour 1, the interface colours |
 | `dune.cpp/.h` | `DuneEngine::run()`: data check, graphics, music, intro, event loop |
 | `resource.cpp/.h` | Load a file by name from `DUNE.DAT` or the directory; transparently un-HSQ it |
 | `sprite.cpp/.h` | Palette blocks and sprite decoding/blitting of a sprite sheet |
@@ -66,6 +70,11 @@ or learn something.
 | `sound.cpp/.h` | One-shot VOC sample playback (unused at the moment) |
 | `cursor.cpp/.h` | The original arrow pointer via ScummVM's cursor manager; direct-touch default |
 | `debug.cpp/.h` | Log file, OSD messages, screenshot dumps, developer config keys |
+| `segacd_resources.cpp/.h` | Sega CD storage: `DUNE.DAT` or the track image, the index inside the game program, the PC names that have a counterpart on the disc |
+| `segacd_gfx.cpp/.h` | Sega CD tile screens (CRAM, VDP name tables, 4-bit tiles) composed with the VDP's plane and priority order; sprite banks (portraits, figures) |
+| `segacd_panel.cpp/.h` | The Sega CD panel from files 5 and 30: book, day box, companions, command rows, exit pads, map variant |
+| `segacd_world.cpp` | `World::loadSegaCdData`: the Sega CD program's big-endian, padded data segment rebuilt in the PC CD layout, with its room tables |
+| `segacd_game.cpp/.h` | The Sega CD host: new game, rooms from the room tables drawn as Sega CD screens (320x224), walking, conversations with portraits, the map, the dump tour; `runSegaCd()` |
 
 Data flow for a room: `World` gives the place's `.SAL` file, the room record
 and the sheet its slot names → `Resource` loads them → sky or video backdrop
@@ -104,6 +113,18 @@ before building; see `BUILDING.md` at the repository root.
 # notes/temp/dune_scummvm_engine_20260916/results/sdl-dump/, then exits.
 DUNE_DATA=/path/to/cd-data     ./scripts/test_dune_scummvm_sdl.sh dump   # CD
 DUNE_DATA=/path/to/floppy-data ./scripts/test_dune_scummvm_sdl.sh dump   # floppy
+# Amiga: DUNE_DATA is the folder scripts/dune_amiga_extract.py writes from the
+# three ADFs (no intro: the game opens in the throne room).
+# Sega CD: DUNE_DATA is the folder with the bin/cue rip (or an extracted
+# DUNE.DAT); the dump writes segacd-*.bmp (every palace room, a sietch, a
+# village, a fortress, the Harkonnen palace, the credits' cards).
+DUNE_DATA=/path/to/amiga-data  ./scripts/test_dune_scummvm_sdl.sh dump   # Amiga
+DUNE_DATA=/path/to/segacd-data ./scripts/test_dune_scummvm_sdl.sh dump   # Sega CD
+
+# The Amiga and Sega CD scenarios against their references (a release whose
+# data is missing is skipped).
+DUNE_DATA_AMIGA=/path/to/amiga-data DUNE_DATA_SEGACD=/path/to/segacd-data \
+	./scripts/check_other_releases.sh
 
 # Null-backend build and detection test.
 ./scripts/test_dune_scummvm_native.sh
@@ -210,16 +231,20 @@ already answered in one of them.
   (save games, troops, locations).
 - [Cryogenic](https://github.com/OpenRakis/Cryogenic) (`src/`): the Spice86/C# hybrid, a behavioural reference.
 
-## Planned releases: Amiga and Sega Mega CD
+## Other releases: Amiga and Sega Mega CD
 
-The goal is one engine for every release of the game. Today only the DOS CD
-and DOS floppy releases are detected. What a first look at the other two shows
-(details in FINDINGS.md):
+One engine plays every release: the DOS CD and floppy, the Amiga and the Sega
+CD / Mega CD are all detected by the same build (desktop and iOS). The two
+ports are younger than the DOS game (details in FINDINGS.md, "Sega CD / Mega
+CD release" and "Amiga release"):
 
-| Release | Data we have | First look |
+| Release | Data | State |
 | --- | --- | --- |
-| Amiga (3 disks) | `Dune_Amiga_EN.zip`, `Dune 1 (Cryo + Virgin) A/B/C.adf` | Same `.hsq` resource names as DOS (`icone.hsq`, `leto.hsq`, `balcon.hsq`, ...), so HSQ and the sprite sheets probably carry over. Needs: reading the disks' file system, 32-colour palettes, Amiga music (not HERAD/OPL) |
-| Sega Mega CD | `Dune (USA)/*.bin+cue`, `Dune (U).zip`, `Dune (EU).zip` | ISO 9660 with a single 471 MB `DUNE.DAT` whose start is zeroed: not the PC archive layout, the index must live in the boot program. Needs: finding that index, the video and audio formats (CD-quality speech and redrawn graphics) |
+| Amiga (3 disks) | `Dune 1 (Cryo + Virgin) A/B/C.adf`, extracted by `scripts/dune_amiga_extract.py` | Plays on the shared engine: its files, sheets, rooms, palettes and data segment are converted to the DOS layouts on load (`amiga.cpp`, `amiga_gfx.cpp`). Rooms, dialogue, map, globe, book, mirror, flights and the story screens work. Not ported: the intro (the game opens in the throne room), music and sound, the desert landscape |
+| Sega CD / Mega CD | `Dune (USA)/*.bin+cue` (or an extracted `DUNE.DAT`) | Its own host (`segacd_*.cpp`): the disc's index, text, tile screens and initial game data (rebuilt in the PC layout); the original room screens, panel, conversations with portraits, and the map with travel. Not yet: verbs, videos, sound, flight, battles. The Mega CD (Europe) entry is detected but untested |
+
+The game options (the Leto loop, Celimyn-Tuek) are offered on the DOS
+releases only.
 
 How the code is meant to absorb them:
 

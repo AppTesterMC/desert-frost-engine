@@ -17,7 +17,8 @@
 
 Desert Frost is a new native [ScummVM](https://www.scummvm.org/) engine for
 Cryo Interactive's *Dune*. Its goal is to make the game portable to modern
-systems, including iOS.
+systems, including iOS. One build detects and plays all four releases: the
+DOS floppy and CD, the **Amiga** and the **Sega CD / Mega CD**.
 
 The project works from legally obtained game data. No copyrighted Dune game
 executables, archives, music files, or disc images are redistributed here.
@@ -46,12 +47,16 @@ cp -R ../desert-frost-engine/third_party/scummvm/engines/dune engines/dune
 
 The data directory needs the game's executable next to the data: `DUNE.DAT` +
 `DNCDPRG.EXE` for the CD release, the loose `*.HSQ` files + `DUNEPRG.EXE` for
-the floppy release.
+the floppy release. For the Amiga, extract the three disk images with
+`scripts/dune_amiga_extract.py`; for the Sega CD, point ScummVM at the folder
+with the disc's bin/cue rip. [BUILDING.md](BUILDING.md#game-data) has the
+details.
 
 ## Current state of the engine
 
-This is a development build, not an end-user release yet. The DOS CD and
-floppy releases are detected. The table shows what works; the full status is in
+This is a development build, not an end-user release yet. The DOS floppy and
+CD releases play from the intro to the ending; the Amiga and Sega CD ports are
+younger (see their rows). The table shows what works; the full status is in
 [`engines/dune/README.md`](third_party/scummvm/engines/dune/README.md).
 
 | Area | State |
@@ -70,6 +75,8 @@ floppy releases are detected. The table shows what works; the full status is in
 | Ecology and ending | the ecology route (wind traps, bulbs, irrigation, vegetation spreading on the map, fortresses taken, MODIFY EQUIPMENT), the Harkonnen zone, deaths on arrival, and the final scene |
 | Desert and flight | walking in the desert with its landscape, the ornithopter cockpit and destination screen, steering in free flight, CHANGE DESTINATION, the flight landscape (seeded row by row as the original, checked against its memory) and sightings of companions |
 | War and the ending | troop marches and espionage, fort battles, MASSIVE ATTACK and FIGHT FOR A WHOLE DAY, the Harkonnen captain, worm riding, the smugglers' village, the quarrel between north and south troops (as in the original: mixed troops stop working) and the final attack on the Harkonnen palace |
+| Amiga | plays on the shared engine: its files, sheets, rooms, 32-colour palettes, copper sky and data segment are converted to the DOS layouts on load. Rooms, dialogue, map, globe, book, mirror, flights and the story screens work. Not ported yet: the intro (the game opens in the throne room), music and sound, and the desert landscape (walks and flights show plain sky over sand) |
+| Sega CD / Mega CD | its own host: the disc's index, text, tile screens and initial game data, the original room screens, panel, conversations with portraits, and the map with travel. Not yet: verbs, videos, sound, flight and battles. The Mega CD (Europe) entry is detected but untested |
 | Not yet | full command lists per room |
 
 `scripts/check_speedrun.sh` lets a bot play the known PC speedrun route through
@@ -87,6 +94,11 @@ engine plays as the original does. Turn them on per game in ScummVM's
 **Options > Engine** tab (desktop and iPhone), or in `scummvm.ini` under the
 game's section. ScummVM's command line cannot pass engine-specific settings,
 so there is no command-line switch.
+
+The options are offered for the DOS floppy and CD releases. A game entry added
+to ScummVM by an older build shows the checkboxes only after Dune has been
+started once, because ScummVM refreshes the entry's stored options when the
+game starts.
 
 | Option | `scummvm.ini` key | What it does |
 | --- | --- | --- |
@@ -144,6 +156,27 @@ data; the iOS build draws the same frames.
 
 </div>
 
+### Amiga and Sega CD
+
+<div align="center">
+
+| | |
+| --- | --- |
+| ![Sega CD: a palace room with the Sega CD panel](doc/screen-segacd-panel-walk.png) | ![Sega CD: a sietch outside](doc/screen-segacd-panel-travel.png) |
+| Sega CD: a palace room with its own panel | Sega CD: a sietch outside |
+| ![Sega CD: arriving at a sietch after travel](doc/screen-segacd-map-travel.png) | ![Sega CD: Duke Leto speaking with his portrait](doc/screen-segacd-talk-leto-2.png) |
+| Sega CD: arriving after travel on the map | Sega CD: Duke Leto speaking |
+| ![Amiga: the throne room with Duke Leto](doc/screen-amiga-landing.png) | ![Amiga: the flat map](doc/screen-amiga-map-flat.png) |
+| Amiga: the throne room | Amiga: the flat map |
+| ![Amiga: the book's cover](doc/screen-amiga-book-cover.png) | ![Amiga: a page of the book](doc/screen-amiga-book-page.png) |
+| Amiga: Paul's book | Amiga: a page of the book |
+| ![Amiga: Paul's bedroom](doc/screen-amiga-bedroom.png) | ![Amiga: Paul in the mirror](doc/screen-amiga-mirror.png) |
+| Amiga: Paul's bedroom | Amiga: the mirror |
+| ![Amiga: a palace hall with Jessica](doc/screen-amiga-hall.png) | ![Amiga: the palace front with an ornithopter](doc/screen-amiga-palace-front.png) |
+| Amiga: a palace hall | Amiga: the palace front |
+
+</div>
+
 ## Roadmap
 
 ### Soundtrack preservation
@@ -157,16 +190,13 @@ differences. The repository will not bundle the commercial audio.
 
 ### Other releases
 
-- **Amiga:** add ADF file-system access, the Amiga resource variants, 32-colour
-  rendering, Amiga music, and release-specific detection. The Amiga data is
-  close to the DOS floppy data, so this is the most promising next port.
-- **Sega Mega CD:** identify the boot/index format in the ISO, then add a
-  release-specific resource layer, video handling, CD audio, and detection.
-- **DOS gameplay:** finish the full play-through from a new game and the
-  remaining room commands. The DOS version then serves as the
+- **Amiga:** the intro, the Amiga music and sound, and the desert landscape
+  for walks and flights.
+- **Sega CD / Mega CD:** the verbs, the videos, sound, flight and battles; test
+  the European Mega CD release.
+- **DOS gameplay:** the remaining room commands. The DOS version then serves as the
   reference behaviour for the other ports.
 
-Amiga and Sega Mega CD are research targets, not supported releases yet.
 
 ## Contributing
 
@@ -176,7 +206,7 @@ Contributions are very welcome. Useful help includes:
 - testing CD and floppy data sets on desktop, iOS, and other ScummVM targets;
 - validating palette, sprite, room, HNM, and audio behaviour against original
   hardware or trusted recordings;
-- researching the Amiga and Sega Mega CD formats;
+- completing the Amiga and Sega CD ports (see the roadmap);
 - helping design a legally safe optional soundtrack import; and
 - improving documentation, tests, tooling, and reproducible builds.
 

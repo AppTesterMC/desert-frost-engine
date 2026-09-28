@@ -34,6 +34,7 @@
 
 #include "graphics/paletteman.h"
 
+#include "dune/amiga.h"
 #include "dune/debug.h"
 #include "dune/dialogue.h"
 #include "dune/harness.h"
@@ -206,7 +207,17 @@ void GameScreen::showFinal(uint picture) {
 	Sprite final(_system, data);
 	final.setPalette();
 	_surface.fillRect(Common::Rect(0, 0, 320, 152), 0);
-	if (picture == 1) {
+	if (_world.amiga()) {
+		// The Amiga's FINAL.HSQ: "THE END" (1) over the worm's head (picture
+		// 5), as the recording shows it, then "with (in order of
+		// Appearance)" (0) at (0x40, 0x34) (code 0x250c).
+		if (picture == 1) {
+			final.drawFrame(5, _surface.surfacePtr(), 0, 0);
+			final.drawFrame(1, _surface.surfacePtr(), 0x5a, 0x40);
+		} else {
+			final.drawFrame(0, _surface.surfacePtr(), 0x40, 0x34);
+		}
+	} else if (picture == 1) {
 		for (uint16 f = 0; f < 3; ++f)
 			final.drawFrame(f, _surface.surfacePtr(), 0, 0);
 	} else {
@@ -412,10 +423,19 @@ void GameScreen::drawDesert() {
 	// ORNITHOPTER stands for its hotspot.
 	_surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
 	_panel.applyPalette();
-	Graphics::Surface view = _surface.surfacePtr()->getSubArea(Common::Rect(0, 0, 320, 152));
-	drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
-	_surface.fillRect(Common::Rect(0, 77, 320, 152), 0xbf); // floppy 3AF8: the sand from y 77
-	drawLandscape(view, _walkLng, _walkLat, 0, _walkLng, false);
+	if (_world.amiga()) {
+		// The executable draws DUNES3 pieces here (code 0x5094, not ported):
+		// the sky gradient over the time of day's sand colour.
+		_surface.fillRect(Common::Rect(0, 0, 320, 78), 1);
+		_surface.fillRect(Common::Rect(0, 78, 320, 152), 2);
+		amigaSkyPalette(_system, _resources, _state.w(GameState::kGameTime), true);
+		amigaSkyGradient(*_surface.surfacePtr());
+	} else {
+		Graphics::Surface view = _surface.surfacePtr()->getSubArea(Common::Rect(0, 0, 320, 152));
+		drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
+		_surface.fillRect(Common::Rect(0, 77, 320, 152), 0xbf); // floppy 3AF8: the sand from y 77
+		drawLandscape(view, _walkLng, _walkLat, 0, _walkLng, false);
+	}
 	const byte black[3] = { 0, 0, 0 };
 	_system->getPaletteManager()->setPalette(black, 0, 1);
 	_viewOk = true;

@@ -30,6 +30,8 @@
 
 namespace Dune {
 
+class SegaCdArchive;
+
 /**
  * Reader for the two resource layouts used by the original DOS release.
  *
@@ -39,15 +41,29 @@ namespace Dune {
  */
 class Resource {
 public:
-	explicit Resource(bool useArchive) : _useArchive(useArchive) {}
+	explicit Resource(bool useArchive, bool amiga = false) : _useArchive(useArchive), _amiga(amiga), _segaCd(nullptr) {}
+
+	/**
+	 * Sega CD: serve the PC names that have a counterpart on the disc
+	 * (SegaCdArchive::loadNamed) instead of reading DOS files.
+	 */
+	void setSegaCd(const SegaCdArchive *archive) { _segaCd = archive; }
+	bool segaCd() const { return _segaCd != nullptr; }
 
 	bool load(const Common::String &name, Common::Array<byte> &data) const;
 
 	/** Decode an HSQ bit stream (without its six-byte header). */
 	static bool unpackHSQ(const byte *packed, uint32 packedSize, byte *unpacked, uint32 unpackedSize);
 
+	bool amiga() const { return _amiga; }
+
 private:
+	/** The Amiga release: its own file names, converted to the DOS layouts (amiga.cpp). */
+	bool loadAmiga(const Common::String &name, Common::Array<byte> &data) const;
+
 	bool _useArchive;
+	bool _amiga;
+	const SegaCdArchive *_segaCd;
 };
 
 } // namespace Dune

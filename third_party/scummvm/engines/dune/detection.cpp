@@ -59,6 +59,54 @@ static const ADGameDescription gameDescriptions[] = {
 		GUIO2(GAMEOPTION_FIX_LETO_LOOP, GAMEOPTION_FIX_CELIMYN_TUEK)
 	},
 
+	// Sega CD / Mega CD version (USA T-70065, 1994-08-30): the data track's
+	// DUNE.DAT, extracted with scripts/segacd_iso.py, or the data track image
+	// itself (Redump naming), in which case the engine finds DUNE.DAT in the
+	// image's ISO 9660 directory. SegaCdArchive tells the revisions apart.
+	{
+		"dune",
+		"Sega CD",
+		AD_ENTRY1s("DUNE.DAT", "6a8557bc59665fdda7fdcdf5245a83d9", 471040000),
+		Common::EN_ANY,
+		Common::kPlatformSegaCD,
+		ADGF_CD,
+		GUIO0()
+	},
+	{
+		"dune",
+		"Sega CD",
+		AD_ENTRY1s("Dune (USA) (Track 1).bin", nullptr, 541369248),
+		Common::EN_ANY,
+		Common::kPlatformSegaCD,
+		ADGF_CD,
+		GUIO0()
+	},
+	// Mega CD, Europe (1994-04; English and French, chosen on a flag screen).
+	{
+		"dune",
+		"Mega CD",
+		AD_ENTRY1s("DUNE.DAT", "d83f9f5e50aa89163813fde8b492f572", 471040000),
+		Common::EN_ANY,
+		Common::kPlatformSegaCD,
+		ADGF_CD | ADGF_UNSTABLE,
+		GUIO0()
+	},
+
+	// English Amiga version (three disks, 1992). The files as the original
+	// installer (disk_to_hd) or scripts/dune_amiga_extract.py write them;
+	// the executable is the same in the original and the cracked images up
+	// to its protection check, which lies past the first 5000 bytes.
+	{
+		"dune",
+		"",
+		AD_ENTRY2s("dune", "d858bc26d299fcb715f54ae78f8f1bb9", 137264,
+				"dunechar.hsq", "11c0dd6a0f83d7b01781f0f091c38f02", 1058),
+		Common::EN_ANY,
+		Common::kPlatformAmiga,
+		ADGF_NO_FLAGS,
+		GUIO0()
+	},
+
 	AD_TABLE_END_MARKER
 };
 

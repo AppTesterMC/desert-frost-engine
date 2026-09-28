@@ -33,6 +33,7 @@
 #include "engines/advancedDetector.h"
 #include "engines/util.h"
 
+#include "dune/amiga.h"
 #include "dune/cursor.h"
 #include "dune/debug.h"
 #include "dune/dune.h"
@@ -42,6 +43,7 @@
 #include "dune/palace.h"
 #include "dune/resource.h"
 #include "dune/scene.h"
+#include "dune/segacd_game.h"
 
 namespace Dune {
 
@@ -71,13 +73,20 @@ Common::Error DuneEngine::run() {
 	struct HarnessLogGuard {
 		~HarnessLogGuard() { setDuneHarnessLog(nullptr); }
 	} harnessLogGuard;
+	if (_gameDescription->platform == Common::kPlatformSegaCD) {
+		// The Sega CD release has its own storage and screens (segacd_*.cpp).
+		log.line("Dune startup: version=Sega CD");
+		return runSegaCd(_system, log);
+	}
 	const bool isCD = (_gameDescription->flags & ADGF_CD) != 0;
-	log.line(Common::String::format("Dune startup: version=%s", isCD ? "CD" : "floppy"));
+	const bool isAmiga = _gameDescription->platform == Common::kPlatformAmiga;
+	setAmigaRelease(isAmiga);
+	log.line(Common::String::format("Dune startup: version=%s", isCD ? "CD" : isAmiga ? "Amiga" : "floppy"));
 
 	// The CD release keeps its files in DUNE.DAT; the floppy release has them
 	// loose. The choice is explicit so that a shared search path can never
 	// make the floppy target read the CD archive.
-	Resource resources(isCD);
+	Resource resources(isCD, isAmiga);
 
 	// Fail early, with a clear message, when the data is not where we look.
 	const char *probeName = isCD ? "INTDS.HSQ" : "DUNES.HSQ";
@@ -113,7 +122,11 @@ Common::Error DuneEngine::run() {
 
 	startSong(music, resources, log, "WORMINTR.HSQ", musicEnabled);
 	bool keepRunning;
-	if (isCD) {
+	if (isAmiga) {
+		// The Amiga intro is not ported yet: the game starts in the throne room.
+		log.line("Intro: Amiga intro not ported, starting the game");
+		keepRunning = true;
+	} else if (isCD) {
 		keepRunning = playCdIntro(_system, resources, log);
 	} else {
 		// The floppy sequence owns its own music changes (WORMINTR for the

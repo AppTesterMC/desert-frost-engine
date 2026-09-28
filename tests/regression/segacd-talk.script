@@ -1,0 +1,19 @@
+# Sega CD conversation (segacd_game.cpp, talk mode): in the throne room the
+# second command row is DUKE LETO ATREIDES; tapping it shows Leto's portrait
+# (bank 1782, measured placement) over the room's close-up backdrop with his
+# first line in the orange box; a tap in the view shows the next line;
+# STOP TALKING (second row) returns to the throne room.
+wait 1500
+move 120 188
+click left 120 188
+wait 1000
+checkpoint segacd-talk-leto-1
+move 160 80
+click left 160 80
+wait 1000
+checkpoint segacd-talk-leto-2
+move 120 188
+click left 120 188
+wait 1000
+checkpoint segacd-talk-back
+quit

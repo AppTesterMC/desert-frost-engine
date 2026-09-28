@@ -1,0 +1,129 @@
+{
+  "phash_tolerance": 6,
+  "scenarios": [
+    {
+      "name": "segacd-panel",
+      "data_env": "DUNE_DATA_SEGACD",
+      "data_default": "/private/tmp/dune-data/segacd",
+      "script": "tests/regression/segacd-panel.script",
+      "timeout_seconds": 120,
+      "checkpoints": [
+        {
+          "name": "segacd-panel-throne",
+          "category": "room-rendering"
+        },
+        {
+          "name": "segacd-panel-walk",
+          "category": "room-rendering"
+        },
+        {
+          "name": "segacd-panel-travel",
+          "category": "room-rendering"
+        }
+      ],
+      "optional": true
+    },
+    {
+      "name": "segacd-talk",
+      "data_env": "DUNE_DATA_SEGACD",
+      "data_default": "/private/tmp/dune-data/segacd",
+      "script": "tests/regression/segacd-talk.script",
+      "timeout_seconds": 120,
+      "checkpoints": [
+        {
+          "name": "segacd-talk-leto-1",
+          "category": "dialogue"
+        },
+        {
+          "name": "segacd-talk-leto-2",
+          "category": "dialogue"
+        },
+        {
+          "name": "segacd-talk-back",
+          "category": "room-rendering"
+        }
+      ],
+      "optional": true
+    },
+    {
+      "name": "segacd-map",
+      "data_env": "DUNE_DATA_SEGACD",
+      "data_default": "/private/tmp/dune-data/segacd",
+      "script": "tests/regression/segacd-map.script",
+      "timeout_seconds": 120,
+      "checkpoints": [
+        {
+          "name": "segacd-map-open",
+          "category": "map"
+        },
+        {
+          "name": "segacd-map-scrolled",
+          "category": "map"
+        },
+        {
+          "name": "segacd-map-travel",
+          "category": "map"
+        }
+      ],
+      "optional": true
+    },
+    {
+      "name": "amiga",
+      "data_env": "DUNE_DATA_AMIGA",
+      "data_default": "/private/tmp/dune-data/amiga",
+      "script": "tests/regression/amiga.script",
+      "timeout_seconds": 180,
+      "checkpoints": [
+        {
+          "name": "amiga-landing",
+          "category": "room-rendering"
+        },
+        {
+          "name": "amiga-leto-1",
+          "category": "dialogue"
+        },
+        {
+          "name": "amiga-leto-2",
+          "category": "dialogue"
+        },
+        {
+          "name": "amiga-globe",
+          "category": "map"
+        },
+        {
+          "name": "amiga-menu-save",
+          "category": "menu"
+        },
+        {
+          "name": "amiga-map-flat",
+          "category": "map"
+        },
+        {
+          "name": "amiga-book-cover",
+          "category": "book"
+        },
+        {
+          "name": "amiga-book-page",
+          "category": "book"
+        },
+        {
+          "name": "amiga-bedroom",
+          "category": "room-rendering"
+        },
+        {
+          "name": "amiga-mirror",
+          "category": "menu"
+        },
+        {
+          "name": "amiga-hall",
+          "category": "room-rendering"
+        },
+        {
+          "name": "amiga-palace-front",
+          "category": "room-rendering"
+        }
+      ],
+      "optional": true
+    }
+  ]
+}

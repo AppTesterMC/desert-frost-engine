@@ -33,6 +33,7 @@
 #include "common/system.h"
 #include "graphics/paletteman.h"
 
+#include "dune/amiga.h"
 #include "dune/debug.h"
 #include "dune/harness.h"
 #include "dune/resource.h"
@@ -356,9 +357,13 @@ void GameScreen::drawWalkView() {
 	_panel.applyPalette();
 	Graphics::Surface view = _surface.surfacePtr()->getSubArea(Common::Rect(0, 0, 320, 152));
 	const bool tall = _walkLng == 0x2001 || _walkLng == 0x3001; // the original's quirk (3.1)
-	drawSky(_system, _resources, view, tall ? kSkyLarge : kSkyNarrow, 320, skyPalette(), true);
-	_surface.fillRect(Common::Rect(0, kHorizon, 320, 152), kGroundColour);
-	drawLandscape(view, _walkLng, _walkLat, _walkFine, _walkLng, false);
+	if (_world.amiga()) {
+		amigaDesertView(_system, _resources, view, _state.w(GameState::kGameTime));
+	} else {
+		drawSky(_system, _resources, view, tall ? kSkyLarge : kSkyNarrow, 320, skyPalette(), true);
+		_surface.fillRect(Common::Rect(0, kHorizon, 320, 152), kGroundColour);
+		drawLandscape(view, _walkLng, _walkLat, _walkFine, _walkLng, false);
+	}
 	const byte black[3] = { 0, 0, 0 };
 	_system->getPaletteManager()->setPalette(black, 0, 1);
 	_viewOk = true;

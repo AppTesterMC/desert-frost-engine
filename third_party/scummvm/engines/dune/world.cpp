@@ -31,6 +31,7 @@
  * position bytes 4-11.
  */
 
+#include "dune/amiga.h"
 #include "dune/world.h"
 
 #include "common/endian.h"
@@ -174,7 +175,38 @@ bool World::readExecutable(const char *name, Common::Array<byte> &image) const {
 	return true;
 }
 
+bool World::loadAmigaInitialData() {
+	Common::File file;
+	if (!file.open(Common::Path("dune"))) {
+		_log.line("World: the Amiga executable \"dune\" was not found; starting from an empty state");
+		return findTables();
+	}
+	Common::Array<byte> raw(file.size());
+	if (file.read(raw.data(), raw.size()) != raw.size())
+		return false;
+	Common::Array<byte> code;
+	Common::Array<uint32> relocations;
+	int delta = 0;
+	if (!loadAmigaHunks(raw, code, relocations) ||
+			!amigaInitialDataSegment(code, relocations, _state.vars, GameState::kSize, delta)) {
+		_log.line("World: the Amiga executable has no data segment we recognise");
+		return findTables();
+	}
+	_amiga = true;
+	_floppy = false; // CD layout (amiga.cpp converts to it)
+	_code = code;
+	_scriptBase = 0;
+	_scriptDelta = delta;
+	_log.line(Common::String::format("World: initial data from the Amiga executable (%u relocations, scripts at delta %d)",
+			relocations.size(), delta));
+	return findTables();
+}
+
 bool World::loadInitialData() {
+	if (_resources.amiga())
+		return loadAmigaInitialData();
+	if (_segaCdProgram)
+		return loadSegaCdData();
 	static const char *const executables[] = { "DUNEPRG.EXE", "DNCDPRG.EXE" };
 	Common::Array<byte> image;
 	uint found = 0;
@@ -262,6 +294,15 @@ bool World::findTables() {
 	_tablesFound = false;
 	_palaceTable = _pointerTable = 0;
 	_shift = 0;
+	if (_segaCdProgram) {
+		// loadSegaCdData() rebuilt the CD layout: palace table and pointers
+		// at the CD's offsets (its room codes are screen numbers, see there).
+		_palaceTable = 0x1225;
+		_pointerTable = 0x13c4;
+		_state.nameTable = (uint16)GameState::kNameTable;
+		_tablesFound = true;
+		return true;
+	}
 	for (uint p = 0x1000; p + sizeof(kPalaceTableHead) <= GameState::kSize; ++p) {
 		if (memcmp(_state.vars + p, kPalaceTableHead, sizeof(kPalaceTableHead)) == 0) {
 			_palaceTable = p;
@@ -435,6 +476,17 @@ Common::String World::sheetFor(const RoomRecord &room) const {
 		"POR.HSQ", "PROUGE.HSQ", "COMM.HSQ", "EQUI.HSQ", "BALCON.HSQ", "CORR.HSQ", "SIET0.HSQ", "SIET1.HSQ",
 		"VILG.HSQ", "FORT.HSQ", "BUNK.HSQ", "FINAL.HSQ", "SERRE.HSQ", "BOTA.HSQ", "PALPLAN.HSQ", "SUN.HSQ"
 	};
+	if (_amiga) {
+		// A village's picture follows its region (code 0x5328: the table
+		// at 0x52f4 by the place's first name).
+		if (room.sheetSlot() == 15) {
+			static const byte kVillageRoom[12] = { 0xf1, 0xf1, 0xf2, 0xf2, 0xf3, 0xf4, 0xf4, 0xf4, 0xf5, 0xf5, 0xf6, 0xf6 };
+			const byte region = location(currentLocation()).firstName;
+			if (region >= 1 && region <= 12)
+				return amigaRoomSheet(kVillageRoom[region - 1]);
+		}
+		return amigaRoomSheet(room.code);
+	}
 	const char *name = (_floppy ? kFloppySheets : kCdSheets)[room.sheetSlot()];
 	return name ? name : "";
 }
@@ -683,7 +735,9 @@ void World::phaseCallback(byte phase, uint16 &cutscene, uint16 &vision) {
 		WRITE_LE_UINT16(character(Thufir) + 2, 0x0180);
 		character(Jessica)[0] = 0x0a;
 		WRITE_LE_UINT16(character(Jessica) + 2, 0x0180);
-		WRITE_LE_UINT16(&var(0x1201), 0x0109);
+		// "Muad'Dib" (COMMAND id + 1): CD 0x108; the Amiga numbers its
+		// commands as the DOS floppy does, 0xfc.
+		WRITE_LE_UINT16(&var(0x1201), _amiga ? 0x00fd : 0x0109);
 		addCharisma(0x14);
 		var(0x0a) |= 0x10;
 		reveal({ 45, 44, 46, 48, 49 });

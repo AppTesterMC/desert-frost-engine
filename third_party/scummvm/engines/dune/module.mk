@@ -1,6 +1,8 @@
 MODULE := engines/dune
 
 MODULE_OBJS := \
+	amiga.o \
+	amiga_gfx.o \
 	attack.o \
 	book.o \
 	cursor.o \
@@ -23,6 +25,11 @@ MODULE_OBJS := \
 	resource.o \
 	room.o \
 	saves.o \
+	segacd_game.o \
+	segacd_gfx.o \
+	segacd_panel.o \
+	segacd_resources.o \
+	segacd_world.o \
 	scene.o \
 	sky.o \
 	sprite.o \

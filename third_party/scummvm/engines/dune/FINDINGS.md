@@ -784,6 +784,7 @@ The Dune wiki says tribes from both hemispheres in one sietch "quarrel and refus
   - dialogue lines show their first words.
 
   `scripts/dune_script_trace.py SCRIPT [--saves DIR] [--prelude MS] [--data cd] [--config k=v]` runs a script and prints the log grouped by script line.
+- **Check scripts' data paths.** A new `scripts/check_*.sh` takes its game data from `"${DUNE_DATA_FLOPPY:-$repo_root/data/floppy}"` and `"${DUNE_DATA_CD:-$repo_root/data}"`, as `check_flight_landscape.sh` does, so a clean checkout can point them elsewhere.
 - **`periods N`** passes N game periods. The harness's clock is stopped, so a march or prospection needs it.
 - **`dune_real_time`** keeps a harness run at the original's speed (`isDuneFastHarness`): intros, flights and the clock. The fidelity report's CD flight scenarios use it.
 - **The CD intro's ESC.** ESC ends the whole intro, the story after TITLE included, as in the original: ESC at 8.0 s, the throne room at 8.2 s (Spice86, `captures/cd-flight`). A click or Return skips only the current video.
@@ -899,20 +900,357 @@ the game-logic work:
   game state) was worked out that way. This makes the Amiga a realistic port
   target and its code a good aid for the DOS logic.
 
-## Other releases (first look only)
+## Other releases
 
-**Amiga** — guessed from strings on `Dune 1 (Cryo + Virgin) A.adf`: the disk
-names the same resources as DOS in lower case (`dm1.hsq`, `icone.hsq`,
-`leto.hsq`, `balcon.hsq`, `dunes2.hsq`, ...) and mentions the build commands
-(`genam2 dune.s`). Nothing has been decoded yet. The zip holds three-disk sets,
-several of them cracked; prefer the uncracked `.adf`/`.scp` images.
+**Amiga** — decoded; see "Amiga release" below.
 
-**Sega Mega CD** — verified only this far: track 1 is ISO 9660 (volume
-`SEGA_SAMPLE`) with `ABS.TXT`, `BIB.TXT`, `CPY.TXT` and one `DUNE.DAT` of
-471,040,000 bytes. Its first sectors are zero, so it is not the PC archive
-(entry count + 25-byte entries). The index is presumably in the boot program
-(the disc's system area), which has not been examined. Track 2 is a short audio
-track.
+**Sega Mega CD** — supported as a separate release: see the next section.
+
+**One build for all four (2026-09-28).** The Amiga and Sega CD work (done on
+a branch on 2026-09-25) is merged into the current engine: the same desktop
+and iOS build detects the DOS floppy, the DOS CD, the Amiga and the Sega CD.
+Only the platform hooks were carried over; the game logic is the current
+one. Since the branch, the shared code gained screens the Amiga had never
+seen: the desert walk, the cockpit and the cabin now draw the Amiga's sky
+gradient over its sand (`amigaDesertView`, DUNES3 is not ported), and the
+globe's ownership colours (SEE RESULTS) are DOS palette ramps, so the Amiga
+globe keeps its ONMAP terrain colours there. The flat map's latitude fix
+(terrain 18 rows north of the places) applies to the Amiga and the Sega CD
+too, and a click on Paul's head is inert on every release (the globe opens
+from the box's edge under it). `scripts/check_other_releases.sh` runs the
+Amiga and Sega CD scenarios (`tests/regression/other-releases.json`) and
+skips a release whose data is missing.
+
+## Sega CD / Mega CD release
+
+*Dune* on the Sega CD (Cryo / Virgin, USA T-70065 built 1994-08-30, Europe
+1994-04). No public reverse engineering of this release was found (OpenRakis,
+the dune2k forum, Sega Retro and romhacking.net searched on 2026-09-25), so
+everything here was worked out from the disc. The research tools are in
+`Cryogenic/scripts/`: `segacd_iso.py` (disc reader and extractor),
+`m68k_dis.py` (capstone 68000 disassembler), `segacd_img.py` (tile screens),
+`segacd_sprites.py` (sprite banks), `segacd_ds_align.py` and
+`segacd_ds_convert.py` (the data-segment conversion). Sub-CPU addresses below
+are in the game program (file 0, loaded at 0x7000).
+
+### Disc and storage
+
+**Tracks** — verified. Track 1 is MODE1/2352 data (541,369,248 bytes in the
+Redump rip); track 2 is a 6-second audio track. All game data, speech
+included, is on track 1: the game does not stream CD audio for music or
+speech.
+
+**ISO 9660** — verified. Four files: `ABS.TXT`, `BIB.TXT`, `CPY.TXT`
+(Sega's sample-disc placeholders) and `DUNE.DAT`, 471,040,000 bytes (230,000
+sectors) from disc sector 21.
+
+**Boot area** — verified. Sector 0: `SEGADISCSYSTEM`, the IP at 0x200 (0x600
+bytes) and the SP at 0x800 (0x2800 bytes, `MAIN DUNESP`, loaded at sub-CPU
+0x6000). The SP's init (0x6cd0) writes index entry 0 = (sector 0, 0x1ec44
+bytes), loads file 0 to 0x7000 (PRG-RAM) and file 1 to 0xc0000 (word RAM),
+and jumps to 0xa69e.
+
+**Index** — verified. `DUNE.DAT` has no header and no names. The index is
+part of file 0: 0x202d2-0x25444 (file offset 0x192d2), 3,475 entries of six
+bytes, big-endian, a 24-bit sector relative to `DUNE.DAT` and a 24-bit byte
+size. The SP's reader (0x6032) multiplies the file number by 6 and adds 0x15,
+the sector where `DUNE.DAT` starts. Files start on sector boundaries, back to
+back without gaps.
+
+**The European disc** — verified for storage only. Same size and file count,
+but another program: file 0 is 0x1ecc6 bytes, the index at 0x20354-0x254c6,
+and file 0 differs from offset 0xdf0 on. The engine reads the layout from the
+SP's code when it has the track image (`clr.w (a0)+` / `move.l #size0,(a0)`;
+`lea index.l,a0` followed by the multiply by 6; `move.l #end,$c(a6)`) and
+otherwise tries the known revisions, keeping the one whose index tiles
+`DUNE.DAT`. Everything else below was checked on the USA disc only.
+
+**No compression** — verified. No file has an HSQ header; the text, map and
+table files are byte-identical to the PC's unpacked ones.
+
+### What the files are
+
+"Verified" rows were decoded; the others are guesses from headers and sizes.
+
+| Files | What | Confidence |
+| --- | --- | --- |
+| 0 | the game program (sub CPU): code, the PC-style data segment at 0x90c8, the index | verified |
+| 1 | the main-CPU program (17 KB): copies itself to 0xff0000; a VDP and input driver | verified (loader), guessed (role) |
+| 2 | `TABLAT.BIN` | verified (identical) |
+| 3, 1857 | `MAP.HSQ`, `MAP2.HSQ` (unpacked) | verified (identical) |
+| 7 | `CONDIT.HSQ` with one condition added | verified |
+| 8 | `DIALOGUE.HSQ`, 291 bytes changed near its end | verified |
+| 9, 10 | `DNCHAR.BIN`, `DNCHAR2.BIN` (the font) | verified (identical) |
+| 12-17 | `COMMAND1`-`6`: English, French, German, English, Italian, Spanish | verified |
+| 18-29 | `PHRASE11`-`62`, same languages, two parts each | verified |
+| 1859 | `GLOBDATA.HSQ` | verified (identical) |
+| 11, 43 | language screens (three planes: the choice, then each flag alone) | verified |
+| 30 | a dialogue frame (text box and portrait frame) | verified |
+| 38, 44-61, 1613-1615, 1627-1677 | desert views, the planet, intro backdrops | verified (drawn) |
+| 1678-1743 | room screens (see Rooms) | verified |
+| 1744-1809 | their second layers (room screen + 66) | verified |
+| 1728 | the title logo, revealed over 27 planes | verified (drawn) |
+| 1853 | blue text-box frames and a sand pattern | verified (drawn) |
+| 1854 | the Atreides / Harkonnen balance panels | verified (drawn) |
+| 1910 | the ending: Jessica and Paul; "THE END" | verified (drawn) |
+| 1911-1925 | the end credits' cards | verified (drawn) |
+| 1782-1850 | talking portraits: Leto, Paul, Jessica, Stilgar, Kynes, Chani, Harah, the Harkonnens, Fremen chiefs and troops | verified (frames drawn) |
+| 1716-1718 | full-body figures that stand in rooms, at several depth scales | verified (frames drawn) |
+| 1616 | the ornithopter and its dust | verified (frames drawn) |
+| 1620, 1719, 1724, 1738, 1743, 1852, 1855 | small sprite sets: map icons, buttons, labels | verified (parsed) |
+| 1860-1908, 1928 | bitmap sets of 60 x 60 pictures (see Bitmap sets); 1928 holds the map dialogue's portraits (Harkonnen captain, Stilgar, Feyd-Rautha, the Baron, the Emperor); the others probably the globe's frames | verified (1928 drawn), guessed (globe) |
+| 1735, 1856, 1858 | bitmap sets: 1858 the map screen's items (ornithopter, troop icons, the 168 x 104 viewport frame, the gauntlet pointer, worm frames) | verified (drawn) |
+| 1929 | a byte-coded script (0xf7 opcodes), loaded into RAM with the data files | guessed |
+| 62-70 | 30 frames of 39 tiles each, an animation (five files identical) | guessed |
+| 39 and 3,077 others | `Megative Voice File` headers: speech and sound samples | guessed |
+| 31-37, 40-42, 71, 72, 1607-1612, 1926, 1927, 3465-3474 | large streams (0.2 to 12 MB), most starting with CRAM words: video | guessed |
+
+The program loads files through a few routines, which sorts them by kind:
+0x1c66e takes full screens (30, 38, 44, 47, 1615, 1647, 1677, 1687, 1728,
+1734, 1737, 1742, 1853, 1854, 1910, 1911, 1925); 0x1f27a the big streams (31,
+33, 37, 41, 42, 1608, 1927); 0x1dcd0 sounds; 0x1c3ba sprite sets; 0x6806 reads
+data files into RAM (2-8, 1859, 1929).
+
+### Tile screens
+
+**Format** — verified on all 175 files that have it (`segacd_gfx.cpp`).
+Big-endian:
+
+| Offset | Content |
+| --- | --- |
+| +0 | word: offset T of the tile block |
+| +2 | 64 words: CRAM, four lines of 16 colours, `0000 BBB0 GGG0 RRR0` |
+| +0x82 | word L: length of the plane list that starts here (2, 4, 6 for 1, 2, 3 planes; 54 in the title logo) |
+| +0x84 | (when L is above 2) each further plane's offset from 0x82 |
+| plane | byte width, byte height (in tiles), then width x height VDP name-table words |
+| +T | word: tile count, then 32 bytes per 8 x 8 tile, 4 bits per pixel, high nibble first |
+
+Name-table words are the VDP's: priority 0x8000, palette line 0x6000,
+vertical flip 0x1000, horizontal flip 0x0800, tile 0x07ff. Colour 0 of each
+line is transparent; the backdrop is colour 0 of line 0. Rooms are 40 x 21
+tiles (320 x 168), full screens 40 x 25. The file size always equals
+T + 2 + 32 x count, the check the engine uses.
+
+**Colours** — measured. The engine scales the 3-bit levels linearly
+(level x 255 / 7). The VDP's real output is not linear; if pictures look dark
+on the device, this is the place to change.
+
+### Rooms
+
+**Room tables** — verified. The Sega CD keeps the PC's room tables: per place
+type, 5-byte records of a room code and four exits, with the same exit
+numbers, the same 252-254 "leave" values and the same bit 7 for doors the
+story opens. The pointer table (0x8394, 0x34 entries of 32-bit addresses) and
+the tables (0x8230-0x8393) sit in the program's constants, except the
+palace's, which is in the data segment as on the PC.
+
+**The room code is a screen number** — verified. The interior routine
+(0x10204) draws screen 1678 + code (`addi.w #$68e`) and places characters from
+a marker table at 0x39b08. Screens from 1678 on get a second layer 66 files
+later (0x1016c, `addi.w #$42`); earlier ones get 1614. Palace codes 0x00-0x0c
+are screens 1678-1690 (the throne room is code 0), the sietch rock 0x0d is
+1691 and the caves 0x0e-0x19 are 1692-1703; villages use 0x1b-0x20,
+fortresses 0x21-0x23, the Harkonnen palace 0x24 and 0x25 (the Emperor's
+court, with the Baron, Feyd-Rautha and the Emperor drawn into the picture).
+
+**Exteriors** — verified from the code, not implemented. The routine at
+0xfd9c picks the outdoor screen: a sietch's own view 1627 + n (n from the
+location), and for the open desert 1632 + hash mod 19, or 1667 + hash mod 10
+once the place is green, with hash = ((ds:6 << 8) xor ds:4) + 1.
+
+### Sprite banks
+
+**Format** — verified for the frame layout (`segacd_sprites.py`); the
+portraits' second tile block is not decoded.
+
+| Offset | Content |
+| --- | --- |
+| +0 | word: offset T of the tile block |
+| +2 | word: offset F of the frame table |
+| +4 | (banks with a palette) word 1, two unknown words, 15 CRAM colours (colour 0 transparent), 0xffff |
+| F | words: frame offsets relative to F (the first gives the count) |
+| frame | one word: the frame's size, (width - 1) << 8 or (height - 1), measured on the pieces; then 4-byte pieces: x in pixels; y in tiles in the high nibble and the VDP sprite size, (width - 1) << 2 or (height - 1), in the low one; the VDP attribute word |
+| +T | word: tile count, then the tiles; a piece's tiles are column-major, as the VDP's sprites |
+
+Palette-less banks (1719, 1724, 1738, 1743, 1852) parse to their exact size.
+The portrait banks have about 7 KB after the counted tiles: more tiles
+(the eye and mouth frames of the talking animation, loaded per frame).
+Frames carry no position, so where the head, eyes and mouth sit on the body
+comes from elsewhere (the program's tables, not found yet).
+
+### Bitmap sets
+
+**Format** — verified on 1928 (`segacd_bitmaps.py`). Word 0 is the offset
+(2) of a table of words; the first entry also gives the table's length.
+Each entry, relative to the table, points to a bitmap: word width, word
+height, then the pixels, 4 bits each, high nibble first, in columns one byte
+(two pixels) wide: byte (x / 2) x height + y. That is the Sega CD's word-RAM
+"dot image" order, drawn by the graphics ASIC, not the VDP. No palette is
+stored with them.
+
+### Panel
+
+**Verified** (found from the code at sub-CPU 0xab56, which loads file 5 to
+0x3a844 and then draws file 30; compared with the longplay's frames):
+
+- file 30, a tile screen of 29 x 7 cells, is the panel's right part: the
+  command box and the direction pad's frame, drawn from x = 88 on the lower
+  56 lines;
+- file 5 is a set of tile blocks: word 0 = 2, a table of word offsets
+  relative to the table, and per block a byte width, a byte height (tiles)
+  and the tiles, **column-major**. Block 0 is the left part (the book, the day
+  box, two companion slots; 88 x 56); 1 the map's left part (a globe between
+  two figures); 3-5 the open "STORY" book; 7-15 the companions' 16 x 16
+  faces; 16, 17 the sun and the moon; 19-34 the direction pad for every exit
+  mask (19 + mask: bit 0 up, 1 right, 2 down, 3 left; open exits lavender,
+  closed ones blue) with a red centre; 35-47 an incomplete set without it;
+  36 and 48 the map's pad; 49 the flight's.
+- Geometry (measured on the tiles): pad at (256, 184), 40 x 32; command box
+  (96, 176)-(231, 215), five rows of 8 lines; day box (8, 200), 24 x 16;
+  face slots (40, 200) and (64, 200).
+- Colours: the panel uses VDP palette line 0 and every room screen's CRAM
+  line 0 is its place's tint (bronze palace, violet desert); pads and faces
+  use line 1 (file 30's). The map's blue tint is taken from file 1853's
+  line 0 (a guess that matches the recording).
+- The command text is the PC font's small set (`DNCHAR.BIN`, identical on the
+  disc): the recording's rows are 8 lines apart in that font. File 1738 is
+  a second font (91 glyphs, ASCII 32-122 with e-acute, a-acute, c-cedilla,
+  e-grave in the slots of `[ \ ] ^`), 8 x 16 with a vertical gradient; where
+  the game uses it is not known yet.
+- Which pad has the red centre is guessed: a room with a way out of the
+  place (a 252-254 exit); the recording's palace room without one shows
+  pad 39. Faces 7-15 are taken as characters 0-8 in DIALOGUE order, also a
+  guess from the pictures.
+
+### Dialogue
+
+**Measured** from the longplay (`notes/segacd-gameplay/longplay/`): the
+character's portrait fills the left of the view over a close-up backdrop
+(the room screen + 66 files, which are exactly these close-ups); the line
+is in a box at (160, 16)-(311, 127), black text, justified, on a colour that
+depends on the place (palace orange, sietch beige, village blue, fortress
+pale, remote messages magenta); the command box shows `>>>> TALK <<<<` over
+the verbs (" COME WITH ME ", " WHAT ? ", STOP TALKING). The conversations
+themselves are the PC's (DIALOGUE, CONDIT, PHRASE from the disc, driven by
+the engine's `Conversation`).
+
+**Portrait banks** — identified by masked template matching of every
+bank's frames against the longplay's close-ups
+(`scripts/segacd_portrait_match.py`, OpenCV): 1782 Leto, 1783 Jessica, 1784
+Thufir, 1786 Gurney, 1789 Chani, 1791 the Baron, 1793 the Emperor, 1794 the
+Harkonnen captain, 1795-1800 smugglers, 1806 Stilgar, 1833-1849 Fremen
+chiefs' bodies. 1801-1815 are heads (Fremen, chiefs) whose palettes differ
+from their banks' CRAM, so they did not match; Duncan, Kynes, Harah and
+Feyd-Rautha were not identified. Frames have no position: each portrait is a
+rest pose of several frames whose placement was measured
+(`scripts/segacd_portrait_pose.py`, table `kPortraits` in `segacd_game.cpp`);
+the program's own placement and animation tables are not found yet.
+
+### Map
+
+**Measured.** The Sega CD's map is a zoomed flat map: the same terrain
+(`MAP.HSQ`), about twice the PC's scale, in two main sand tones (yellow
+231,230,98 and tan 229,197,130) inside a blue frame, with rock, palace and
+troop icons (bitmap set 1858), a tooltip box and the map panel (block 1 and
+pad 48; rows EXIT MAPS, CONTACT FREMEN TROOPS, SEE SPICE DENSITY, TAKE AN
+ORNITHOPTER, FIND PROSPECTORS). The engine renders it with the PC's
+`MapRenderer` from the world's live map, zooms twice and thresholds the 16
+shades into the Sega CD's tones (the thresholds are guessed); the places are
+drawn as placeholder markers. There is no separate globe screen in the
+longplay.
+
+**Bitmap sets** in word-RAM order (see below) hold the map's pieces: 1858 the
+map items (ornithopter, troop icons, the 168 x 104 viewport frame, the
+gauntlet pointer, worm frames), 1928 the map dialogue's 60 x 60 portraits,
+1860-1908 probably more of them.
+
+### Data segment
+
+**Where** — verified. The program keeps the PC's data segment at 0x90c8
+(file 0 offset 0x20c8), recognisable by its first bytes, the PC's
+`00 00 02 00 0a 20 80 01 20 00 00 0a` stored big-endian.
+
+**How it differs** — verified by aligning it with `DNCDPRG.EXE`'s
+(`segacd_ds_align.py`: byte agreement allowing for swapped words):
+
+- words are big-endian: the position words (ds:2-7), the locations'
+  longitude, latitude and map offset (+2, +4, +6), the troops' +16 and +18,
+  the characters' first two words, the name table (ds:11eb) and a few
+  variables;
+- the 68000 needs words on even addresses, so records of odd length gained a
+  pad byte at their end: troops 27 to 28 bytes (68 records), smugglers 17 to 18
+  (6 records). Everything after the troop table is 0x44 bytes later;
+- after the smugglers the variables were reordered: the PC's pointer at
+  0x113f and its word at 0x1156 are gone and a 120-byte table of 0xff was
+  added. That part is mapped variable by variable (`segacd_world.cpp`,
+  `kRegions`);
+- values changed on purpose: Arrakeen starts with one ornithopter
+  (location 0, byte 21), two location statuses are 0x80 instead of 0xa0, two
+  troop bytes differ, and the characters' +4 word holds an index (0, 6, 12, ...)
+  instead of a PC data pointer.
+
+After conversion 78 bytes of 0x0000-0x1260 differ from the PC CD's initial
+data, all listed above or PC-only constants the engine does not read
+(0x11bd-0x1221, left zero).
+
+**Decision: convert to the PC layout once, at a new game.** The whole engine
+(`World`, dialogue conditions, saves) reads the data segment by PC CD
+offsets, so rebuilding that layout lets the Sega CD share all of it. Saves
+are therefore the engine's PC-format saves, not the Sega CD's backup-RAM ones.
+
+### Text
+
+**Verified.** COMMAND and PHRASE are the PC's format (little-endian offset
+tables, strings ended by 0xff, the same inline codes) and mostly
+byte-identical to the PC CD's. COMMAND1 differs only in entry 275
+(`* NO BACK-UP RAM AVAILABLE *` instead of ` *** SAVE ERROR `). The USA disc
+has all six languages; which one the US game uses is not known yet (the
+engine uses 1, English). Location names come out as the shared
+`World::locationName` gives them (the palace is "Carthag-(Atreides)"): that is
+the same on the PC and agrees with dune-rust's and odrade's tables.
+
+### Presentation
+
+**Measured** from the Let's Play part 24 video (`notes/segacd-gameplay/route.md`):
+the picture is 320 x 224, the room view the upper 168 lines and the panel the
+lower 56. The panel holds the day counter under a sun or moon, two companion
+portraits, the command list (white capitals) and a direction pad; its frame is
+violet outdoors, bronze in the palace and ivory in battle. Dialogue shows a
+full-screen close-up portrait with the line in a box. The map is its own
+screen with a globe at the left and a red and yellow pad at the right.
+
+The panel's pieces are in files 5 and 30 (see Panel).
+
+### Decisions
+
+- **Detection**: `DUNE.DAT` (471,040,000 bytes; md5 of the first 5,000 bytes
+  per revision) or the Redump-named data track. A raw MODE1/2352 `.bin` and a
+  2048-byte `.iso` or `.img` both work: `SegaCdArchive` finds `DUNE.DAT`
+  through the image's ISO 9660 directory, so users need not extract anything.
+- **One engine**: the release branches once, in `DuneEngine::run()`
+  (`platform == kPlatformSegaCD`), into `runSegaCd()`. The shared code gained
+  two small hooks: `Resource::setSegaCd()` (the PC names served from the disc)
+  and `World::setSegaCdProgram()` (the initial data from the program).
+- **Screen size**: 320 x 224, the Sega CD's own, rather than squeezing rooms
+  into the PC's 152-line view.
+
+### Open questions and next steps
+
+1. The command verbs in conversations (COME WITH ME, WHAT ?), the panel's
+   pressed states and the pointer shapes (file 4, four 32 x 32 pointers).
+2. The program's portrait placement and talking-animation tables; the heads
+   of banks 1801-1815; Duncan, Kynes, Harah and Feyd-Rautha.
+3. The room figures (1716-1718) and the marker table at 0x39b08.
+4. The video format of the large streams; the intro and the endings (1910
+   holds the ending's stills).
+5. The `Megative Voice File` sample format; the music.
+6. The map's icons (1858) and menus, the ornithopter flight (the cockpit
+   view with the minimap), battles, worms.
+7. The exterior selection (0xfd9c) for sietches and the open desert.
+8. The endings: the longplay (US, 7 h) shows only the military victory
+   (the Emperor, the Baron and Feyd exiled, "Long live the Emperor Paul
+   Atreides and Chani his Empress", THE END, credits); the "secret ending"
+   clip stops before its ending, so the secret ending is still unseen.
 
 ## Platform and workflow decisions
 
@@ -939,3 +1277,148 @@ track.
   settings at startup so a silent run can be diagnosed from `dune-ios.log`.
 - **Log file**: `dune-ios.log` in the save directory is the only window into a
   device run, so every stage writes a line and the file is flushed per line.
+
+## Amiga release
+
+The Amiga release (Cryo/Virgin 1992, three disks, English, executable version
+"1.0" by its save name `dune10s0.sav`) is played by converting its data into
+the DOS layouts at load time (`amiga.cpp`, `amiga_gfx.cpp`); decoders and game
+logic stay shared. Addresses "code 0x...." are offsets in the first hunk of the
+68000 executable `dune` (disassembled with capstone,
+`notes/amiga-port/tools/dis_game.py`). Evidence tools are in
+`notes/amiga-port/tools/`.
+
+**Sources.** The three images `Dune 1 (Cryo + Virgin) A/B/C.adf` (original,
+copy-protected) and the TOSEC set in `Dune_Amiga_EN.zip` (cracked disk 1 plus
+the same disks 2 and 3). The data files are identical in all of them; the
+executables differ only in two bytes of the protection check (file offsets
+72813 and 76109, `beq` patched to `bra`).
+
+**Disks** — verified. Disk 1 has a small OFS file system (`dune`, `dir.0`,
+`dir.1`, `disk_to_hd`, `tiroir`); disks 2 and 3 have an empty one. The game
+data sits in raw sectors. `dir.0` is 103 big-endian records of 14 bytes:
+unpacked size, stored size (u32 each), first sector on disk 1, 2 and 3 (u16,
+0 = absent). A sector is a 16-bit checksum (sum of the following 255
+big-endian words) and 510 data bytes; a file fills consecutive sectors. The
+names are not on the disks: they are the tables `disk_fic`, `disk2`, `disk3`
+of the installer `disk_to_hd`, which ships with its symbol table
+(`read_disk`, `read_secteur_510`, ...). There is no HNM, VOC or HERAD file:
+`m1-m3.hsq` are the music, `.sam` files replace `.sal`. **Decision:** the
+engine reads loose files as that installer writes them (lower-case names and
+`dune`); `scripts/dune_amiga_extract.py` writes the same from the ADFs with
+the Python standard library. Detection: `dune` (first 5000 bytes, 137264
+bytes) and `dunechar.hsq`.
+
+**Files** — verified. HSQ is the DOS format, with one extension: the third
+header byte holds bits 16-19 of the unpacked size (high nibble) and of the
+packed size (low nibble), so the music files can exceed 64 KB (`m1.hsq`: 0x21
+for 0x244ce and 0x18ae0). `map.hsq`, `map2.hsq`,
+`tablat.bin`, `globdata.hsq` are byte-identical to DOS. `command2.hsq`,
+`phrase21.hsq`, `phrase22.hsq` are the English text in the DOS layout (the
+Amiga numbers English "2"), an earlier wording ("I am the Duke Leto
+Atreides, your father.") with some different indices (COMMAND "Paul
+Atreides" is 0xfc, CD 0x108). `dialogue.hsq` and `condit.hsq` are the DOS
+layout with small content differences. `m1-m3.hsq` unpack to sound banks
+(titles WORMSIGN, ECOLOVE, FREMENS; named instruments, wave tables and
+samples) for the executable's own Paula replayer, not decoded.
+
+**Sprite sheets** — verified. The DOS structure with big-endian words;
+palette blocks hold 12-bit colour words (`0RGB`); the sprite header is
+width word, palette offset, height; 4-bit pixels have the left pixel in the
+high nibble. The palette offset and the RLE are the DOS ones (blitter at code
+0x14b46, RLE unpacking at 0x13d52). Other entries:
+
+- **Pictures**: first word 0, second word a size, then an HSQ body (no
+  header) of 30400 bytes: 320x152, five interleaved bitplanes (per row plane
+  0 to 4, 40 bytes each). The intro sheets `cryo`, `death`, `sun`,
+  `ornycab` have the body without the two words; `mirror.hsq` is only a
+  picture. Rooms are these pictures plus sprites: there are no polygons.
+- **Palette records** (`sky`, `sunrs`, `attack`, `balcon`): zero, size 0x6c,
+  54 colours (see the sky below).
+- **Animation blocks**: the DOS layout with big-endian words.
+- **Planar sprites** (`back`, `back1`, `credits`, `fresk`, `orny`, `ornytk`,
+  `shai`, `shai1`, `shai2`, `stars`, `stars1`, `ver`), drawn by the blitter
+  at code 0x15238 when `ds:14a9` is set: a word (bit 15 compressed, width),
+  a word (bit 8 colours 16-31, height), four bitplanes one after the other,
+  rows of `((width + 31) / 16) * 2` bytes. The compression (code 0x13dd0, two
+  jump tables into 127 copies and 128 fills): 0 ends, 1-127 copies `128 - n`
+  bytes, 128-255 repeats the next byte `129 - (n & 0x7f)` times. The sheets
+  were found by which decoding ends exactly at every sprite's end.
+
+**Decision:** every sheet is converted to the DOS layout on load: colours to
+6-bit VGA (`v * 63 / 15`), header and nibbles swapped, planar sprites to
+8-bit RLE sprites with palette byte 255. Pictures do not fit the 16-bit
+offsets: they become an 8-byte stub (palette byte 253, a 32-bit offset) with
+the 8-bit pixels after the sheet; `Sprite::getFrameInfo()` follows the stub.
+On the Amiga colour 0 is a real colour, so `setPalette()` applies a (0, 1)
+block there.
+
+**Rooms (`.SAM`)** — verified. The `.SAL` stream with big-endian words and
+no polygons or lines: marker count, then 5-byte commands (command word,
+`y << 8 | x`, palette byte) until FFFF. An interior room's first command draws
+the picture at (0, 0). The room byte of the room tables picks the sheet as on
+DOS, file `0x13 + slot` (`por prouge comm equi balcon corr siet0 sas dunes2
+fort bunk harko serre bota`), except slot 14 = `siet1`-`siet12` by SAL room
+and slot 15 = `vilg1`-`vilg6` (code 0x5546); a village's picture follows its
+region (code 0x5328, table `f1 f1 f2 f2 f3 f4 f4 f4 f5 f5 f6 f6` by the
+place's first name). The room bytes differ from DOS (sietch rooms `e2-ed`
+for `72-7d`, village `f1` for `81`, Harkonnen palace `b7/b8` for `95/a8`).
+
+**Palettes, sky, panel** — verified. Five bitplanes; the copper switches to
+a second 32-colour palette at line 152 for the panel. The engine keeps view
+colours 0-31 and panel colours 32-63 (`icone.hsq` gets 32 added to its
+palette offsets). Colour 1 of the exterior pictures is the sky: the copper
+list (built at code 0x13782) repaints it every three lines from 26 gradient
+entries, the last from line 75 down (`amigaSkyGradient`). A time-of-day
+record (code 0x5296): words 0-13 are colours 2-15 (the landscape, kept for
+the palace and villages, `ds:1582`), 14-27 colours 33-46 (the panel tint),
+28-53 the gradient, bottom band first. The record is
+`table[time & 15] + ((time >> 2) & 0x1c)`, table
+`08 08 09 09 09 09 09 09 09 09 09 0a 0a 0b 0b 0b` (code 0x5254): sunrise,
+day, sunset, night, four records for each day of the week. Colours 47-63 are
+fixed interface colours (as POR.HSQ sets them); the shared drawing code's
+DOS interface indices 224-255 are filled from the Amiga's
+(`amigaMirrorUiColours`). The talk balloon is a plain box in colour 16 with
+text in colour 29 (measured on the recording).
+
+**Ornithopter** — verified (code 0x5406, 0x5420). Pad (0x95, 0x39) at a
+sietch, (0xb5, 0x49) elsewhere (DOS 0xca); further ornis 50 pixels apart (DOS
+70); the cropped wing frames are shifted by the table at code 0x5498.
+
+**Data segment** — verified. It lies in the first hunk from 0x1a900 (the
+CD's first bytes, big-endian). The layout is the CD's with the port's rules:
+16-bit fields big-endian; pointers into the data segment (dune-chani's
+`ofs16`) are 32-bit relocated addresses; records with words padded to an even
+size (Troop 27 to 28, Smuggler 17 to 18); RoomPerson's handler is a 16-bit
+index. A walk over dune-chani's CD field types predicts every Amiga offset
+(two anchors: CD 0x11eb = Amiga 0x12e8, CD 0x1225 = 0x1322) and leaves only
+content differences (version 1.0 data, room bytes, COMMAND ids, interface
+lists). **Decision:** `amigaInitialDataSegment` converts to the CD layout
+(table `amiga_ds_table.h`, generated by `notes/amiga-port/tools/build_conv.py`).
+The runtime variables at CD 0x113e-0x11ea take the CD's initial values
+(sentinels and pointers the shared logic expects). The world runs with the CD
+layout and CD save format, the presentation follows the floppy
+(`World::floppy()` is true, `World::amiga()` selects the Amiga details). The
+scripted scenes are the CD's bytes, 0xed3 further (found by the map lesson
+`0e 10 ff 00 02 03 05 07`).
+
+**Other screens** — measured on the recording unless stated.
+- The flat map and the globe: the Amiga's ONMAP keeps its sand ramp at 21-29
+  (20 is a dark blue), so terrain value `t` shows as `clip(t + 17, 21, 29)`
+  where DOS uses `t + 16` (`terrainColour`); the executable's table is not
+  located. The globe wears ONMAP's colours 16-31 inside FRESK's frame
+  (FRESK's own 16-31 are other colours).
+- The mirror: `mirror.hsq` includes the gilt frame; Paul's portrait is drawn
+  at its talking position, clipped to the glass (12, 12)-(306, 138).
+- The ending (code 0x239a, 0x23f2, 0x250c): picture 1 is FINAL frame 5 (the
+  worm's head) with "THE END" (frame 1) at (0x5a, 0x40); picture 2 is frame
+  0 ("with / (in order of Appearance)") at (0x40, 0x34).
+- The book: BOOK.HSQ holds an ornament (0), the drop capitals (1-9) and the
+  cover (13) and page (14) as pictures.
+- The telepathic messages are on black (there is no VIS.HSQ).
+
+**Not ported yet.** The intro (the game starts in the throne room; the
+recording also starts there, at the mirror), music and sound (Paula), the
+desert landscape of code 0x5094 (a flat sand colour, colour 2 of the
+time-of-day record, stands in), the talk background's coarser zoom, the
+copy-protection check (not needed).

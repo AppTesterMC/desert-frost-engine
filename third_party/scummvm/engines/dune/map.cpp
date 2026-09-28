@@ -29,6 +29,7 @@
  * panel layout dune-rust's wasm_map and wasm_globe front-ends.
  */
 
+#include "dune/amiga.h"
 #include "dune/map.h"
 
 #include "common/endian.h"
@@ -70,6 +71,15 @@ uint16 MapRenderer::rowOffset(uint16 row) const {
 	return row < 99 ? (uint16)(kMapBase - offset) : (uint16)(kMapBase + offset);
 }
 
+byte terrainColour(uint terrain) {
+	// DOS: ONMAP's ramp at 20-31. The Amiga's ONMAP has its sand ramp at
+	// 21-29 (20 is a dark blue): measured against the recording, the
+	// executable's colour table is not located yet.
+	if (amigaRelease())
+		return (byte)CLIP<uint>(terrain + 17, 21, 29);
+	return (byte)(terrain + 0x10);
+}
+
 byte MapRenderer::mapPixel(uint offset) const {
 	if (offset >= _map.size())
 		return 0;
@@ -100,7 +110,7 @@ void MapRenderer::drawBand(Graphics::Surface &view, uint16 band, uint16 row, uin
 			break;
 		for (int x = 0; x < kViewWidth; ++x) {
 			const byte b = _buffer[y * 400 + x + 160];
-			*(byte *)view.getBasePtr(kViewX + x, screenY) = (byte)(((b >> 4) & 0x0f) + 0x10);
+			*(byte *)view.getBasePtr(kViewX + x, screenY) = terrainColour((b >> 4) & 0x0f);
 		}
 	}
 }
@@ -576,7 +586,7 @@ void MapScreen::drawZoomedWindow(Graphics::ManagedSurface &surface, const Common
 				continue;
 			}
 			if (!density) {
-				dst[x] = (byte)((v & 0x0f) + 0x10);
+				dst[x] = terrainColour(v & 0x0f);
 				continue;
 			}
 			// vga_draw_landscape: only where the pixel equals its right and
@@ -1020,6 +1030,8 @@ void MapScreen::draw(Graphics::ManagedSurface &surface, const Panel &panel, cons
 	surface.fillRect(Common::Rect(0, 0, 320, 152), 0);
 	if (_icons)
 		_icons->setPalette(); // ONMAP carries the map screen's palette, the planet's colours 20-31 included
+	if (amigaRelease())
+		amigaMirrorUiColours(_system);
 	if (_mode == kFlat) {
 		if (_renderer) {
 			Graphics::Surface view = target->getSubArea(Common::Rect(0, 0, 320, 152));

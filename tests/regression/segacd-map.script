@@ -1,0 +1,25 @@
+# Sega CD map (segacd_game.cpp, map mode): SEE DUNE MAP (first row) opens
+# the map centred on the palace (white marker) with the map panel (globe
+# block, blue tint, map pad); the pad's right arrow scrolls east; a tap on
+# the sietch marker east of the palace (place 11) travels there; the
+# sietch's first room shows.
+wait 1500
+move 120 180
+click left 120 180
+wait 1000
+checkpoint segacd-map-open
+move 290 200
+click left 290 200
+wait 1000
+checkpoint segacd-map-scrolled
+move 120 180
+click left 120 180
+wait 800
+move 120 180
+click left 120 180
+wait 1000
+move 304 84
+click left 304 84
+wait 1000
+checkpoint segacd-map-travel
+quit

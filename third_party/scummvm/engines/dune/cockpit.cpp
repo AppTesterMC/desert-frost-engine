@@ -32,6 +32,7 @@
 #include "common/system.h"
 #include "graphics/paletteman.h"
 
+#include "dune/amiga.h"
 #include "dune/debug.h"
 #include "dune/harness.h"
 #include "dune/resource.h"
@@ -113,7 +114,10 @@ void GameScreen::drawCockpit() {
 	_panel.applyPalette();
 	_map->applyPalette();
 	Graphics::Surface view = _surface.surfacePtr()->getSubArea(Common::Rect(0, 0, 320, 152));
-	drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
+	if (_world.amiga())
+		amigaDesertView(_system, _resources, view, _state.w(GameState::kGameTime));
+	else
+		drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
 	Common::Array<byte> ornypanData;
 	Sprite *ornypan = nullptr;
 	if (_resources.load("ORNYPAN.HSQ", ornypanData)) {
@@ -266,7 +270,10 @@ void GameScreen::drawCabin() {
 	_surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
 	_panel.applyPalette();
 	Graphics::Surface view = _surface.surfacePtr()->getSubArea(Common::Rect(0, 0, 320, 152));
-	drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
+	if (_world.amiga())
+		amigaDesertView(_system, _resources, view, _state.w(GameState::kGameTime));
+	else
+		drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
 	Common::Array<byte> data;
 	if (_resources.load("ORNYCAB.HSQ", data)) {
 		Sprite cabin(_system, data);

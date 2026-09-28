@@ -31,6 +31,7 @@
 #include "graphics/surface.h"
 #include "graphics/paletteman.h"
 
+#include "dune/amiga.h"
 #include "dune/debug.h"
 #include "dune/sprite.h"
 
@@ -54,7 +55,7 @@ bool Sprite::setPalette() {
 		const byte paletteCount = _data[position++];
 		if (paletteStart == 0xff && paletteCount == 0xff)
 			break;
-		if (paletteStart == 0 && paletteCount == 1) {
+		if (paletteStart == 0 && paletteCount == 1 && !amigaRelease()) {
 			// The original palette reader reserves colour 0 and skips its
 			// three-byte placeholder.
 			if (position + 3 > chunkEnd)
@@ -200,6 +201,17 @@ bool Sprite::getFrameInfo(uint16 frameIndex, uint32 &dataOffset, uint16 &width,
 	width = widthLow | ((widthHigh & 0x01) << 8);
 	height = _data[dataOffset++];
 	paletteOffset = (int8)_data[dataOffset++];
+	if ((byte)paletteOffset == 253 && amigaRelease()) {
+		// An Amiga full-screen picture (amiga.cpp): the 8-bit pixels lie past
+		// the 16-bit offsets' reach, at the 32-bit offset that follows.
+		if (dataOffset + 4 > _data.size())
+			return false;
+		dataOffset = READ_LE_UINT32(_data.data() + dataOffset);
+		if (dataOffset + (uint32)width * height > _data.size())
+			return false;
+		compressed = false;
+		paletteOffset = (int8)254;
+	}
 	return width && height;
 }
 

@@ -22,6 +22,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "dune/amiga.h"
 #include "dune/book.h"
 
 #include "common/system.h"
@@ -46,6 +47,13 @@ enum {
 	kTileFrame = 3,
 	kFirstLetterFrame = 5,
 	kInkColour = 94,
+	// The Amiga's BOOK.HSQ: an ornament (0), the drop capitals (1-9), three
+	// small pieces, the cover (13) and the page (14) as pictures; its ink is
+	// the darkest brown of the sheet (30).
+	kAmigaFirstLetterFrame = 1,
+	kAmigaCoverFrame = 13,
+	kAmigaPageFrame = 14,
+	kAmigaInkColour = 30,
 	kPageWidth = 320,
 	kPageHeight = 152,
 	kTileWidth = 33,
@@ -179,7 +187,7 @@ void Book::paginate() {
 		if (paragraphs[i].header.empty() && !text.empty()) {
 			const char *letter = strchr(kDropCapLetters, toupper(text[0]));
 			if (letter && *letter) {
-				dropCap = kFirstLetterFrame + (int)(letter - kDropCapLetters);
+				dropCap = (amigaRelease() ? kAmigaFirstLetterFrame : kFirstLetterFrame) + (int)(letter - kDropCapLetters);
 				text.deleteChar(0);
 			}
 		}
@@ -226,22 +234,28 @@ void Book::draw(Graphics::ManagedSurface &surface) {
 	_sheet->setPalette();
 	const byte black[3] = { 0, 0, 0 };
 	_system->getPaletteManager()->setPalette(black, 0, 1);
+	if (amigaRelease())
+		amigaMirrorUiColours(_system);
 
 	// The page is composed in a view-sized surface so the tiles cannot
 	// spill into the panel rows.
 	Graphics::Surface view;
 	view.create(kPageWidth, kPageHeight, Graphics::PixelFormat::createFormatCLUT8());
-	if (_cover) {
+	const bool amiga = amigaRelease();
+	const byte ink = amiga ? kAmigaInkColour : kInkColour;
+	if (amiga) {
+		_sheet->drawFrame(_cover ? kAmigaCoverFrame : kAmigaPageFrame, &view, 0, 0);
+	} else if (_cover) {
 		for (uint frame = 0; frame < kCoverFrames; ++frame)
 			_sheet->drawFrame(frame, &view, 0, 0);
 	} else {
 		for (int y = 0; y < kPageHeight; y += kTileHeight)
 			for (int x = 0; x < kPageWidth; x += kTileWidth)
 				_sheet->drawFrame(kTileFrame, &view, x, y);
-		view.hLine(0, 0, kPageWidth - 1, kInkColour);
-		view.hLine(0, kPageHeight - 1, kPageWidth - 1, kInkColour);
-		view.vLine(0, 0, kPageHeight - 1, kInkColour);
-		view.vLine(kPageWidth - 1, 0, kPageHeight - 1, kInkColour);
+		view.hLine(0, 0, kPageWidth - 1, ink);
+		view.hLine(0, kPageHeight - 1, kPageWidth - 1, ink);
+		view.vLine(0, 0, kPageHeight - 1, ink);
+		view.vLine(kPageWidth - 1, 0, kPageHeight - 1, ink);
 	}
 	surface.copyRectToSurface(view, 0, 0, Common::Rect(0, 0, kPageWidth, kPageHeight));
 	view.free();
@@ -255,7 +269,7 @@ void Book::draw(Graphics::ManagedSurface &surface) {
 			_sheet->drawFrame(rows[i].dropCap, surface.surfacePtr(), kTextLeft, y);
 		if (!rows[i].text.empty())
 			_panel.drawText(surface, rows[i].text.c_str(), kTextLeft + (rows[i].indented ? kDropCapWidth : 0), y,
-					kInkColour, false);
+					ink, false);
 	}
 }
 

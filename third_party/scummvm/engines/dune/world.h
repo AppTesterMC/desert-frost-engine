@@ -174,6 +174,13 @@ public:
 	/** Load the executable's initial data segment into the state (a new game). */
 	bool loadInitialData();
 	bool ready() const { return _tablesFound; }
+	/**
+	 * Sega CD: take the initial data from the game program (file 0 of the
+	 * archive) instead of DUNE.EXE/DNCDPRG.EXE; segacd_world.cpp rebuilds the
+	 * PC CD layout from it.
+	 */
+	void setSegaCdProgram(const Common::Array<byte> *program) { _segaCdProgram = program; }
+	bool segaCd() const { return _segaCdProgram != nullptr; }
 
 	uint locationCount() const;
 	Location location(uint index) const;
@@ -195,7 +202,9 @@ public:
 	/** The CD's arrival video of a place kind; its last picture stays behind the exterior rooms. */
 	static const char *arrivalVideo(byte placeType);
 	/** The floppy release (DUNEPRG.EXE): loose files, SIET0/VILG/FORT exteriors, 13-byte longer layout. */
-	bool floppy() const { return _floppy; }
+	bool floppy() const { return _floppy || _amiga; }
+	/** The Amiga release: floppy-like rooms (pictures), CD data-segment layout. */
+	bool amiga() const { return _amiga; }
 
 	Character character(uint index) const;
 	/** The executable's test (loc_136EE): the record's room, place type, 0x80 and location + 1 equal ds:4-7. */
@@ -587,6 +596,10 @@ private:
 	int _shift;
 	bool _tablesFound;
 	bool _floppy;
+	bool _amiga = false;
+	bool loadAmigaInitialData();
+	const Common::Array<byte> *_segaCdProgram = nullptr;
+	bool loadSegaCdData();  ///< segacd_world.cpp
 	bool _fixLetoLoop = false;
 	bool _fixCelimynTuek = false;
 	Common::Array<byte> _tablat;

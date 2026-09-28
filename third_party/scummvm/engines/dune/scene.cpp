@@ -33,6 +33,7 @@
 #include "graphics/fontman.h"
 #include "graphics/paletteman.h"
 
+#include "dune/amiga.h"
 #include "dune/book.h"
 #include "dune/debug.h"
 #include "dune/dialogue.h"
@@ -130,6 +131,8 @@ bool drawRecoveredGlobe(Graphics::Surface &surface, const Common::Array<byte> &g
 		// neutral 0x10, Atreides (including vegetation) 0x20, Harkonnen 0x30.
 		const byte stage = cell & 0x30;
 		const byte bank = results && stage ? (stage == 0x30 ? 0x30 : 0x20) : 0x10;
+		if (amigaRelease())
+			return terrainColour(cell & 0x0f); // the Amiga's ONMAP ramp (map.cpp); no ownership ramps
 		return (cell & 0x0f) | bank;
 	};
 
@@ -304,8 +307,21 @@ bool drawDuneGlobe(OSystem *system, Graphics::Surface &surface, Resource &resour
 			|| !resources.load("TABLAT.BIN", tablatData) || !resources.load("FRESK.HSQ", freskData))
 		return false;
 	Sprite fresk(system, freskData);
+	byte planet[16 * 3];
+	Common::Array<byte> onmapData;
+	const bool amigaPlanet = amigaRelease() && resources.load("ONMAP.HSQ", onmapData);
+	if (amigaPlanet) {
+		// The Amiga's FRESK has its own colours at 16-31; the planet wears the
+		// map's (ONMAP), as the recording's globe shows.
+		Sprite(system, onmapData).setPalette();
+		system->getPaletteManager()->grabPalette(planet, 16, 16);
+	}
 	if (!fresk.setPalette())
 		return false;
+	if (amigaPlanet) {
+		system->getPaletteManager()->setPalette(planet, 16, 16);
+		amigaMirrorUiColours(system);
+	}
 	// Floppy CS:B749 fills with F1, draws the ring and globe, then B77D
 	// draws the sliding house panels. Never erase rectangles over the sphere.
 	surface.fillRect(Common::Rect(0, 0, 320, 152), 0xf1);
@@ -685,13 +701,24 @@ void GameScreen::composeView() {
 		// an exterior sheet: the floppy's SIET0, VILG and FORT (slots 6, 8,
 		// 9; the Harkonnen palace is FORT's room 4), the CD's GENERIC (0).
 		const uint slot = record->sheetSlot();
+		// The Amiga's are its slots 6 (SIET0), 9 (FORT), 15 (VILG1-6) and the
+		// Harkonnen palace's front, HARKO room 6 (code 0xb7).
 		const bool outdoors = palace ? (salRoom == 10 || salRoom == 11)
+									 : _world.amiga() ? (slot == 6 || slot == 9 || slot == 15 || record->code == 0xb7)
 									 : (floppy ? (slot == 6 || slot == 8 || slot == 9) : slot == 0);
 		const bool video = !floppy && outdoors && !(palace && salRoom == 10);
 		if (video) {
 			if (!drawVideoBackdrop(placeType))
 				_log.line(Common::String::format("Room: %s backdrop missing", World::arrivalVideo(placeType)));
 			_panel.applyPalette(); // the interface colours over the video's
+		} else if (outdoors && _world.amiga()) {
+			// The Amiga pictures hold the whole view; the sky is their colour
+			// 1, repainted below. A sietch or fortress entrance stands in
+			// the open desert (code 0x534a): sky over sand (colour 2).
+			if (!palace && placeType != Location::kHarkonnenPalace && !(placeType >= Location::kVillageMin && placeType <= Location::kVillageMax)) {
+				_surface.fillRect(Common::Rect(0, 0, 320, 78), 1);
+				_surface.fillRect(Common::Rect(0, 78, 320, 152), 2);
+			}
 		} else if (outdoors) {
 			if (palace && salRoom == 11)
 				drawSky(_system, _resources, *_surface.surfacePtr(), kSkyLarge, 200, skyPalette(), true);
@@ -775,7 +802,10 @@ void GameScreen::composeView() {
 		// the panel, so nothing here disturbs the sky.
 		if (!sheet.setPalette())
 			_log.line(Common::String::format("Room: %s has a broken palette chunk", sheetName.c_str()));
-		if (floppy && palace && outdoors && salRoom == 10)
+		if (outdoors && _world.amiga())
+			amigaSkyPalette(_system, _resources, _state.w(GameState::kGameTime),
+					!palace && placeType != Location::kHarkonnenPalace && !(placeType >= Location::kVillageMin && placeType <= Location::kVillageMax));
+		if (floppy && palace && outdoors && salRoom == 10 && !_world.amiga())
 			// The intro's palace scenes, matched against the recording, put
 			// BALCON frame 2 under the pieces the SAL record places.
 			sheet.drawFrame(2, _surface.surfacePtr(), 0, 0);
@@ -787,6 +817,8 @@ void GameScreen::composeView() {
 			drawParkedOrnis(*_surface.surfacePtr(), 0);
 		if (ok && _sceneKiss)
 			drawKiss();
+		if (ok && outdoors && _world.amiga())
+			amigaSkyGradient(*_surface.surfacePtr());
 		if (!ok)
 			_log.line(Common::String::format("Room: %s #%u did not parse", World::salFile(placeType), salRoom));
 	}
@@ -795,6 +827,8 @@ void GameScreen::composeView() {
 	// room sheets set it to something else.
 	const byte black[3] = { 0, 0, 0 };
 	_system->getPaletteManager()->setPalette(black, 0, 1);
+	if (_world.amiga())
+		amigaMirrorUiColours(_system);
 
 	_viewOk = ok;
 }
@@ -1432,7 +1466,11 @@ void GameScreen::drawOrni(Graphics::Surface &target, int x, int y, uint frame) {
 	orni.drawFrame(0, &target, x, y);
 	orni.drawFrame(1, &target, x + 6, y + 30);
 	orni.drawFrame((uint16)(2 + CLIP<int>((int)frame - 15, 0, 5)), &target, x + 4, y + 50);
-	orni.drawFrame((uint16)(8 + MIN<uint>(frame, 14)), &target, x - 81, y - 3);
+	// The Amiga's wing frames are cut to their size; code 0x547a adds this
+	// table's shift to the DOS position.
+	static const byte kAmigaWingShift[15] = { 0x8e, 0x8e, 0x8e, 0x89, 0x87, 0x81, 0x79, 0x6e, 0x5f, 0x50, 0x3f, 0x2b, 0x1d, 0x0d, 0x00 };
+	const int wingX = x - 81 + (_world.amiga() ? kAmigaWingShift[MIN<uint>(frame, 14)] : 0);
+	orni.drawFrame((uint16)(8 + MIN<uint>(frame, 14)), &target, wingX, y - 3);
 }
 
 int GameScreen::orniPadX() const {
@@ -1443,11 +1481,13 @@ void GameScreen::drawParkedOrnis(Graphics::Surface &target, uint skip) {
 	// get_orni_position (CD seg000:3a95, floppy sub_5BD4): the pad at
 	// (149, 57) for a sietch; elsewhere (202, 73) on the CD but (181, 73) on
 	// the floppy (0xB5; the palace front's orni sat 21 px too far right).
-	// Each further orni 70 to the right, 10 lower.
+	// Each further orni 70 to the right, 10 lower. The Amiga (code 0x5406,
+	// 0x53c6) parks at (0xb5, 0x49) too and spaces the ornis 50 apart.
 	const bool sietch = _world.placeType() < Location::kPalace;
 	int x = sietch ? 0x95 : orniPadX(), y = sietch ? 0x39 : 0x49;
+	const int step = _world.amiga() ? 0x32 : 0x46;
 	const uint count = parkedOrnis();
-	for (uint i = 0; i < count; ++i, x += 0x46, y += 0x0a)
+	for (uint i = 0; i < count; ++i, x += step, y += 0x0a)
 		if (i >= skip)
 			drawOrni(target, x, y, 0);
 }
@@ -1511,20 +1551,36 @@ void GameScreen::drawMirror() {
 	// the menu is RESTART / LOAD / SAVE / EXIT GAME and Look away (ds:1d1e).
 	_surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
 	Common::Array<byte> data, paul;
+	if (_world.amiga()) {
+		// The Amiga's mirror picture has no palette: it is the bedroom's (POR).
+		Common::Array<byte> bedroom;
+		if (_resources.load("POR.HSQ", bedroom))
+			Sprite(_system, bedroom).setPalette();
+	}
 	if (_resources.load("MIRROR.HSQ", data)) {
 		Sprite mirror(_system, data);
 		mirror.setPalette();
 		// The reflected bedroom is two frames: 0 (colours 129-141, the walls,
-		// door and shelves) and 1 (144-158); the recording shows both.
-		mirror.drawFrame(0, _surface.surfacePtr(), 0, 0);
+		// door and shelves) and 1 (144-158); the recording shows both. The
+		// Amiga's picture is frame 1 alone.
+		if (!_world.amiga())
+			mirror.drawFrame(0, _surface.surfacePtr(), 0, 0);
 		mirror.drawFrame(1, _surface.surfacePtr(), 0, 0);
 		if (_resources.load("PAUL.HSQ", paul)) {
 			Sprite face(_system, paul);
 			face.setPalette();
 			// Centred in the frame; Paul ages with the clock (seg000:917a).
 			const uint expression = MIN<uint>((uint)(_state.w(GameState::kGameTime) >> 6), 8u) * 2;
-			if (!face.drawAnimationFrame(expression, 0, _surface.surfacePtr(), 86, 0))
+			if (_world.amiga()) {
+				// The Amiga's picture includes the gilt frame: Paul, where he
+				// talks from (measured on the recording), shows inside it.
+				const Common::Rect glass(12, 12, 306, 138);
+				Graphics::Surface inside = _surface.surfacePtr()->getSubArea(glass);
+				if (!face.drawAnimationFrame(expression, 0, &inside, -glass.left, -glass.top))
+					face.drawAnimationFrame(0, 0, &inside, -glass.left, -glass.top);
+			} else if (!face.drawAnimationFrame(expression, 0, _surface.surfacePtr(), 86, 0)) {
 				face.drawAnimationFrame(0, 0, _surface.surfacePtr(), 86, 0);
+			}
 		}
 		mirror.setPalette();
 		mirror.drawFrame(2, _surface.surfacePtr(), 0, 0);
@@ -1754,7 +1810,13 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		_map->applyPalette();
 		if (ornypan)
 			ornypan->setPalette();
-		drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
+		if (_world.amiga()) {
+			// DUNES3 is not ported: the Amiga's sky over its sand colour.
+			view.fillRect(Common::Rect(0, 0, 320, 78), 1);
+			amigaSkyPalette(_system, _resources, _state.w(GameState::kGameTime), true);
+		} else {
+			drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
+		}
 		const uint32 nowMillis = _system->getMillis();
 		// A frame every 16 ticks (546D); the eighth frame since the last step
 		// makes the next one due (the counter at ds:4286), so rows and steps
@@ -1769,7 +1831,13 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		}
 		if (nowMillis - _flightFrameAt >= 8 * kLandFrameMillis)
 			_flightFrameAt = nowMillis - kLandFrameMillis; // after a pause, no rush of frames
-		flightLandscapeDraw(view, dunesData);
+		if (_world.amiga()) {
+			view.fillRect(Common::Rect(0, 78, 320, 152), 2);
+			amigaSkyGradient(view);
+			amigaMirrorUiColours(_system);
+		} else {
+			flightLandscapeDraw(view, dunesData);
+		}
 		_map->drawMinimap(_surface, Common::Rect(202, 3, 318, 61), _panel);
 		setFlightRows();
 		_panel.setLeftPanel(Panel::kLeftBook);
@@ -1808,8 +1876,16 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 			_surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
 			_panel.applyPalette();
 			_map->applyPalette();
-			drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
-			flightLandscapeDraw(view, dunesData);
+			if (_world.amiga()) {
+				view.fillRect(Common::Rect(0, 0, 320, 78), 1);
+				amigaSkyPalette(_system, _resources, _state.w(GameState::kGameTime), true);
+				view.fillRect(Common::Rect(0, 78, 320, 152), 2);
+				amigaSkyGradient(view);
+				amigaMirrorUiColours(_system);
+			} else {
+				drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
+				flightLandscapeDraw(view, dunesData);
+			}
 			_map->drawMinimap(_surface, Common::Rect(202, 3, 318, 61), _panel);
 			uint16 commands[Panel::kCommandRows] = { _panel.findCommand("SKIP TO DESTINATION"), _panel.findCommand("CHANGE DESTINATION") };
 			RowAction actions[Panel::kCommandRows] = { kRowNone, kRowNone };
@@ -3427,6 +3503,8 @@ void GameScreen::drawTalk() {
 			_talkSheet->setPalette();
 			const byte black[3] = { 0, 0, 0 };
 			_system->getPaletteManager()->setPalette(black, 0, 1);
+			if (_world.amiga())
+				amigaMirrorUiColours(_system);
 			const uint animation = _talkAnimating ? _talkAnimation : _talkIdle;
 			const uint frame = _talkAnimating ? _talkFrame : 0;
 			if (!_talkSheet->drawAnimationFrame(animation, frame, _surface.surfacePtr(), 0, 0) &&
@@ -3497,14 +3575,22 @@ void GameScreen::drawBubble(const Common::Array<Common::String> &lines, uint fir
 	// justified as layout_subtitle_lines does (the spare width shared out
 	// between the words, the last line of a paragraph left alone) and
 	// centred vertically.
-	Graphics::Surface area = _surface.surfacePtr()->getSubArea(box);
-	Graphics::ManagedSurface tiles;
-	tiles.create(box.width(), box.height(), Graphics::PixelFormat::createFormatCLUT8());
-	for (int y = 0; y < box.height(); y += 29)
-		for (int x = 0; x < box.width(); x += 33)
-			_panel.drawIcon(tiles, 0x1c, x, y);
-	area.copyRectToSurface(*tiles.surfacePtr(), 0, 0, Common::Rect(0, 0, box.width(), box.height()));
-	tiles.free();
+	if (_world.amiga()) {
+		// The Amiga's balloon is a plain box in colour 16 (0xa9b in every
+		// character sheet) with the text in colour 29 (dark red), as the
+		// recording shows.
+		_surface.fillRect(box, 16);
+		ink = 29;
+	} else {
+		Graphics::Surface area = _surface.surfacePtr()->getSubArea(box);
+		Graphics::ManagedSurface tiles;
+		tiles.create(box.width(), box.height(), Graphics::PixelFormat::createFormatCLUT8());
+		for (int y = 0; y < box.height(); y += 29)
+			for (int x = 0; x < box.width(); x += 33)
+				_panel.drawIcon(tiles, 0x1c, x, y);
+		area.copyRectToSurface(*tiles.surfacePtr(), 0, 0, Common::Rect(0, 0, box.width(), box.height()));
+		tiles.free();
+	}
 	const int lineHeight = 10, leftPad = 12, rightPad = 12;
 	const int width = box.width() - leftPad - rightPad;
 	int y = box.top + (box.height() - (int)count * lineHeight) / 2;

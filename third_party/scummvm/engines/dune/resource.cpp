@@ -26,7 +26,9 @@
 #include "common/textconsole.h"
 #include "common/util.h"
 
+#include "dune/amiga.h"
 #include "dune/resource.h"
+#include "dune/segacd_resources.h"
 
 namespace Dune {
 
@@ -70,8 +72,12 @@ private:
 } // namespace
 
 bool Resource::load(const Common::String &requestedName, Common::Array<byte> &data) const {
+	if (_amiga)
+		return loadAmiga(requestedName, data);
 	Common::String name = requestedName;
 	name.toUppercase();
+	if (_segaCd) // nothing on the Sega CD disc is HSQ-packed
+		return _segaCd->loadNamed(name, data);
 
 	Common::File file;
 	const bool hasArchive = _useArchive && file.open("DUNE.DAT");
@@ -148,6 +154,38 @@ bool Resource::load(const Common::String &requestedName, Common::Array<byte> &da
 
 	data.swap(unpacked);
 	return true;
+}
+
+bool Resource::loadAmiga(const Common::String &requestedName, Common::Array<byte> &data) const {
+	const Common::String name = amigaFileName(requestedName);
+	if (name.empty())
+		return false;
+	Common::File file;
+	if (!file.open(Common::Path(name)))
+		return false;
+	data.resize(file.size());
+	if (data.size() && file.read(data.data(), data.size()) != data.size())
+		return false;
+	file.close();
+	// The DOS HSQ header, extended: the third byte holds bits 16-19 of the
+	// unpacked size (high nibble) and of the packed size (low nibble); the
+	// music files are over 64 KB (m1.hsq: 0x21 for 0x244ce and 0x18ae0).
+	if (data.size() >= 6) {
+		byte checksum = 0;
+		for (uint i = 0; i < 6; ++i)
+			checksum += data[i];
+		if (checksum == 0xAB) {
+			const uint32 unpackedSize = READ_LE_UINT16(data.data()) | ((uint32)(data[2] >> 4) << 16);
+			const uint32 packedSize = READ_LE_UINT16(data.data() + 3) | ((uint32)(data[2] & 0x0f) << 16);
+			if (packedSize != data.size() || packedSize < 6)
+				return false;
+			Common::Array<byte> unpacked(unpackedSize);
+			if (!unpackHSQ(data.data() + 6, packedSize - 6, unpacked.data(), unpackedSize))
+				return false;
+			data.swap(unpacked);
+		}
+	}
+	return convertAmigaResource(name, data);
 }
 
 bool Resource::unpackHSQ(const byte *packed, uint32 packedSize, byte *unpacked, uint32 unpackedSize) {

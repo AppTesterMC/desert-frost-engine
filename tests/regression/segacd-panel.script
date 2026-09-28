@@ -1,0 +1,17 @@
+# Sega CD / Mega CD release with its own panel (segacd_panel.cpp): a new
+# game lands in the throne room (screen 1678 over 1744; the panel from files
+# 5 and 30 in the palace's bronze; SEE DUNE MAP and DUKE LETO ATREIDES in the
+# command box; the pad shows the open exits); the pad's up arrow walks to
+# room 9 (screen 1680); the developer key M travels to the next location
+# (the Harkonnen palace is not on the map at the start): its first room
+# (screen 1714). The map itself is checked by segacd-map. Data: the bin/cue rip.
+wait 1500
+checkpoint segacd-panel-throne
+move 276 190
+click left 276 190
+wait 1000
+checkpoint segacd-panel-walk
+key m
+wait 1000
+checkpoint segacd-panel-travel
+quit

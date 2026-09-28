@@ -36,6 +36,9 @@ class OSystem;
 
 namespace Dune {
 
+/** The palette index of a MAP.HSQ terrain value (0-15) on the flat map and the globe. */
+byte terrainColour(uint terrain);
+
 class Panel;
 class Resource;
 class SentenceBank;

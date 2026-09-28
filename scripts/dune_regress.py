@@ -26,8 +26,8 @@ MANIFEST = "tests/regression/manifest.json"
 REPORT = "notes/temp/dune_scummvm_engine_20260916/results/regression-report"
 
 
-def load_manifest(root: Path) -> dict:
-    return json.loads((root / MANIFEST).read_text())
+def load_manifest(root: Path, name: str = MANIFEST) -> dict:
+    return json.loads((root / name).read_text())
 
 
 def dct_coeff(values: list[list[float]], u: int, v: int) -> float:
@@ -271,9 +271,21 @@ def add_missing_goldens(root: Path, manifest: dict, outputs: dict[str, Path]) ->
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=("verify", "init-golden", "add-missing"))
+    # The other releases (Amiga, Sega CD) have their own manifest, run by
+    # scripts/check_other_releases.sh; the default one is the IPA's gate.
+    parser.add_argument("--manifest", default=MANIFEST)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    manifest = load_manifest(root)
+    manifest = load_manifest(root, args.manifest)
+    # An "optional" scenario is skipped when its game data is not present.
+    kept = []
+    for scenario in manifest["scenarios"]:
+        data = os.environ.get(scenario["data_env"], scenario["data_default"])
+        if scenario.get("optional") and not Path(data).exists():
+            print(f"{scenario['name']}: skipped, no data at {data} (set {scenario['data_env']})")
+            continue
+        kept.append(scenario)
+    manifest["scenarios"] = kept
     outputs = {}
     for scenario in manifest["scenarios"]:
         output, status, _ = run_scenario(root, scenario)
@@ -283,6 +295,8 @@ def main() -> int:
             return status or 1
         print(f"{scenario['name']}: run complete ({len(list(output.glob('*.png')))} PNG checkpoints)")
     report = root / REPORT
+    if args.manifest != MANIFEST:
+        report = root / f"{REPORT}-{Path(args.manifest).stem}"
     if args.command == "add-missing":
         return add_missing_goldens(root, manifest, outputs)
     if args.command == "init-golden":

@@ -35,18 +35,21 @@ it does not compile, go back to this commit and please open an issue.
 
 ### Game data
 
-Point ScummVM at a directory holding one of the supported DOS releases. **The
-game's executable must be in the same directory**: the engine reads the
-location, room and character tables from the executable's data segment.
+Point ScummVM at a directory holding one of the supported releases. For the
+DOS releases, **the game's executable must be in the same directory**: the
+engine reads the location, room and character tables from the executable's
+data segment.
 
 | Release | Files needed | Tested with (SHA-256) |
 | --- | --- | --- |
 | DOS CD | `DUNE.DAT`, `DNCDPRG.EXE` | `DNCDPRG.EXE` `5f30aeb84d67cf2e053a83c09c2890f010f2e25ee877ebec58ea15c5b30cfff9`; `DUNE.DAT` `60060efa7fb0bd49447dcc7327549a554808aa0e9f11ccbc4866a30895960623` |
 | DOS floppy (v2.1) | all the loose `*.HSQ` / `*.HNM` / `*.BIN` files and `DUNEPRG.EXE` | `DUNEPRG.EXE` `021e6767485735e643fdb842aa0850f339b2e5114a5142e4d7c8a10d0dc6bea7` |
+| Amiga (3 disks) | the folder `scripts/dune_amiga_extract.py DISK1.adf DISK2.adf DISK3.adf OUTPUT_DIR` writes from the three disk images | |
+| Sega CD / Mega CD | the folder with the disc's bin/cue rip (or an extracted `DUNE.DAT`) | |
 
 Check yours with `shasum -a 256 <file>` (macOS) or `sha256sum <file>` (Linux).
-Other versions may work; please report their hashes. Amiga and Sega Mega CD
-data are not detected yet.
+Other versions may work; please report their hashes. The Amiga and Sega CD
+ports are younger than the DOS game; the README lists what they do not do yet.
 
 ## 2. Build by hand (any platform)
 
@@ -154,6 +157,12 @@ memory (`tests/regression/flight-seeds-floppy.txt`).
 off and on, on both releases) and the north/south quarrel. They read
 `DUNE_DATA_FLOPPY` and `DUNE_DATA_CD`.
 
+`scripts/check_other_releases.sh` runs the Amiga and Sega CD scenarios
+(`tests/regression/other-releases.json`) against their references. It reads
+`DUNE_DATA_AMIGA` and `DUNE_DATA_SEGACD` and skips a release whose data is
+missing; like the DOS references, seed them from your own data with
+`python3 scripts/dune_regress.py add-missing --manifest tests/regression/other-releases.json`.
+
 `scripts/dune_script_trace.py <script>` runs one harness script and prints the
 engine log grouped by script line (each line is logged as `Script line N`), the
 quickest way to see what a step did. Scripts may carry `#` comments after a
@@ -218,7 +227,7 @@ To check audio without listening, run the SDL build with
 | Symptom | Cause / fix |
 | --- | --- |
 | `--list-engines` has no `dune` line | the engine directory is not `engines/dune`, or `configure` ran before it was copied; re-run `configure` |
-| Game is not detected | the directory lacks `DUNE.DAT` (CD) or `DUNES.HSQ` (floppy) |
+| Game is not detected | the directory lacks `DUNE.DAT` (CD), `DUNES.HSQ` (floppy), the extracted Amiga files, or the Sega CD rip |
 | Intro plays, but after it places, exits or characters are missing or wrong | the executable (`DNCDPRG.EXE` / `DUNEPRG.EXE`) is not next to the data |
 | Compile errors in `engines/dune` against newer ScummVM | build at the pinned commit above and open an issue with the error |
 | Headless runs (`dump`, `make verify`, the speedrun check) exit at once with no error, while the game window works | Homebrew's `sdl2` is now `sdl2-compat` (SDL 3 underneath), whose dummy video driver cannot create a renderer. The checks need the real SDL 2. `test_dune_scummvm_sdl.sh` relinks the binary to `/opt/homebrew/Cellar/sdl2/<version>` when that is still installed; otherwise install an SDL 2.x release from [libsdl.org](https://github.com/libsdl-org/SDL/releases) and rebuild |
