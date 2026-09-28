@@ -26,6 +26,24 @@ engine contains no game data; you need your own copy of the game.
 | [odrade](https://github.com/debrouxl/odrade) | Lionel Debroux (with Dmitri Fatkin, John2022, hugslab) | GPL 2.0 | The troop record layout (27 bytes: occupation codes, skills, equipment bits, population) and the NPC/smuggler table positions, used by `World::troop` and FINDINGS.md |
 | UNLZEXE | Mitugu Kurizono (1990) | stated as freely usable in its source header; **verify the exact terms before publishing** | The LZEXE 0.91 decompression algorithm (bit queue reloaded after the sixteenth bit, the two match encodings) that `World::unpackLzexe` reimplements to read the floppy's DUNEPRG.EXE |
 | [ScummVM](https://www.scummvm.org/) | the ScummVM team | GPL 3.0 or later | The framework, the iOS backend and the OPL emulators |
+| Cryo's `disk_to_hd` (on the Amiga disk 1) | Cryo Interactive (1992) | part of the game; read, not copied | Its symbol table and code gave the Amiga disk layout (`dir.0`, 510-byte sectors with a checksum, the file-name tables): `scripts/dune_amiga_extract.py` reimplements the reading |
+| [amitools](https://github.com/cnvogelg/amitools) (`xdftool`) | Christian Vogelgsang | GPL 2.0 | Tool only: listing and unpacking the Amiga disks' OFS file system during the investigation; the extractor has its own small OFS reader |
+| [Capstone](https://www.capstone-engine.org/) (again) | Nguyen Anh Quynh and contributors | BSD-3-Clause | Tool only: the 68000 disassembly of the Amiga executable `dune` (`notes/amiga-port/tools/dis_game.py`), the source of the Amiga formats in `amiga.cpp` |
+| "DUNE Full Game Speedrun (Amiga)" video | MilkToast (runner) | video, facts only | The reference for the Amiga port's look (talk balloon colours, mirror, ending layout) and the route in `notes/amiga-speedrun/route.md` |
+
+For the Sega CD release no earlier reverse engineering was found; its
+formats were decoded from the disc (FINDINGS.md, "Sega CD / Mega CD
+release"). General Mega Drive / Mega CD hardware facts (the VDP's 4-bit tiles,
+name-table words, sprite sizes and CRAM colours; the disc's boot header and
+the IP/SP layout) are public knowledge from the console's documentation and
+emulator sources such as Charles MacDonald's VDP notes and the Genesis Plus GX
+and MAME Mega CD drivers; no code was taken from them. The gameplay references
+are a Let's Play recording ("Let's Play Dune (Sega CD) 24 - The Secret
+Ending") and a full US longplay ("Sega CD Longplay 047 - Dune (US)"), used
+only to compare screens and to measure layouts (portrait placements, box
+colours); `scripts/segacd_portrait_match.py` uses
+[OpenCV](https://opencv.org/) (Apache 2.0; tool only, not linked) for the
+template matching.
 
 Also consulted: Zwomp's ["Exploring the Dune files"](https://zwomp.com/tags/dune/)
 (HSQ format), Bigs' [Dune pages](https://www.bigs.fr/dune_old/), the
