@@ -472,6 +472,13 @@ bool World::characterInRoom(uint index) const {
 	// loc_136EE compares the record's two first words with ds:4 and ds:6:
 	// (room, place type) and (0x80, location + 1). A record with 0xFF as
 	// its location is somewhere else (Thufir and Duncan at the start).
+	// The Leto loop (dune_fix_leto_loop, off by default): the Duke's death
+	// (phase 0x4c, CD sub_11166, floppy phase callback) moves Jessica and
+	// queues vision 0x105 but never clears Leto's record, so the original
+	// keeps him in the throne room, listed and talking. With the fix he is
+	// in no room from then on.
+	if (index == 0 && _fixLetoLoop && _state.b(GameState::kPhase) >= 0x4c)
+		return false;
 	return _state.vars[o] == _state.b(GameState::kLocationAndRoom) &&
 		   _state.vars[o + 1] == _state.b(GameState::kLocationAndRoom + 1) &&
 		   _state.vars[o + 2] == _state.b(6) && _state.vars[o + 3] == _state.b(7);
@@ -1041,6 +1048,13 @@ void World::runPeriod() {
 		const int index = (int)(t.location - Location::kTableOffset) / Location::kRecordSize;
 		if (index < 0 || (uint)index >= locationCount())
 			continue;
+		// The new-day routine (floppy sub_9A58, ds:423A set on the first
+		// period of a day) starts the spice (9C1E), army (9E28) and
+		// irrigation (A2C7) handlers; its fort conversion lives in
+		// militaryTraining, its north/south quarrel here.
+		const byte job = t.occupation & 0x0f;
+		if (timeSlot() == 0 && (job == Troop::kSpiceMining || job == Troop::kMilitaryTraining || job == Troop::kIrrigation))
+			fremenQuarrel(id, (uint)index);
 		switch (t.occupation & 0x0f) {
 		case Troop::kMilitaryTraining:
 			if (!t.harkonnen())
@@ -1162,6 +1176,22 @@ bool World::discoverable(uint index) const {
 	// seg000:4125-4131: any hidden place (villages too) once the story phase
 	// reaches its byte 0x0b.
 	return l.hidden() && l.discoverPhase != 0xff && l.discoverPhase <= _state.b(GameState::kPhase);
+}
+
+void World::applyCelimynTuekFix() {
+	// The wiki's save patch (place record 0c 05 .. 03 00 80 ff: type 3, no
+	// troop, hidden, discovery phase 0xff) done in memory: byte 0x0b becomes
+	// 0x58, so the flight search (floppy sub_6223, 6257: cmp ds:2A, [si+0Bh])
+	// finds the sietch from phase 0x58 on.
+	if (!_fixCelimynTuek)
+		return;
+	for (uint i = 0; i < locationCount(); ++i) {
+		const Location l = location(i);
+		if (l.firstName != 0x0c || l.lastName != 0x05 || !l.hidden() || l.discoverPhase != 0xff)
+			continue;
+		locationByte(i, 11) = 0x58;
+		_log.line(Common::String::format("Option: dune_fix_celimyn_tuek: place %u discovery phase 0xff -> 0x58", i));
+	}
 }
 
 uint World::rowCells(int latitude) const {

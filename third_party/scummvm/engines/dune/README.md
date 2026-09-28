@@ -91,9 +91,9 @@ present at the markers into a 320x200 8-bit surface → `Panel::draw()` on rows
 
 ## Building and checking your change
 
-The repository lives on a slow external volume, so the scripts in
-`Cryogenic/scripts/` copy the ScummVM tree to `/private/tmp` and rsync this
-directory into it before building.
+The scripts in `scripts/` build in a staging folder outside the checkout
+(`DUNE_LOCAL_BUILD_ROOT`) and rsync this directory into the ScummVM tree there
+before building; see `BUILDING.md` at the repository root.
 
 ```sh
 # Desktop build (SDL). Opens the game in a window.
@@ -102,8 +102,8 @@ directory into it before building.
 # Automated check: untimed run that writes screenshots (BMP) of the intro
 # steps and of every palace room to
 # notes/temp/dune_scummvm_engine_20260916/results/sdl-dump/, then exits.
-DUNE_DATA=/private/tmp/dune-data        ./scripts/test_dune_scummvm_sdl.sh dump   # CD
-DUNE_DATA=/private/tmp/dune-data/floppy ./scripts/test_dune_scummvm_sdl.sh dump   # floppy
+DUNE_DATA=/path/to/cd-data     ./scripts/test_dune_scummvm_sdl.sh dump   # CD
+DUNE_DATA=/path/to/floppy-data ./scripts/test_dune_scummvm_sdl.sh dump   # floppy
 
 # Null-backend build and detection test.
 ./scripts/test_dune_scummvm_native.sh
@@ -130,13 +130,64 @@ skips the first n floppy intro scenes so a late scene can be checked quickly.
 `make verify` runs the scripted regression scenarios against `golden/` and
 must pass before an IPA is built (`make ipa`); `make add-missing-golden`
 seeds references for new checkpoints only. Changes to ScummVM outside
-this directory are kept as patches in `Cryogenic/scripts/patches/` (see its
+this directory are kept as patches in `scripts/patches/` (see its
 README); the iOS build script applies them.
 
-The Python tools in `Cryogenic/scripts/` (`dune_sprite_sheet.py`,
+The Python tools in `scripts/` (`dune_sprite_sheet.py`,
 `dune_hnm_frames.py`, `dune_room.py`) are small reference decoders. They are
 the quickest way to look inside a resource, and new format work usually starts
 there before it is ported to C++.
+
+## Game options
+
+Options that change the original's behaviour are off by default, so the
+engine plays as the original does. Turn them on per game in ScummVM's
+**Options > Engine** tab (desktop and iOS), or in `scummvm.ini` under the
+game's section:
+
+| Option (GUI) | `scummvm.ini` key | What it does |
+|---|---|---|
+| Fix the Leto loop | `dune_fix_leto_loop=true` | The original never clears Duke Leto's record when he dies (phase 0x4c), so he keeps standing in the throne room, listed and talking. With the option he is gone from every room from then on. Checked by `scripts/check_leto_loop.sh`. |
+| Fix Celimyn-Tuek | `dune_fix_celimyn_tuek=true` | The original's data gives the sietch Celimyn-Tuek a discovery stage the story never reaches (0xff), so it can never be found. With the option it becomes 0x58 at new game and after loading a save, so it can be found from that stage like the other late sietches. Checked by `scripts/check_celimyn_tuek.sh`. |
+
+ScummVM's command line has no switch for engine-specific keys; set the key in
+`scummvm.ini` (or with the GUI) instead.
+
+### The Leto loop
+
+**The cause.** When Leto dies, the original game never updates his own
+record: it still places him in the throne room. So the game keeps finding him
+there, drawing him, listing him and letting him talk. By default the engine
+keeps that behaviour, to stay faithful to the original.
+
+**How to turn the fix on** (off by default):
+
+- In ScummVM: the Dune game's **Options > Engine**, tick **Fix the Leto loop**.
+  It is the same on desktop and iPhone.
+- Or add `dune_fix_leto_loop=true` under the game's section in `scummvm.ini`.
+  There is no command-line switch, because ScummVM's command line cannot pass
+  engine-specific settings.
+
+With the fix on, Leto is no longer drawn, listed or talking anywhere after his
+death. The rest of the story is unchanged, including the handover to Duncan and
+the final scene with the Emperor.
+
+### Celimyn-Tuek
+
+**The cause.** Every hidden place has a byte for the story stage from which
+flying over it (or a nearby Fremen's hint) reveals it. For Celimyn-Tuek, the
+red centre of the map, the original's starting data has 0xff there, a stage the
+story never reaches, so the sietch is never found. By default the engine keeps
+that behaviour.
+
+**How to turn the fix on** (off by default):
+
+- In ScummVM: the Dune game's **Options > Engine**, tick **Fix Celimyn-Tuek**.
+- Or add `dune_fix_celimyn_tuek=true` under the game's section in `scummvm.ini`.
+
+The fix is the community's save patch (0xff to 0x58), done in memory at new
+game and whenever a save is loaded, so old saves benefit too. A save file
+changes only when the game saves.
 
 ## References
 
@@ -157,7 +208,7 @@ already answered in one of them.
   engine; lists the intro's scene table with the original's routine addresses.
 - **AdPlug** HERAD player; **hnm1dump** by VAG; **dune_revival**; **odrade**
   (save games, troops, locations).
-- `Cryogenic/src`: the Spice86/C# hybrid, a behavioural reference.
+- [Cryogenic](https://github.com/OpenRakis/Cryogenic) (`src/`): the Spice86/C# hybrid, a behavioural reference.
 
 ## Planned releases: Amiga and Sega Mega CD
 

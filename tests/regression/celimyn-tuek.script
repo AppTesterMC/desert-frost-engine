@@ -1,0 +1,10 @@
+# The Celimyn-Tuek option (scripts/check_celimyn_tuek.sh): the setup
+# (dune_story_setup=celimyn) logs the sietch's discovery phase at new game,
+# whether it is findable at phases 0x57 and 0x58, and the byte after a save
+# with the original's 0xff and a reload; everything happens during the setup.
+#
+# Comments after '#' on a command line say what a click hits and what a
+# wait lets finish; scripts/dune_script_trace.py prints what each line did.
+wait 3000               # the story setup runs (the save and the reload)
+checkpoint celimyn-end
+quit

@@ -1,0 +1,10 @@
+# The north/south quarrel (scripts/check_hemispheres.sh): the setup
+# (dune_story_setup=hemispheres) puts a northern and a southern troop at one
+# sietch, passes a day, contacts the chief (map and in person) and sends the
+# southern troop home; everything happens during the setup.
+#
+# Comments after '#' on a command line say what a click hits and what a
+# wait lets finish; scripts/dune_script_trace.py prints what each line did.
+wait 15000              # the story setup runs (a day passes, the talks, the move)
+checkpoint hemispheres-end
+quit

@@ -149,6 +149,11 @@ the floppy data (`DUNE_DATA_FLOPPY`) and checks that every row of the flight
 landscape is seeded exactly as in the original, whose seeds were read from its
 memory (`tests/regression/flight-seeds-floppy.txt`).
 
+`scripts/check_leto_loop.sh`, `scripts/check_celimyn_tuek.sh` and
+`scripts/check_hemispheres.sh` check the game options (each with the option
+off and on, on both releases) and the north/south quarrel. They read
+`DUNE_DATA_FLOPPY` and `DUNE_DATA_CD`.
+
 `scripts/dune_script_trace.py <script>` runs one harness script and prints the
 engine log grouped by script line (each line is logged as `Script line N`), the
 quickest way to see what a step did. Scripts may carry `#` comments after a

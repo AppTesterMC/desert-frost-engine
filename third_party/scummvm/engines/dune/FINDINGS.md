@@ -745,6 +745,37 @@ The red dot in the compass box of the Atreides palace opens a floor plan of the 
 - **Data.** The engine reads these tables from the executable's initial data segment through `World::ds`, so the floppy (+13 above 0x11C0) and CD layouts both work.
 - **Result:** 99.9% of pixels match the original with the plan open (throne room, Paul's room). The chapter 13 save's plan in room 11 matches too; that checkpoint's remaining difference is Jessica's figure in the room view, which the engine draws cut off.
 
+## The Leto loop (an original bug, fixed as an option)
+
+- **The bug.** After Jessica's "The Duke is dead" (phase 0x4c) the throne room still lists DUKE LETO ATREIDES and he talks ("Keep on going Paul!", speedrun video 2105-2115 s and 6265-6295 s).
+- **The cause.** The death callback (CD `sub_11166`; `phaseCallback(0x4c)` in `world.cpp`) only adds one to ds:1141, moves Jessica (room 2, 0x80, place 0 + 1) and queues vision 0x105. It never touches Leto's character record at ds:FD8 (room 10, the palace, 0x80, place 0 + 1). The presence test (`loc_136EE`: the record's two words against ds:4 and ds:6) therefore still finds him in the throne room. So do the command rows, the room's figures and the persons-in-room bits the dialogue conditions read.
+- **The engine.** By default it keeps the bug, as the original does: `World::characterInRoom` is the same test.
+- **The option.** `dune_fix_leto_loop`, shown in Options > Engine and read from `scummvm.ini`, makes `characterInRoom(0)` false from phase 0x4c on. Leto then leaves every room, row, figure and presence test, and the story flags set at his death are unchanged. Scripted scenes place their own cast and are not affected.
+- **Check.** `scripts/check_leto_loop.sh` runs the throne room right after his death (`dune_story_setup=letodead`) on both releases. With the option off, Leto must be listed and talk; with it on, he must be gone.
+
+## Northern and southern Fremen quarrel (2026-09-28)
+
+The Dune wiki says tribes from both hemispheres in one sietch "quarrel and refuse to work". The original does this:
+- **The hemisphere.** At game start each troop's byte 0x12 gets its region in the low nibble and bit 7 for the south (floppy `seg000:01e0`). The same byte holds bit 4 (quarrel) and bit 5 (sulk).
+- **When.** The new-day routine (floppy `sub_9A58`, tail 9A95–9AB8; CD 6e20) runs on the first period of a day (ds:423A). It is called at the start of the spice, army and irrigation handlers (9C1E, 9E28, A2C7). It only acts for the troop at the head of its place's chain.
+- **The test.** It skips Paul's place (ds:114E) and places of type 0x21 or more. Callback 7BEA (CD 6e82) walks the place's troops whose motivation (byte 0x15) is below 0x28 and whose occupation & 0x2F is 0, setting side bit 1 for the north and 2 for the south.
+- **The penalty.** If both sides are there, callback 7C10 (CD 6ea8) takes every such troop: `sub_9CBE` sets occupation bit 4 (stopped: no work), and byte 0x12 gets bit 4. Then `sub_4BB0` with ax 0x302 queues Duncan's message "Nothing coming from ... I wonder what's going on there!" (CD 6e77).
+- **What it shows.** The dispatcher (`sub_98B0`, CD 6c92) skips a troop whose word 0x12 has 0x430. The chief's lines read that word: 0x90 both "Life is impossible here! We came from the south...", 0x10 alone "It's difficult to understand Fremen from the south...", 0x20 the sulk line, 0xA0 "Some men even talk about going back to the south...". On contact: "We refuse to work anymore." (CD condition 513, floppy 511).
+- **The release.** Moving a troop out (`troop_issue_move_order`, floppy `sub_B072` at B096 calling `sub_9AF7`; CD 6ebf/6ecb) re-applies the job of every troop left behind that has bit 4. That goes through `sub_973E` (CD 6ad4), which clears bits 4–5 (`and byte [si+12h], 0CFh`, floppy 9759). The quarrel starts again the next day if both sides are still there and still below motivation 0x28.
+- **The engine.** `World::fremenQuarrel` (troops.cpp), called from `runPeriod` at time slot 0 for miners, trainers and irrigators. `applyJob` clears bits 4–5 and `issueMoveOrder` releases the troops left behind. The speedrun bot asks `World::wouldQuarrel` before sending miners or soldiers to a place.
+- **Not transcribed.** `sub_9A58` also runs `sub_9934` (the sietch's byte 0x0B counter) and a daily motivation decay (`sub_9BCB(1)` when more than 8 days have passed since troop byte 0x14; below 5 the troop sulks with bit 5).
+- **Check.** `scripts/check_hemispheres.sh` puts a northern and a southern troop at one sietch (`dune_story_setup=hemispheres`) on both releases. It checks that both quarrel the next day, that message 0x302 is queued, the contact and in-person lines, and that both work again after the southern troop leaves.
+
+## Celimyn-Tuek (an original bug, fixed as an option)
+
+- **The bug (wiki).** The sietch Celimyn-Tuek can never be found. The wiki's save patch looks for the place record `0C 05`, then 6 bytes, then `03 00 80 FF F7 04 00`, and changes FF to 58.
+- **The field.** The record is the location record at ds:0x100 (28 bytes): names 0x0C (Celimyn) and 0x05 (Tuek), then longitude, latitude and map cell, type 3, troop 0, status 0x80 (hidden), and byte 0x0B = 0xFF. Byte 0x0B is the discovery phase: the flight search (floppy `sub_6223` at 6257), `sub_6305` (6340) and `sub_7EF5` (7F56) all do `mov al, ds:2Ah; cmp al, [si+0Bh]; jb skip`. A hidden place is found only once the story phase ds:2A has reached that byte; CD 4125–4131 is `World::discoverable`. Finding a place clears the byte (`sub_637F`: `mov byte [di+0Bh], 0`; CD 425b).
+- **Why FF blocks it.** The phase never reaches 0xFF, so the compare always skips the sietch. With 0x58 it can be found from phase 0x58 on, as the other late sietches are.
+- **The option.** `dune_fix_celimyn_tuek` (Options > Engine, `scummvm.ini`), off by default. `World::applyCelimynTuekFix` sets the byte to 0x58 in memory after new-game setup and after a save is loaded, only while the sietch is still hidden with 0xFF. A save writes the patched byte only because the game writes its state.
+- **Check.** `scripts/check_celimyn_tuek.sh` runs `dune_story_setup=celimyn` on both releases:
+  - with the option off: 0xFF, never findable, and still 0xFF after a reload;
+  - with it on: 0x58, findable at phase 0x58 but not 0x57, and 0x58 again after reloading a save written with 0xFF.
+
 ## Test scripts: comments, traces and real time
 
 - **Comments.** The harness (`harness.cpp`) and the Spice86 host both strip a `#` that follows whitespace, so every `click` and `wait` carries what it hits or waits for: `click left 160 171      # row 2: DUKE LETO ATREIDES`.

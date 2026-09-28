@@ -185,9 +185,96 @@ void World::removeFromPlay(uint id) {
 	troopByte(id, kTroopEquipment) = 0;
 }
 
+bool World::wouldQuarrel(uint id, uint place) const {
+	if (place >= locationCount() || location(place).type >= 0x21)
+		return false; // only sietches and the palace quarrel (7BEA)
+	const byte *self = _state.vars + kTroopTable + (id - 1) * kTroopSize;
+	byte sides = (self[kTroopOccupation] & 0x2f) ? 0 : ((self[kTroopSpeech] & 0x80) ? 2 : 1);
+	Common::Array<uint> ids;
+	troopsAt(place, ids);
+	for (uint k = 0; k < ids.size(); ++k) {
+		if (ids[k] == id)
+			continue;
+		const byte *r = _state.vars + kTroopTable + (ids[k] - 1) * kTroopSize;
+		if (!(r[kTroopOccupation] & 0x2f))
+			sides |= (r[kTroopSpeech] & 0x80) ? 2 : 1;
+	}
+	return sides == 3;
+}
+
+bool World::prepareQuarrelTest(uint &north, uint &south, uint &place) {
+	// The first Fremen troop of each half (troop byte 0x12 bit 7) standing
+	// at a sietch; the southern one is moved into the northern one's sietch.
+	north = south = 0;
+	for (uint id = 1; id <= kTroops && (!north || !south); ++id) {
+		const Troop t = troop(id);
+		const int at = troopPlace(id);
+		if (!t.id || t.harkonnen() || at < 0 || (uint)at == currentLocation() || !location((uint)at).isSietch())
+			continue;
+		uint &slot = (troopByte(id, kTroopSpeech) & 0x80) ? south : north;
+		if (!slot)
+			slot = id;
+	}
+	if (!north || !south)
+		return false;
+	place = (uint)troopPlace(north);
+	unlinkTroop(south);
+	WRITE_LE_UINT16(&troopByte(south, kTroopLocation), placeOffset(place));
+	linkTroop(south, place);
+	const uint pair[2] = { north, south };
+	for (uint k = 0; k < 2; ++k) {
+		applyJob(pair[k], Troop::kSpiceMining);
+		troopByte(pair[k], kTroopMotivation) = 30;
+	}
+	return true;
+}
+
+void World::fremenQuarrel(uint id, uint index) {
+	// The north/south quarrel, the tail of the new-day routine that every
+	// spice, army and irrigation troop runs first (floppy sub_9A58 9A95-9AB8,
+	// CD troop_location_do_stuff_upon_new_day 6e20). Only the troop at the
+	// head of its place's chain runs it, once for the place.
+	if (troopByte(id, 0) != locationByte(index, 9))
+		return;
+	// Callback 7BEA (CD 6e82): nothing where Paul is, nothing outside a
+	// sietch or the palace (type >= 0x21); the troops that count are content
+	// below motivation 40 (0x28) and spice mining (occupation & 0x2f == 0:
+	// job 0, stopped/moving/unhired bits allowed). Each sets bit 1 for the
+	// north, bit 2 for the south (troop byte 0x12 bit 7, seg000:01e0).
+	if (index == currentLocation() || location(index).type >= 0x21)
+		return;
+	Common::Array<uint> ids;
+	troopsAt(index, ids);
+	byte sides = 0;
+	for (uint k = 0; k < ids.size(); ++k) {
+		if (troopByte(ids[k], kTroopMotivation) >= 0x28 || (troopByte(ids[k], kTroopOccupation) & 0x2f))
+			continue;
+		sides |= (troopByte(ids[k], kTroopSpeech) & 0x80) ? 2 : 1;
+	}
+	if (sides != 3)
+		return;
+	// Both halves: callback 7C10 (CD 6ea8) stops every troop there below
+	// motivation 40 that mines or trains for the army (occupation & 0x2b ==
+	// 0): sub_9CBE sets occupation bit 4 and the speech byte gets bit 4, the
+	// flag the job dispatcher skips (6c92, word 0x430) and the chiefs' lines
+	// read (PHRASE12 248-251, staged at ds:34). Then Duncan's telepathic
+	// message type 2 about the place, "Nothing coming from ... I wonder what's
+	// going on there!" (sub_4BB0 ax=0x302, CD 6e77).
+	for (uint k = 0; k < ids.size(); ++k) {
+		if (troopByte(ids[k], kTroopMotivation) >= 0x28 || (troopByte(ids[k], kTroopOccupation) & 0x2f & 0xfb))
+			continue;
+		troopByte(ids[k], kTroopOccupation) |= Troop::kStopped;
+		troopByte(ids[k], kTroopSpeech) |= 0x10;
+		_log.line(Common::String::format("Troops: troop %u quarrels at place %u (Fremen from the %s)", ids[k], index,
+				(troopByte(ids[k], kTroopSpeech) & 0x80) ? "south" : "north"));
+	}
+	queueVision(0x302, placeOffset(index));
+}
+
 void World::applyJob(uint id, byte job) {
 	// seg000:6ad4 / 6acb: the job with its clocks restarted.
 	troopByte(id, kTroopOccupation) = job; // seg000:6aea: the whole byte
+	troopByte(id, kTroopSpeech) &= 0xcf;   // 6aed: the quarrel/refusal bits 4-5 go (floppy sub_973E 9759)
 	if (job != Troop::kWaitingForOrders)
 		troopByte(id, kTroopSpeech + 1) |= (byte)(0x20 << ((job & 0x0f) >> 2)); // 6b06
 	WRITE_LE_UINT16(&troopByte(id, kTroopTime), _state.w(GameState::kGameTime));
@@ -226,6 +313,19 @@ bool World::issueMoveOrder(uint id, uint dest) {
 		// original bug, spec section 2.2); refuse the order instead.
 		_log.line(Common::String::format("Troops: troop %u cannot march to place %u under attack", id, dest));
 		return false;
+	}
+	// troop_06ebf (floppy sub_9AF7, called first at B096): the troops of the
+	// place being left that quarrel (speech bit 4, see fremenQuarrel) take
+	// their job again (troop_06ad4 with their own occupation), so moving a
+	// troop away settles the quarrel. The marching troop is still linked.
+	if (from >= 0) {
+		Common::Array<uint> left;
+		troopsAt((uint)from, left);
+		for (uint k = 0; k < left.size(); ++k)
+			if (troopByte(left[k], kTroopSpeech) & 0x10) {
+				applyJob(left[k], troopByte(left[k], kTroopOccupation) & 0x0f);
+				_log.line(Common::String::format("Troops: troop %u stops quarrelling at place %d", left[k], from));
+			}
 	}
 	unlinkTroop(id);
 	if (from >= 0) {

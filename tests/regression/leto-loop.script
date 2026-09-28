@@ -1,0 +1,15 @@
+# The Leto loop (scripts/check_leto_loop.sh): the throne room right after the
+# Duke's death (dune_story_setup=letodead). As in the original Leto is still
+# there, listed and talking; with dune_fix_leto_loop he is gone.
+#
+# Comments after '#' on a command line say what a click hits and what a
+# wait lets finish; scripts/dune_script_trace.py prints what each line did.
+wait 15000              # the story setup loads the throne room at phase 0x4c
+checkpoint leto-throne
+click left 160 171      # row 2: DUKE LETO ATREIDES if he is still listed (the loop), else the next person or nothing
+wait 2500               # his line shows (or nothing happens)
+checkpoint leto-row2
+click left 160 179      # row 3: DUKE LETO ATREIDES on the CD (row 2 is Mixer Panel there); on the floppy STOP TALKING or nothing
+wait 2500               # his line shows (or nothing happens)
+checkpoint leto-row3
+quit

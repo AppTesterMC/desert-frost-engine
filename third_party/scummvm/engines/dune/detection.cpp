@@ -26,6 +26,8 @@
 
 #include "engines/advancedDetector.h"
 
+#include "dune/detection.h"
+
 static const PlainGameDescriptor duneGames[] = {
 	{"dune", "Dune"},
 	{nullptr, nullptr}
@@ -42,7 +44,7 @@ static const ADGameDescription gameDescriptions[] = {
 		Common::EN_ANY,
 		Common::kPlatformDOS,
 		ADGF_NO_FLAGS,
-		GUIO0()
+		GUIO2(GAMEOPTION_FIX_LETO_LOOP, GAMEOPTION_FIX_CELIMYN_TUEK)
 	},
 
 	// English CD version. This is the DUNE.DAT currently present in the
@@ -54,7 +56,7 @@ static const ADGameDescription gameDescriptions[] = {
 		Common::EN_ANY,
 		Common::kPlatformDOS,
 		ADGF_CD,
-		GUIO0()
+		GUIO2(GAMEOPTION_FIX_LETO_LOOP, GAMEOPTION_FIX_CELIMYN_TUEK)
 	},
 
 	AD_TABLE_END_MARKER

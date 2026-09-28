@@ -498,6 +498,19 @@ public:
 	/** rand (seg000:e3cc) and rand_masked (e3b7): LCGs outside the save, so a reload rerolls. */
 	uint16 lcgRand();
 	uint16 lcgRandMasked(uint16 mask);
+	/** dune_fix_leto_loop: Leto is in no room after his death (phase 0x4c); off = as the original. */
+	void setFixLetoLoop(bool on) { _fixLetoLoop = on; }
+	bool fixLetoLoop() const { return _fixLetoLoop; }
+	/**
+	 * dune_fix_celimyn_tuek: the initial data gives Celimyn-Tuek (names 0x0c,
+	 * 0x05) the discovery phase 0xff, which the phase compares (floppy
+	 * seg000:6257, 6340, 7f56) never reach. On: the byte becomes 0x58 at new
+	 * game and after a load (in memory; a save writes it). Off = as the original.
+	 */
+	void setFixCelimynTuek(bool on) { _fixCelimynTuek = on; }
+	bool fixCelimynTuek() const { return _fixCelimynTuek; }
+	/** Apply dune_fix_celimyn_tuek to the current state (no-op when off or already fixed). */
+	void applyCelimynTuekFix();
 	/** The place a troop stands at (or marches to), -1 if none. */
 	int troopPlace(uint id) const;
 	static uint16 placeOffset(uint index);
@@ -522,6 +535,20 @@ public:
 	void shiftProspectorQueue();
 	/** Place index of a place offset (0x100 + 28 i), -1 for none. */
 	int placeIndex(uint16 offset) const;
+	/**
+	 * Would troop @p id at @p place make both halves meet there, the
+	 * condition of the north/south quarrel (fremenQuarrel): the spice troops
+	 * there (occupation & 0x2f == 0) and the troop itself if it mines, from
+	 * the north and the south (troop byte 0x12 bit 7). Motivation is left out
+	 * (it falls with time), so the answer is the cautious one.
+	 */
+	bool wouldQuarrel(uint id, uint place) const;
+	/**
+	 * Test setup (dune_story_setup=hemispheres): a northern and a southern
+	 * Fremen troop hired as spice miners at one sietch away from Paul,
+	 * motivation 30; returns false when no such pair exists.
+	 */
+	bool prepareQuarrelTest(uint &north, uint &south, uint &place);
 	/** ESPIONAGE (seg000:6a45): march to the nearest hidden fort within 30 cells. */
 	bool startEspionage(uint id);
 	/** seg000:5274's distance between two places: max(|dlng| >> 8, |dlat|). */
@@ -560,6 +587,8 @@ private:
 	int _shift;
 	bool _tablesFound;
 	bool _floppy;
+	bool _fixLetoLoop = false;
+	bool _fixCelimynTuek = false;
 	Common::Array<byte> _tablat;
 	uint _harvestRemainder;
 	byte _requestedPhase = 0;
@@ -582,6 +611,9 @@ private:
 	void registerEquipment(uint id, uint index, int sign, byte mask = 0xff);
 	void removeFromPlay(uint id);
 	void applyJob(uint id, byte job);
+	/** The north/south quarrel on a new day (floppy sub_9A58 9A95, CD 6e20). */
+	void fremenQuarrel(uint id, uint index);
+
 	bool travelSubstep(uint id);
 	void travelSubsteps(uint id, uint n);
 	void troopTravelStep(uint id);

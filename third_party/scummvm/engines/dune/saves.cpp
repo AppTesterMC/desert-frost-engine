@@ -235,6 +235,7 @@ bool SaveGame::load(uint slot) {
 	memcpy(state.vars, body.data() + kMapFlagBytes + extraSize + dialogueSize + slack, _world.savedSize());
 	state.notebook.clear();
 	_world.markPlaceCells();
+	_world.applyCelimynTuekFix(); // in memory; only a save writes it
 	_log.line(Common::String::format("Saves: slot %u loaded, time %u, place %u room %u", slot,
 			state.w(GameState::kGameTime), _world.currentLocation(), _world.room()));
 	return true;

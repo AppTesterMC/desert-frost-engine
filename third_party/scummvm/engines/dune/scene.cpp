@@ -395,6 +395,7 @@ void GameScreen::startNewGame() {
 	_state.newGame();
 	_world.loadInitialData();
 	_world.prepareNewGame();
+	_world.applyCelimynTuekFix(); // dune_fix_celimyn_tuek (off = as the original)
 	// The executable runs the phase triggers twice at startup (seg000:00b9, 00bc).
 	runPhaseTriggers();
 	runPhaseTriggers();

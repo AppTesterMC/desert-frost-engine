@@ -1397,8 +1397,8 @@ void GameScreen::speedrunSpice() {
 				int best = -1;
 				uint bestDistance = 0xffff;
 				for (Common::HashMap<uint, int>::const_iterator it = spare.begin(); it != spare.end(); ++it) {
-					if (it->_value <= 0 || (int)it->_key == at)
-						continue;
+					if (it->_value <= 0 || (int)it->_key == at || _world.wouldQuarrel(id, it->_key))
+						continue; // north and south quarrel (World::fremenQuarrel)
 					const uint d = _world.placeDistance((uint)at, it->_key);
 					if (d < bestDistance) {
 						bestDistance = d;
@@ -1510,7 +1510,7 @@ void GameScreen::speedrunSpiceFields(const Common::Array<uint> &troops) {
 			bool moved = false;
 			for (uint f = 0; f < fields.size() && !moved; ++f) {
 				const uint i = fields[f];
-				if ((int)i == at || assigned[i] >= 3)
+				if ((int)i == at || assigned[i] >= 3 || _world.wouldQuarrel(id, i))
 					continue;
 				speedrunLog(Common::String::format("troop %u leaves spent place %d to mine place %u (density %#x)", id, at, i,
 						_world.location(i).spiceDensity));
@@ -1522,7 +1522,7 @@ void GameScreen::speedrunSpiceFields(const Common::Array<uint> &troops) {
 			}
 			for (uint f = 0; f < fresh.size() && !moved; ++f) {
 				const uint i = fresh[f];
-				if ((int)i == at || assigned[i] >= 1)
+				if ((int)i == at || assigned[i] >= 1 || _world.wouldQuarrel(id, i))
 					continue;
 				speedrunLog(Common::String::format("troop %u leaves spent place %d to prospect place %u (density %#x)", id, at, i,
 						_world.location(i).spiceDensity));
@@ -1542,8 +1542,8 @@ void GameScreen::speedrunSpiceFields(const Common::Array<uint> &troops) {
 		const uint mine = !(here.status & 0x01) ? richness((uint)at) : 0;
 		for (uint f = 0; f < fields.size(); ++f) {
 			const uint i = fields[f];
-			if ((int)i == at || richness(i) < mine + 0x30 || assigned[i] >= 3)
-				continue;
+			if ((int)i == at || richness(i) < mine + 0x30 || assigned[i] >= 3 || _world.wouldQuarrel(id, i))
+				continue; // no field where the north and the south would meet
 			speedrunLog(Common::String::format("troop %u marches to mine place %u (density %#x, was %#x)", id, i,
 					_world.location(i).spiceDensity, here.spiceDensity));
 			speedrunOrders(id, -1, false, (int)i);

@@ -132,6 +132,15 @@ Common::Error DuneEngine::run() {
 	// As in the original, the game lands in the throne room; there is no
 	// start menu. Saving, loading and options belong to the book.
 	screen.setMusic(&music, musicEnabled);
+	// Options (Options > Engine, or scummvm.ini); off = as the original.
+	if (ConfMan.hasKey("dune_fix_leto_loop") && ConfMan.getBool("dune_fix_leto_loop")) {
+		screen.world().setFixLetoLoop(true);
+		log.line("Option: dune_fix_leto_loop on (Leto leaves the palace at his death, phase 0x4c)");
+	}
+	if (ConfMan.hasKey("dune_fix_celimyn_tuek") && ConfMan.getBool("dune_fix_celimyn_tuek")) {
+		screen.world().setFixCelimynTuek(true);
+		log.line("Option: dune_fix_celimyn_tuek on (Celimyn-Tuek can be found from phase 0x58)");
+	}
 	screen.startNewGame();
 	log.line("Startup complete: throne room displayed");
 	if (ConfMan.hasKey("dune_test_flight")) {

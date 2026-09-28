@@ -24,14 +24,51 @@
 
 #include "base/plugins.h"
 
+#include "common/translation.h"
+
 #include "engines/advancedDetector.h"
 
+#include "dune/detection.h"
 #include "dune/dune.h"
+
+namespace {
+
+const ADExtraGuiOptionsMap optionsList[] = {
+	{
+		GAMEOPTION_FIX_LETO_LOOP,
+		{
+			_s("Fix the Leto loop"),
+			_s("The original leaves Duke Leto standing and talking in the palace after his death. When enabled he is gone from phase 0x4c on."),
+			"dune_fix_leto_loop",
+			false,
+			0,
+			0
+		}
+	},
+	{
+		GAMEOPTION_FIX_CELIMYN_TUEK,
+		{
+			_s("Fix Celimyn-Tuek"),
+			_s("The original's data never lets the sietch Celimyn-Tuek be found. When enabled it can be found from story phase 0x58 on."),
+			"dune_fix_celimyn_tuek",
+			false,
+			0,
+			0
+		}
+	},
+	AD_EXTRA_GUI_OPTIONS_TERMINATOR
+};
+
+} // namespace
 
 class DuneMetaEngine : public AdvancedMetaEngine<ADGameDescription> {
 public:
 	const char *getName() const override {
 		return "dune";
+	}
+
+	const ADExtraGuiOptionsMap *getAdvancedExtraGuiOptions() const override {
+		return optionsList;
 	}
 
 	bool hasFeature(MetaEngineFeature feature) const override {

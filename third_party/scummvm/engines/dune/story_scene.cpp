@@ -587,6 +587,93 @@ void GameScreen::storySetup(const Common::String &what) {
 		prepareEcologyTest(true);
 		return;
 	}
+	if (what == "hemispheres") {
+		// The north/south quarrel (World::fremenQuarrel, floppy sub_9A58
+		// 9A95): two hired troops from both halves at one sietch, Paul at the
+		// palace; a day passes, then the chief of the place is contacted and
+		// the southern troop is sent home (scripts/check_hemispheres.sh).
+		setGamePhase(0x14);
+		_world.firstVision(); // the quarrel's message needs the first vision (sub_4BB0, ds:0a bit 0)
+		while (_world.visionCount())
+			_world.dequeueVision();
+		_world.setPosition(0, 10);
+		uint north, south, place;
+		if (!_world.prepareQuarrelTest(north, south, place)) {
+			_log.line("Story setup: no northern and southern troop pair");
+			return;
+		}
+		_log.line(Common::String::format("Story setup: troops %u (north) and %u (south) at place %u", north, south, place));
+		_world.advanceTime(World::kSlotsPerDay - _world.timeSlot()); // to the next day's first period
+		_log.line(Common::String::format("Story setup: after the day, troop %u occupation %#x speech %#x, troop %u occupation %#x speech %#x, %u vision(s)",
+				north, _world.troop(north).occupation, _world.troop(north).dissatisfaction, south,
+				_world.troop(south).occupation, _world.troop(south).dissatisfaction, _world.visionCount()));
+		loadDialogue();
+		openMap(MapScreen::kFlat, false);
+		openTroop(north, true);
+		for (uint g = 0; g < 3 && nextTroopLine(); ++g)
+			; // ASK FOR MORE INFORMATION: "We refuse to work anymore." (condition 513: speech & 0x30)
+		leaveMap();
+		// In person at the sietch (the chief's list 1: conditions 488/489 read
+		// the quarrel bit with the south bit, PHRASE12 248/249).
+		_world.setPosition(place, 1);
+		showRoom(1);
+		talkThrough(World::kFremenChief);
+		_world.setPosition(0, 10);
+		showRoom(10);
+		_world.issueMoveOrder(south, 0);
+		_log.line(Common::String::format("Story setup: after the move, troop %u occupation %#x speech %#x", north,
+				_world.troop(north).occupation, _world.troop(north).dissatisfaction));
+		return;
+	}
+	if (what == "celimyn") {
+		// Celimyn-Tuek (names 0x0c, 0x05): its discovery phase (location
+		// byte 0x0b) at new game, whether the flight search would find it
+		// just before and at phase 0x58, and the byte after a save and
+		// reload with the in-memory byte put back to the original's 0xff
+		// (scripts/check_celimyn_tuek.sh, option off and on).
+		int place = -1;
+		for (uint i = 0; i < _world.locationCount() && place < 0; ++i)
+			if (_world.location(i).firstName == 0x0c && _world.location(i).lastName == 0x05)
+				place = (int)i;
+		if (place < 0) {
+			_log.line("Story setup: Celimyn-Tuek not found");
+			return;
+		}
+		const byte phase = _state.b(GameState::kPhase);
+		_log.line(Common::String::format("Story setup: Celimyn-Tuek is place %d, status %#x, discovery phase %#x", place,
+				_world.location(place).status, _world.location(place).discoverPhase));
+		_state.setB(GameState::kPhase, 0x57);
+		const bool before = _world.discoverable(place);
+		_state.setB(GameState::kPhase, 0x58);
+		const bool at = _world.discoverable(place);
+		_state.setB(GameState::kPhase, phase);
+		_log.line(Common::String::format("Story setup: Celimyn-Tuek findable at phase 0x57 %s, at 0x58 %s",
+				before ? "yes" : "no", at ? "yes" : "no"));
+		_state.vars[Location::kTableOffset + place * Location::kRecordSize + 11] = 0xff;
+		saveSlot(2);
+		loadSlot(2);
+		_log.line(Common::String::format("Story setup: Celimyn-Tuek after a save with 0xff and a load: discovery phase %#x",
+				_world.location(place).discoverPhase));
+		return;
+	}
+	if (what == "letodead") {
+		// Right after the Duke's death (phase 0x4c, CD sub_11166): the throne
+		// room. As in the original Leto still stands there and is listed;
+		// with dune_fix_leto_loop he is gone (scripts/check_leto_loop.sh).
+		setGamePhase(0x4c);
+		_pendingScene = 0;
+		while (_world.visionCount())
+			_world.dequeueVision();
+		_world.setPosition(0, 10);
+		showRoom(10);
+		Common::Array<byte> people;
+		_world.peopleInRoom(people);
+		Common::String list;
+		for (uint i = 0; i < people.size(); ++i)
+			list += Common::String::format(" %u", people[i]);
+		_log.line(Common::String::format("Story setup: the throne room after Leto's death, people:%s", list.c_str()));
+		return;
+	}
 	if (what == "comm") {
 		_state.setB(GameState::kPhase, 0x14);
 		_world.firstVision();

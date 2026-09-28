@@ -69,7 +69,7 @@ floppy releases are detected. The table shows what works; the full status is in
 | Story | story phases and their callbacks, Jessica's lessons, the Emperor's spice demands bargained with Duncan in the COMM room, Paul's visions, the scripted scenes, the sietch chiefs' story lines (the stillsuit maker) and Stilgar's Water of Life |
 | Ecology and ending | the ecology route (wind traps, bulbs, irrigation, vegetation spreading on the map, fortresses taken, MODIFY EQUIPMENT), the Harkonnen zone, deaths on arrival, and the final scene |
 | Desert and flight | walking in the desert with its landscape, the ornithopter cockpit and destination screen, steering in free flight, CHANGE DESTINATION, the flight landscape (seeded row by row as the original, checked against its memory) and sightings of companions |
-| War and the ending | troop marches and espionage, fort battles, MASSIVE ATTACK and FIGHT FOR A WHOLE DAY, the Harkonnen captain, worm riding, the smugglers' village and the final attack on the Harkonnen palace |
+| War and the ending | troop marches and espionage, fort battles, MASSIVE ATTACK and FIGHT FOR A WHOLE DAY, the Harkonnen captain, worm riding, the smugglers' village, the quarrel between north and south troops (as in the original: mixed troops stop working) and the final attack on the Harkonnen palace |
 | Not yet | full command lists per room |
 
 `scripts/check_speedrun.sh` lets a bot play the known PC speedrun route through
@@ -79,6 +79,50 @@ the ending on both the floppy and the CD release.
 
 The reverse-engineering record, with a source and confidence for each fact, is
 in [`FINDINGS.md`](third_party/scummvm/engines/dune/FINDINGS.md).
+
+## Game options
+
+Options that change the original's behaviour are **off by default**, so the
+engine plays as the original does. Turn them on per game in ScummVM's
+**Options > Engine** tab (desktop and iPhone), or in `scummvm.ini` under the
+game's section. ScummVM's command line cannot pass engine-specific settings,
+so there is no command-line switch.
+
+| Option | `scummvm.ini` key | What it does |
+| --- | --- | --- |
+| Fix the Leto loop | `dune_fix_leto_loop=true` | Duke Leto is gone from every room after his death (see below) |
+| Fix Celimyn-Tuek | `dune_fix_celimyn_tuek=true` | The sietch Celimyn-Tuek can be found from story stage 0x58 on (see below) |
+
+### The Leto loop
+
+**The cause.** When Leto dies, the original game never updates his own
+record, which still places him in the throne room. So the game keeps finding
+him there, drawing him, listing him and letting him talk. By default the
+engine keeps that behaviour, to stay faithful to the original.
+
+**How to turn the fix on** (off by default):
+
+- In ScummVM: the Dune game's **Options > Engine**, tick **Fix the Leto loop**.
+  It is the same on desktop and iPhone.
+- Or add `dune_fix_leto_loop=true` under the game's section in `scummvm.ini`.
+
+With the fix on, Leto is no longer drawn, listed or talking after his death.
+The rest of the story is unchanged, including the handover to Duncan and the
+final scene with the Emperor. `scripts/check_leto_loop.sh` checks both
+settings.
+
+### Celimyn-Tuek
+
+**The cause.** Each hidden place has a byte for the story stage from which it
+can be found. The original's starting data gives the sietch Celimyn-Tuek 0xff,
+a stage the story never reaches, so it is never found. By default the engine
+keeps that behaviour.
+
+**How to turn the fix on** (off by default): tick **Fix Celimyn-Tuek** in the
+game's **Options > Engine**, or add `dune_fix_celimyn_tuek=true` to
+`scummvm.ini`. The byte becomes 0x58 in memory at new game and after a load;
+a save file changes only when the game saves. `scripts/check_celimyn_tuek.sh`
+checks both settings.
 
 ## Screenshots
 
