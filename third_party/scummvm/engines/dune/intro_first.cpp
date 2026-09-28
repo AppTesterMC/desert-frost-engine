@@ -51,7 +51,7 @@ namespace Dune {
 namespace {
 
 bool fastCapture() {
-	return (isDumpRun() && !dumpEveryMillis()) || isDuneHarnessRun();
+	return (isDumpRun() && !dumpEveryMillis()) || isDuneFastHarness();
 }
 
 uint32 ramp256(uint32 elapsed, uint32 start, uint32 length) {

@@ -2,6 +2,6 @@
 # water and bulbs; its troop takes bulbs (MODIFY EQUIPMENT), specializes in
 # ecology and irrigates for 120 days. The flat map then shows the vegetation
 # tufts (ONMAP 0x78/0x79) grown round the place and north of it.
-wait 20000
+wait 20000              # the setup plays 120 days of irrigation and opens the flat map
 checkpoint ecology-map
 quit

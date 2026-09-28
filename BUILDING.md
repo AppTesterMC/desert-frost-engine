@@ -136,16 +136,23 @@ report. Then accept that one checkpoint with
 `./scripts/check_speedrun.sh [campaign|full] [seed...]` has a bot play the PC
 speedrun route on both releases (uses `DUNE_DATA_FLOPPY` and `DUNE_DATA_CD`).
 It prints PASS when the Emperor's throne room is reached. `campaign` starts
-after Leto's death; `full`, from a new game, does not pass yet.
-Since the flight follows the original's exact timing, the bot's war and endgame
-do not finish with every seed (for example seed 1, the default); seeds 2 and 3
-pass on both releases. A FAIL there is the bot's strategy, not an engine error:
-the log names the stage where it stopped.
+after Leto's death; `full` plays from a new game to the ending, and completes on
+both releases with seed 1. `scripts/watch_speedrun.sh [campaign|full] [--cd]
+[--seed N]` shows the same bot playing in a window, slowed down so it can be
+followed; the game stays playable where it stops.
+The bot reacts to the exact game timing, so a seed can occasionally stop before
+the end. A FAIL names the stage where it stopped; check another seed before
+suspecting the engine.
 
 `./scripts/check_flight_landscape.sh` flies from the palace to Carthag-Tuek on
 the floppy data (`DUNE_DATA_FLOPPY`) and checks that every row of the flight
 landscape is seeded exactly as in the original, whose seeds were read from its
 memory (`tests/regression/flight-seeds-floppy.txt`).
+
+`scripts/dune_script_trace.py <script>` runs one harness script and prints the
+engine log grouped by script line (each line is logged as `Script line N`), the
+quickest way to see what a step did. Scripts may carry `#` comments after a
+step.
 
 `./scripts/check_dune_build.sh` is the wider pre-release check: it screenshots
 every reachable screen of both releases and measures the audio. See
@@ -193,6 +200,7 @@ are documented in `engines/dune/debug.h`:
 | `dune_record=<dir>` | save every shown frame as a BMP with its duration, to make a video of a run |
 | `dune_speedrun_watch=1` | show the speedrun bot's run on screen and leave the game playable afterwards |
 | `dune_test_cockpit=<n>` | open the ornithopter cockpit for a scripted real-time test |
+| `dune_real_time=true` | keep a scripted (harness) run at the original's speed instead of as fast as possible |
 | `dune_hnm_dump_frame=<n>` | on a dump run, the video frame at which each intro video is screenshotted (default 40) |
 | `dune_story_setup=<name>` | start from a prepared story state (`comm`, `gathering`, `ecology`, `stillsuit`; used by the story scenarios) |
 | `dune_input=<file>`, `dune_checkpoint_dir=<dir>` | scripted input and checkpoints (used by the harness) |

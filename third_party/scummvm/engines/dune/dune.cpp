@@ -67,6 +67,10 @@ static void startSong(Music &music, Resource &resources, StartupLog &log, const 
 
 Common::Error DuneEngine::run() {
 	StartupLog log;
+	setDuneHarnessLog(&log);
+	struct HarnessLogGuard {
+		~HarnessLogGuard() { setDuneHarnessLog(nullptr); }
+	} harnessLogGuard;
 	const bool isCD = (_gameDescription->flags & ADGF_CD) != 0;
 	log.line(Common::String::format("Dune startup: version=%s", isCD ? "CD" : "floppy"));
 

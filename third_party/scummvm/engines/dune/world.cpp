@@ -1004,7 +1004,11 @@ void World::prospect(uint id, uint index) {
 		_log.line(Common::String::format("Troops: troop %u prospected place %u", id, index));
 	}
 	WRITE_LE_UINT16(&troopByte(id, 0x0e), 100);
-	troopByte(id, 3) |= Troop::kStopped; // the job is done: it waits for new orders
+	// seg000:9d5f: with destinations left the prospectors march to the next
+	// (sub_B072); otherwise the job is done and they wait for new orders.
+	if (id == kProspectorTroop && prospectorDestination(0) && issueMoveOrder(id, 0))
+		return;
+	troopByte(id, 3) |= Troop::kStopped;
 }
 
 void World::runPeriod() {
@@ -1102,7 +1106,20 @@ void World::runPeriod() {
 		const uint16 stock = _state.w(kSpiceStock);
 		_state.setW(0xa6, (uint16)(stock >= _state.w(0x1170) ? stock - _state.w(0x1170) : 0));
 		_state.setW(0x1170, stock);
-		_log.line(Common::String::format("Clock: day %u, spice %u kg", day(), spiceStock()));
+		// The spice troops at work, for the logs (the harvest is per period).
+		uint miners = 0, rate = 0, idle = 0;
+		for (uint id = 1; id < kTroops; ++id) {
+			const Troop t = troop(id);
+			if (!t.id || !t.hired() || t.harkonnen() || (t.occupation & 0x0f) != Troop::kSpiceMining)
+				continue;
+			++miners;
+			const uint kg = READ_LE_UINT16(&troopByte(id, 0x0c));
+			rate += kg;
+			if (!kg || (t.occupation & (Troop::kStopped | 0x40)))
+				++idle;
+		}
+		_log.line(Common::String::format("Clock: day %u, spice %u kg; %u miners (%u idle), %u kg a period", day(),
+				spiceStock(), miners, idle, rate));
 	}
 }
 

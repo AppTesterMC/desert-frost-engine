@@ -117,6 +117,29 @@ public:
 	void centreOn(uint locationIndex);
 	/** Centre on a map position (the desert: the orni cockpit's window, seg000:5b5d). */
 	void centreOnPosition(uint16 longitude, int16 latitude);
+	/**
+	 * map_draw_zoomed_globe's windowed mode (CD seg000:b6c3, floppy
+	 * sub_D467/D490): one map row per screen row, one cell per pixel, the
+	 * window centred on a position. Terrain: (cell & 0x0F) + 0x10. Density
+	 * (the SEE SPICE DENSITY overlay, CD 542f / floppy sub_80B0): MAP2's
+	 * spice-field ids through the table of build_spice_density_xlat (CD
+	 * 57e5), a pixel drawn only inside its field (vga_draw_landscape).
+	 */
+	void drawZoomedWindow(Graphics::ManagedSurface &surface, const Common::Rect &window, uint16 longitude, int16 latitude,
+			bool density);
+	/** Where a map position falls in a zoomed window centred on (longitude, latitude). */
+	bool windowProject(const Common::Rect &window, uint16 longitude, int16 latitude, uint16 pointLongitude,
+			int16 pointLatitude, int &x, int &y) const;
+	/** The map position under a pixel of a zoomed window. */
+	bool windowUnproject(const Common::Rect &window, uint16 longitude, int16 latitude, int x, int y,
+			uint16 &pointLongitude, int16 &pointLatitude) const;
+	/** The known places' markers (ICONES 0x3A-0x3E, +5 for a far sietch) in a zoomed window. */
+	void drawWindowMarkers(Graphics::ManagedSurface &surface, const Common::Rect &window, uint16 longitude,
+			int16 latitude, const Panel &panel) const;
+	/** The known place whose marker is within 9 pixels of (x, y) in a zoomed window (floppy 5e6d), or -1. */
+	int windowHit(const Common::Rect &window, uint16 longitude, int16 latitude, int x, int y) const;
+	/** The zoomed window's latitude clamp (+-(0x56 - height / 2)). */
+	static int16 clampWindowLatitude(const Common::Rect &window, int16 latitude);
 	/** Where a map position falls in the flat view (rows 0-151); false off the view. */
 	bool projectPosition(uint16 longitude, int16 latitude, int &x, int &y) const;
 	void scroll(int dx, int dy);
@@ -126,11 +149,44 @@ public:
 	void select(int locationIndex) { _destination = locationIndex; }
 	/** Pick a desert point (arm_pending_travel's desert case): destination -2, its position kept. */
 	bool selectPoint(int x, int y);
+	/** Pick a desert point by its map position (the cockpit's window). */
+	void selectPosition(uint16 longitude, int16 latitude) {
+		_pointLongitude = longitude;
+		_pointLatitude = latitude;
+		_destination = -2;
+	}
+	/** The centre of the zoomed windows (the flat view's middle row). */
+	uint16 centreLongitude() const { return _longitude; }
+	int16 centreLatitude() const { return (int16)CLIP<int>(_latitude + 18, -96, 96); }
 	uint16 pointLongitude() const { return _pointLongitude; }
 	int16 pointLatitude() const { return _pointLatitude; }
 
 	/** SEE SPICE DENSITY: circles sized by each known sietch's density, and the box's title. */
 	void setDensity(bool on) { _density = on; }
+	/**
+	 * A troop's route over the density popup (floppy sub_AD0A, drawn while a
+	 * move order is picked): the troop's position, then each destination,
+	 * joined by dotted lines of colour 0x0C. Empty: no route.
+	 */
+	void setRoute(const Common::Array<Common::Point> &points) { _route = points; }
+	/**
+	 * Where the density popup goes and whose marker it shows. From the map
+	 * (sub_8087) it is at ds:11ce/11d0 with Paul's ornithopter; over a troop's
+	 * popup (sub_A5E5) it is at (0x5c, 0x1e), or (0x5c, 0x0e) under a popup in
+	 * the lower half, with the troop (sub_8F62) at @p troopAt (longitude,
+	 * latitude) and its route.
+	 */
+	void setDensityForMap();
+	void setDensityForTroop(int x, int y, const Common::Point &troopAt) {
+		_densityX = x;
+		_densityY = y;
+		_densityTroop = true;
+		_densityTroopAt = troopAt;
+	}
+	/** A tap on the density popup's window: the nearest place within 9 pixels, -1 none, -2 outside the window. */
+	int densityHit(int x, int y) const;
+	/** The density popup alone (sub_80B0), for screens that draw it over their own panels. */
+	void drawDensityOverlay(Graphics::ManagedSurface &surface, const Panel &panel);
 	/**
 	 * The "DUNE MAP" title popup (map_show_rallied_troops_popup, seg000:5bb0)
 	 * greets the map when it opens from the room. A click with either button
@@ -199,7 +255,9 @@ private:
 	bool _selecting;
 	int _destination;
 
-	Common::Array<byte> _mapData, _tablatData;
+	Common::Array<byte> _mapData, _tablatData, _spiceFields; ///< _spiceFields: MAP2.HSQ
+	bool windowRow(int latitude, int &start, int &cells) const;
+	void drawRoute(Graphics::ManagedSurface &surface, const Common::Rect &window, int16 centreLatitude);
 	MapRenderer *_renderer;
 	Sprite *_icons;   ///< ONMAP.HSQ
 	Sprite *_fresk;   ///< FRESK.HSQ
@@ -209,6 +267,10 @@ private:
 	uint16 _rotation;
 	int _tilt;
 	bool _density;
+	Common::Array<Common::Point> _route; ///< (longitude, latitude) pairs, see setRoute
+	int _densityX = 75, _densityY = 15;  ///< the popup's place (floppy ds:426c/426e)
+	bool _densityTroop = false;
+	Common::Point _densityTroopAt;
 	bool _caption = true;
 	uint32 _captionStart = 0;
 	uint16 _pointLongitude = 0;
@@ -217,6 +279,8 @@ private:
 	uint16 _flightLongitude;
 	int16 _flightLatitude;
 	int _flightDestination;
+	uint16 _minimapLongitude = 0; ///< the flight minimap's centre (travel_minimap_setup)
+	int16 _minimapLatitude = 0;
 	Common::Array<uint32> _trail; ///< (longitude << 16) | (uint16)latitude
 	uint _results;
 	byte _index[320 * 152];

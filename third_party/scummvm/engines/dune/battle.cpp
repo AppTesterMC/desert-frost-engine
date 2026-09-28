@@ -403,17 +403,44 @@ void World::militaryTraining(uint id, uint index) {
 	if (timeSlot() == 0 && (l[10] & kStatusHeld)) {
 		const byte delta = (byte)((_state.w(GameState::kGameTime) >> 4) - l[11]);
 		if (delta != 254 && delta != 255) {
+			// floppy sub_9A58 (9A6C-9A7E): the place turns sietch (type & 7).
 			l[10] &= ~kStatusHeld;
 			l[8] &= 7;
 			_state.setB(GameState::kSietchesAvailable, (byte)(_state.b(GameState::kSietchesAvailable) + 1));
+			// sub_99F3: the characters staying here (their record's second
+			// word is 0x80, place + 1, from sub_61D8) take the new type and
+			// room 1 or 2 (a sietch has no more), and so does Paul's position
+			// (ds:4, ds:0b, ds:8) when he is here. Without it a character left
+			// here with STAY HERE no longer matches ds:4 (loc_136EE) and is
+			// absent: the war council never started for Thufir at place 2.
+			const byte key = (byte)(index + 1);
+			for (uint c = 0; c < 12; ++c) {
+				byte *r = _state.vars + kCharacterTable + c * kCharacterSize;
+				if (r[2] == 0x80 && r[3] == key) {
+					r[1] = l[8];
+					if (r[0] != 1)
+						r[0] = 2;
+				}
+			}
+			if (_state.b(6) == 0x80 && _state.b(7) == key) {
+				const byte room = _state.b(GameState::kLocationAndRoom) == 1 ? 1 : 2;
+				_state.setB(GameState::kLocationAndRoom, room);
+				_state.setB(GameState::kLocationAndRoom + 1, l[8]);
+				_state.setB(0x0b, room);
+				_state.setB(8, l[8]);
+			}
+			// The troops' callback (bp 7B77, 9A4C): flag 0x20 goes, the
+			// speech flag 0x1000 comes.
 			Common::Array<uint> ids;
 			troopsAt(index, ids);
 			for (uint i = 0; i < ids.size(); ++i) {
 				byte *o = troopRecord(ids[i]);
-				if (o[kBits] & 0x20)
+				if (o[kBits] & 0x20) {
+					o[kBits] &= ~0x20;
 					WRITE_LE_UINT16(o + kSpeech, READ_LE_UINT16(o + kSpeech) | 0x1000);
+				}
 			}
-			l[11] = 5;
+			l[11] = 5; // 9A7E
 			_log.line(Common::String::format("Battle: fortress %u becomes a sietch", index));
 		}
 	}

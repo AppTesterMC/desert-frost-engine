@@ -667,7 +667,7 @@ Details are in `notes/orni-cockpit-spec.md` and `notes/orni-flight-spec.md`. The
   - After a step, the seed is lng ^ lat five register-steps ahead, with the heading re-aimed from the new position. The picker comes from that cell's map byte, so the dunes and rocks are the terrain the route is about to cross.
   - `scripts/check_flight_landscape.sh` compares the engine's seeds with the original's (`tests/regression/flight-seeds-floppy.txt`).
 - **Sightings** (floppy `4353`, `3924`). The check needs someone travelling with Paul (ds:10). A findable place counts when it is in the 9×9 block and within 135° of the heading; the last one found wins. It is marked discovered and the flight homes on it at once. The companion then speaks PHRASE12 0x1A0 in the ORNYCAB cabin, with the place's kind and side substituted. The single row is GO TOWARDS THIS PLACE. The old GO TOWARDS / RESUME FLIGHT choice is gone.
-- **Globe access.** The planet at the bottom left of the flat map opens the globe and its game menu, as in the original. Paul's head still works too.
+- **Globe access.** The planet at the bottom left of the flat map opens the globe and its game menu, as in the original. So does the box's top edge under Paul's head (92..229 x 152..159); a click on the head itself, in the view, does nothing, as in the original (the widened zone round the head was dropped on 2026-09-28).
 - **Save files** read raw. A save begins with the game time, so a time such as 0x0178 writes `78 01`, a valid zlib header, and `openForLoading()` returned an empty stream. The speedrun check found this after the route timing changed.
 - **Not yet done:**
   - the zoomed-globe renderer (`b6c3`) that draws the cockpit window and the minimap at a finer scale;
@@ -675,12 +675,119 @@ Details are in `notes/orni-cockpit-spec.md` and `notes/orni-flight-spec.md`. The
   - the take-off blink of the chosen label;
   - the CD's two-way side split and its " WHAT ? " row.
 
+## The zoomed map window, the spice-density overlay and the save slots
+
+These were checked pixel by pixel against the original on Spice86. Both programs loaded the same save and made the same clicks.
+
+- **The zoomed window** (map_draw_zoomed_globe, windowed mode: CD `b6c3`, floppy `sub_D467`/`sub_D490`). One map row per screen row, one cell per pixel.
+  - Each row is centred on the column `longitude × cells >> 16` of the centre.
+  - The top row is `latitude − (h − 1) / 2`; the latitude is clamped to ±(0x56 − h/2).
+  - Terrain pixels are `(cell & 0x0F) + 0x10`.
+  - Place markers are ICONES 0x3A + kind; a sietch beyond the contact range (ds:1176) takes +5. Paul is ICONES 0x4C at (x − 13, y − h).
+
+  It draws three screens:
+  - the ornithopter cockpit's window: 99% of pixels match, with a click resolving to the nearest marker within 9 px;
+  - the flight minimap: (204,4)–(316,60) in a four-ring border, with the trail (ICONES 0x2F), destination (0x2E) and position (0x30). It recentres when the position leaves x 0xD6–0x131, y 0x0A–0x35. ORNYPAN's palette stays installed through the flight and colours it. It matches within 28 of 7,936 pixels;
+  - the SEE SPICE DENSITY overlay.
+- **The spice-density overlay** (floppy `sub_80B0`, CD `542f`). It matches in 99.98% of pixels.
+  - The panel is ONMAP 0x8D (170 × 108) at (75,15), with the window at +(5,7), 160 × 89, centred on the map's position.
+  - The window shows MAP2.HSQ's spice-field ids through build_spice_density_xlat: backdrop 0x70; a known place's field is 0x75, or 0x50 + density/16 once prospected.
+  - A pixel shows only where it equals its right and lower neighbours (vga_draw_landscape), so the fields show outlines. The last row is backdrop.
+  - Over it: the markers, Paul, and an 80 × 40 dotted box (colour 0xFB, pattern 0x5555, starting with a gap) round the view's centre.
+  - The legend reads "SPICE DENSITY", "−", the shades 0x50–0x5F in 3 × 5 squares, and "+".
+  - The row keeps its name and toggles the overlay; the panel's close box also closes it.
+- **Save slots.** The original's Log 1 is DUNE21S1.SAV, Log 2 is S2, and the two "last entering" logs are S3 and S4. The engine used S0–S3.
+- **Still to do:** the curved edges of the window near the poles (map_globe_edge_insets).
+
+## The prospectors: the map lesson and MOVE TROOP
+
+Built from the floppy disassembly (`sub_A5E5`, `sub_ACC0`, `sub_AD0A`, `sub_AE22`, `sub_9D05`, `sub_B05B`) and the CD decompile (`8064`–`84a6`). The lesson and the pick screen were compared with the speedrun video, which is the CD release. Spice86 draws this popup as noise, so there is no pixel capture of the original. `scripts/check_prospector_lesson.sh` replays it from the original's chapter 3 saves.
+
+- **The lesson.** SPECIALIZE IN SPICE for the Carthag-Timin prospectors (troop 3) answers with a list-4 line whose action is 3. Below phase 0x14 that runs scene `0x12f8` (bytes `0e 10 ff`) over the troop popup, one step per " Continue...":
+  - action 0x0E raises the density popup and speaks list 7's next line ("Here, take this map of the planet");
+  - action 0x10 drops the popup and speaks the next line;
+  - 0xFF gives the orders menu back.
+- **The popup over a troop.** Over a troop's contact popup, the density popup is at ds:426C = (0x5C, 0x1E), and at (0x5C, 0x0E) when the contact popup is in the lower half. It is drawn after the contact panel, so the text keeps a two-line area (0x19 high).
+  - Instead of Paul's ornithopter it shows the troop: ICONES 0x36 at $(x, y-h)$, where the troop stands or, while marching, where it is.
+  - It shows the troop's route: dotted lines, colour 0x0C, pattern 0x5555, clipped to the window. They run from the troop's position through its destination, or through the prospectors' queue.
+- **MOVE TROOP** (floppy `8d7a`, CD `8064`) keeps the contact popup and raises the density popup.
+  - Captions: COMMAND 0x4A, "Show me where you want me to go..."; for the prospectors, the next one, "Show me 3 sietchs where you want me to go next...". The engine's command table is 0-based, so these are the ASM's 0x4A/0x4B minus one.
+  - A tap picks the nearest marker within 9 px on the popup's window.
+  - Any other troop goes straight to the done path. Its menu is only Cancel.
+- **The prospectors' queue.** The queue is ARRAY_PTR_Location_prospector_destinations: CD ds:11D3, floppy ds:11E0. It holds three place offsets, and the fourth word, 0, ends the list.
+  - MOVE TROOP copies the queue to a working copy (ds:4274, with its count at ds:4294).
+  - The menu is ADD A DESTINATION (greyed unless the count is 1 or 2), GIVE NEW DESTINATIONS (empties the working copy), Done and Cancel. ADD itself does nothing; the next pick appends.
+  - A pick must be a sietch (appearance < 0x20) or a place with status bit 3. A fourth pick starts the list over.
+  - The third pick commits after a 0x32-tick beat.
+- **The done path** (`8214`):
+  - The prospectors store the working copy; an empty head cancels.
+  - The acknowledgement is list 4, with ds:23 = 0x0B, or 0x10 when the troop is already there. It is spoken with the destination staged as the troop's place.
+  - A line with event 2 drops the gate, and no march starts. For the prospectors at work, this is "As soon as we finish prospection here, we'll leave for …". Otherwise the order issues and the map's main menu returns.
+- **Marching on.**
+  - `troop_issue_move_order` sends the prospectors to their queue's head, first dropping heads already reached.
+  - On arrival the head is dropped (`8357`).
+  - When a place is prospected, or already was (status bit 6), the prospectors march to the next head (`9d5f`). With none left they stop and report.
+- **Harness.** A `periods N` step passes N game periods. The clock is otherwise stopped in harness runs.
+
+## The palace plan
+
+The red dot in the compass box of the Atreides palace opens a floor plan of the palace over the view (`ui_draw_palace_plan`, CD `seg000:18ee`, `sub_118EE` in `DNCDPRG_RECENT.ASM`). It works from day 1 and needs no story event. It was checked against the original floppy on Spice86: `captures/palace-plan` and `captures/palace-plan-people`, and the fidelity scenarios `palace-plan` and `palace-plan-people`.
+
+- **The hotspot** is UI element ds:1CBC of the room navigation panel: rect (269,173)–(280,181), sprite 0x24 (the dot), handler 0x18EE. It only works in the Atreides palace (ds:4 high byte 0x20), and not in its first room, where the dot isn't drawn. The engine checks it before the arrows, whose widened touch zones reach over it.
+- **Toggling.** The handler closes the plan when its own menu is up (bp = 0x2012), so a second click on the dot closes it. So does the plan's only row, Done (menu ds:2012). The engine also closes it when the room changes.
+- **The window** is ds:143C, (160,0)–(320,116), filled with colour 0xF1. Four rings frame it (`loc_15B6E`): ds:1444 = (164,4)–(316,112) grown by one pixel per ring, in colours 0xF7, 0xF5, 0xF3, 0xF1. Then come `PALPLAN.HSQ`'s frames from the list at ds:120B, made of (frame, x, y) words up to 0xFFFF: the plan (frame 0 at 182,12) and frames 3, 4 and 5 at (266,65), (238,65) and (193,65).
+- **The marks** (`sub_11948`) show where the people of this place stand:
+  - It counts the 16 character records (0xFD8 + 16 i) whose byte 3, location + 1, equals ds:7. Each is counted in the room of byte 0.
+  - There are two rows: the second is for records with flag 0x40 in byte 15.
+  - Gurney (id 4 in byte 14) is left out while the phase is 0x15–0x1F (`sub_1127C`), which is his disappearance.
+  - Each row shows up to five frame-2 marks, 4 px apart. The first row is at the room's offset + (3,2), the second 7 px lower. Paul's room (ds:4) gets frame 1, the red mark, at + (12,5).
+  - The room offsets for rooms 2–12 are at ds:1426 (x and y bytes). The front, room 1, is not on the plan.
+- **Data.** The engine reads these tables from the executable's initial data segment through `World::ds`, so the floppy (+13 above 0x11C0) and CD layouts both work.
+- **Result:** 99.9% of pixels match the original with the plan open (throne room, Paul's room). The chapter 13 save's plan in room 11 matches too; that checkpoint's remaining difference is Jessica's figure in the room view, which the engine draws cut off.
+
+## Test scripts: comments, traces and real time
+
+- **Comments.** The harness (`harness.cpp`) and the Spice86 host both strip a `#` that follows whitespace, so every `click` and `wait` carries what it hits or waits for: `click left 160 171      # row 2: DUKE LETO ATREIDES`.
+- **Traces.** In harness runs the engine logs "Script line N: <step>" before each step. The lines after it say what the step did:
+  - taps name their row ("Tap: room 10 at (160, 171) -> command DUKE LETO ATREIDES", "Troop command: …");
+  - dialogue lines show their first words.
+
+  `scripts/dune_script_trace.py SCRIPT [--saves DIR] [--prelude MS] [--data cd] [--config k=v]` runs a script and prints the log grouped by script line.
+- **`periods N`** passes N game periods. The harness's clock is stopped, so a march or prospection needs it.
+- **`dune_real_time`** keeps a harness run at the original's speed (`isDuneFastHarness`): intros, flights and the clock. The fidelity report's CD flight scenarios use it.
+- **The CD intro's ESC.** ESC ends the whole intro, the story after TITLE included, as in the original: ESC at 8.0 s, the throne room at 8.2 s (Spice86, `captures/cd-flight`). A click or Return skips only the current video.
+- **The CD's Mixer Panel row.** CD rooms end their verbs with Mixer Panel (CD `sub_4DCB`, `loc_4E73`): after the ornithopter, messages or mirror, and before the people. So in the CD throne room Leto is row 3. The panel itself (`seg000:a3f0`: volume sliders, subtitle buttons) is not built.
+
 ## The speedrun check
 
 `scripts/check_speedrun.sh [campaign|full] [seeds]` runs the engine's bot (`speedrun.cpp`, developer key `dune_speedrun`) on the floppy and CD data. It plays through the same actions as the menu rows and logs each route step. A shortcut the bot had to take is logged `FORCED`.
 
 - **campaign** starts after Leto's death with one day of the route's preparation forced. From the first worm ride on, it plays the route's war without shortcuts on both releases: espionage, marches, massive attacks with reloads, the captains, and the war council.
-- **full** plays from a new game. It reaches the worm phase by the game's own rules on floppy: the stillsuits, prospectors, Jessica's doors, the desert vision, Gurney, Thufir's armoury, Stilgar, the smugglers, Harah's return, Chani and Leto's death. The Emperor's growing demands then outpace the bot's slower war, so the full run does not finish yet.
+- **full** plays from a new game with no shortcut (2026-09-28). The user's route:
+  - Until Stilgar joins (phase 0x2c), each troop goes to SPICE MINING the moment it agrees to WORK FOR ME, with a free harvester if one is there. The prospectors are sent to the three richest unprospected sietches. Miners move to richer fields, and on to new ones when theirs is spent.
+  - After Stilgar, new troops train for the army; the earlier miners stay on spice.
+
+  With this route every shipment is 100% up to demand 5 (7650 kg, day 28). Both releases reach the worm phase on day 30 and take 5 forts by day 42.
+- **Watchable route (2026-09-28).** The bot now plays like a player to watch (`scripts/watch_speedrun.sh full`):
+  - A place, a room or a talk is done once until something changes: the phase, the party, charisma, the troops there, the unread messages. When nothing is new anywhere, everything is looked at again.
+  - Companions talk once a chapter, plus once in each palace room where their lines matter. The COMM room's messages come before its talks (Thufir: "View the message before anything else").
+  - Orders go through the troop popup's rows (`speedrunOrders`): the chief's GIVE ORDERS TO TROOP in his sietch, or the map's contact; then SELECT/CHANGE TROOP OCCUPATION, MODIFY EQUIPMENT and MOVE TROOP with a pick on the density popup. A missing row or a refusal falls back to the direct write, which is logged.
+  - The war council waits for the next day while its place is still a fort (a fort becomes a sietch overnight, `sub_9A58`; Jessica refuses it before then).
+- **What still stops it:**
+  - The Emperor keeps demanding through the war; shipments pause only when the Harkonnen palace alone is left.
+  - A short shipment right after another short one sets the fulfilment to 0, and the Emperor strikes (floppy `sub_4748`; the engine matches it).
+  - The demand grows by about 1500 kg each time; by demand 7 it is 13730 kg. The 8 miners' output falls as their fields thin, from about 90 kg a period to about 25.
+  - Only 2 harvesters (×4 output, `seg000:708a`) were found lying free all game. Buying more from the smugglers is not built yet.
+
+## A fort turned sietch moves its people (2026-09-28)
+
+A captured fort becomes a sietch on a new day (floppy `sub_9A58`, 9A6C–9A7E): its type byte becomes `type & 7`, and ds:27 is incremented. It then calls `sub_99F3`, which the engine had skipped.
+- **Characters.** The routine walks the 12 character records at ds:FD8. A record whose second word is (0x80, place + 1), from `sub_61D8`, takes the new type byte, and its room becomes 1 or 2.
+- **Paul.** If Paul is there, ds:4, ds:0B and ds:8 change the same way.
+- **Why it matters.** Presence is a byte-for-byte test against ds:4–7 (`loc_136EE`). Without the fix-up, a character left there with STAY HERE keeps the fort's type byte (0x28), while Paul's position has the sietch's (0x00), so the character is absent. That is why the war council never started for Thufir at place 2 in the full speedrun run: persons in room was 0xb2, without Thufir's bit.
+- **The troops.** The routine's troop callback (bp 7B77, at 9A4C) also clears flag 0x20 in the troop's word +10h and sets 0x1000 in +12h; the engine had only done the second.
+
+With `battle.cpp`'s conversion completed, `check_speedrun.sh full` passes on floppy with no FORCED step (19 forts, the end on day 58). The CD run still stops at the palace for want of atomics: its atomics troops are captured.
 
 ## Map and globe
 

@@ -1,15 +1,18 @@
 # A scripted scene (dune_story_setup=gathering): the COMM room gathering of
 # phase 0x0c (cs:1321). The first shot waits for " Continue..."; each tap
 # presents the next topic-7 line.
-wait 15000
+#
+# Comments after '#' on a command line say what a click hits and what a
+# wait lets finish; scripts/dune_script_trace.py prints what each line did.
+wait 15000              # the story setup loads; the scene's first shot waits for Continue
 checkpoint scene-shot
-click left 160 80
-wait 1200
+click left 160 80       # view = Continue: Leto “A communication room! Let's all gather here…”
+wait 1200               # Leto's line shows
 checkpoint scene-leto
-click left 160 80
-wait 1200
+click left 160 80       # view: Jessica “Thank you Leto, but let me tell you…”
+wait 1200               # Jessica's line shows
 checkpoint scene-jessica
-click left 160 80
-wait 1200
+click left 160 80       # view: the scene's second shot (the room)
+wait 1200               # the shot draws
 checkpoint scene-second-shot
 quit

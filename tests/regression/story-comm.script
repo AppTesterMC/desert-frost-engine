@@ -4,48 +4,51 @@
 # the Emperor's line; " Viewed"; then Duncan (fourth row) talks up to his
 # offer and the bargaining menu (ds:1ffe); ACCEPT (second row) agrees and
 # leaving the talk ships the spice (seg000:135ad, in the engine log).
-wait 15000
+#
+# Comments after '#' on a command line say what a click hits and what a
+# wait lets finish; scripts/dune_script_trace.py prints what each line did.
+wait 15000              # the story setup loads and the COMM room draws
 checkpoint story-comm-room
 move 160 171
-click left 160 171
-wait 1500
+click left 160 171      # row 2: VIEW NEW MESSAGES: the list of senders
+wait 1500               # the list shows
 checkpoint story-comm-list
 move 160 163
-click left 160 163
-wait 1500
+click left 160 163      # row 1: EMPEROR SHADDAM IV: “I want a shipment of 1060kgs of spice today!”
+wait 1500               # the Emperor's message shows
 checkpoint story-emperor
-click left 160 80
-wait 1000
+click left 160 80       # view: after his line, the row “ Viewed” comes up
+wait 1000               # the row shows
 move 160 163
-click left 160 163
-wait 1500
+click left 160 163      # row 1: “ Viewed”: the message closes
+wait 1500               # back to the COMM room
 move 160 187
-click left 160 187
-wait 1500
-click left 160 80
-wait 800
-click left 160 80
-wait 800
-click left 160 80
-wait 800
-click left 160 80
-wait 800
-click left 160 80
-wait 800
-click left 160 80
-wait 800
+click left 160 187      # row 4: Duncan IDAHO: “I must congratulate you on finding…”
+wait 1500               # Duncan's first line shows
+click left 160 80       # view: next line “Paul, I don't think that I've told you about the worms…”
+wait 800                # the line shows
+click left 160 80       # view: next line “Sandworms grow to enormous size…”
+wait 800                # the line shows
+click left 160 80       # view: next line “Don't hesitate to regroup your troops…”
+wait 800                # the line shows
+click left 160 80       # view: next line “Our stocks of spice are currently 2000 kgs”
+wait 800                # the line shows
+click left 160 80       # view: next line “The Emperor asked for a spice shipment, didn't he?”
+wait 800                # the line shows
+click left 160 80       # view: next line, his offer “We can send him what he asked for…”
+wait 800                # the line shows
 checkpoint story-duncan-offer
-click left 160 80
-wait 800
+click left 160 80       # view: the bargaining menu (ARGUE / ACCEPT / REFUSE)
+wait 800                # the menu shows
 checkpoint story-bargain
 move 160 171
-click left 160 171
-wait 1500
+click left 160 171      # row 2: ACCEPT: “Ok Paul, let's go to the communication room…”
+wait 1500               # Duncan's answer shows
 checkpoint story-accepted
-click left 160 80
-wait 800
-click left 160 80
-wait 800
-click left 160 80
-wait 800
+click left 160 80       # view: next line “Come on, let's go to that communication room!”
+wait 800                # the line shows
+click left 160 80       # view, after the last line: closes the talk (the spice ships)
+wait 800                # back to the COMM room
+click left 160 80       # view: an empty spot (does nothing)
+wait 800                # settle before quitting
 quit

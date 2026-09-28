@@ -58,6 +58,11 @@ public:
 		kSlots = 4, ///< Log 1, Log 2, last place entered, last new sietch
 		kMapPixels = 50684,
 		kMapFlagBytes = 0x317f,
+		kExtraSize = 0xa2,            ///< the block between the map flags and the dialogue table (both releases)
+		kDialogueSlack = 36,          ///< the floppy's dialogue buffer: 36 bytes past the table, zero
+		kDialogueSlackCd = 0x68,      ///< the CD's: 104 bytes, the first 64 zero (checked on DUNE37S0 by the SwiftDune session)
+		kDialoguePointerBase = 0xcfe9, ///< the floppy's list header in a save: file offset + this
+		kDialoguePointerBaseCd = 0xaa76,
 		kRleMarker = 0xf7
 	};
 
@@ -84,7 +89,8 @@ private:
 	Dialogue &_dialogue;
 	Resource &_resources;
 	StartupLog &_log;
-	Common::Array<byte> _extra; ///< The executable's own block, kept from the last load.
+	Common::Array<byte> _extra;
+	Common::Array<byte> _slack; ///< the bytes after the dialogue table, kept as loaded ///< The executable's own block, kept from the last load.
 };
 
 } // namespace Dune

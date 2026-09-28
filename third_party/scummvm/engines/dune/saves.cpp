@@ -41,7 +41,10 @@ SaveGame::SaveGame(World &world, Dialogue &dialogue, Resource &resources, Startu
 }
 
 Common::String SaveGame::fileName(uint slot, bool floppy) {
-	return Common::String::format(floppy ? "DUNE21S%u.SAV" : "DUNE37S%u.SAV", slot);
+	// The original's files: Log 1 is DUNE21S1.SAV, Log 2 S2, "last entering
+	// into a place" S3 and "last entering new sietch" S4 (checked by saving
+	// in the floppy DUNEPRG.EXE on Spice86); S0 is not one of the four logs.
+	return Common::String::format(floppy ? "DUNE21S%u.SAV" : "DUNE37S%u.SAV", slot + 1);
 }
 
 bool SaveGame::loadMap() {
@@ -123,7 +126,7 @@ bool SaveGame::save(uint slot) {
 	if (!loadMap())
 		return false;
 	const bool floppy = _world.layoutShift() != 0;
-	const uint extraSize = floppy ? 0xc6 : 0xa2;
+	const uint extraSize = kExtraSize;
 	Common::Array<byte> body;
 	// The map's flag bits, four pixels to a byte, first pixel in the top bits (sub_1B427).
 	for (uint i = 0; i < kMapFlagBytes; ++i) {
@@ -137,9 +140,22 @@ bool SaveGame::save(uint slot) {
 	}
 	for (uint i = 0; i < extraSize; ++i)
 		body.push_back(i < _extra.size() ? _extra[i] : 0);
+	// The dialogue table as the executable keeps it in memory: its list
+	// header holds near pointers (offset + kDialoguePointerBase on the
+	// floppy), and the floppy's buffer is 36 bytes longer than the file.
 	const Common::Array<byte> &dialogue = _dialogue.data();
-	for (uint i = 0; i < dialogue.size(); ++i)
-		body.push_back(dialogue[i]);
+	const uint header = dialogue.size() >= 2 ? READ_LE_UINT16(dialogue.data()) : 0;
+	for (uint i = 0; i < dialogue.size(); i += 2) {
+		uint16 word = i + 1 < dialogue.size() ? READ_LE_UINT16(dialogue.data() + i) : dialogue[i];
+		if (i < header)
+			word = (uint16)(word + (floppy ? kDialoguePointerBase : kDialoguePointerBaseCd));
+		body.push_back((byte)word);
+		if (i + 1 < dialogue.size())
+			body.push_back((byte)(word >> 8));
+	}
+	const uint slackSize = floppy ? (uint)kDialogueSlack : (uint)kDialogueSlackCd;
+	for (uint i = 0; i < slackSize; ++i)
+		body.push_back(i < _slack.size() ? _slack[i] : 0);
 	const GameState &state = _world.state();
 	for (uint i = 0; i < _world.savedSize(); ++i)
 		body.push_back(state.vars[i]);
@@ -175,9 +191,23 @@ bool SaveGame::load(uint slot) {
 	}
 	unpack(packed, body);
 	const bool floppy = _world.layoutShift() != 0;
-	const uint extraSize = floppy ? 0xc6 : 0xa2;
 	const uint dialogueSize = _dialogue.data().size();
-	const uint expected = kMapFlagBytes + extraSize + dialogueSize + _world.savedSize();
+	const uint header = dialogueSize >= 2 ? READ_LE_UINT16(_dialogue.data().data()) : 0;
+	// The original's layout (checked on its own saves): extra 0xA2, the
+	// dialogue table, its buffer's slack (floppy 36 bytes, CD 104), the data
+	// segment. The engine's
+	// earlier floppy saves put the slack before the table instead (extra
+	// 0xC6); they are told apart by the raw list header (its first word is
+	// the file offset, where the original's is a pointer).
+	uint extraSize = kExtraSize, slack = floppy ? (uint)kDialogueSlack : (uint)kDialogueSlackCd;
+	if (floppy && body.size() > kMapFlagBytes + kExtraSize + kDialogueSlack + 1 &&
+			READ_LE_UINT16(body.data() + kMapFlagBytes + kExtraSize + kDialogueSlack) == header) {
+		extraSize = kExtraSize + kDialogueSlack;
+		slack = 0;
+	} else if (!floppy && body.size() < kMapFlagBytes + kExtraSize + dialogueSize + slack + _world.savedSize()) {
+		slack = 0; // the engine's earlier CD saves had no gap
+	}
+	const uint expected = kMapFlagBytes + extraSize + dialogueSize + slack + _world.savedSize();
 	if (body.size() < expected) {
 		_log.line(Common::String::format("Saves: slot %u holds %u bytes (%u packed), %u expected", slot, body.size(),
 				packed.size(), expected));
@@ -192,12 +222,17 @@ bool SaveGame::load(uint slot) {
 	_extra.clear();
 	for (uint i = 0; i < extraSize; ++i)
 		_extra.push_back(body[kMapFlagBytes + i]);
+	// The entries (their said flags) come from the save; the list header
+	// stays the file's (the save holds the executable's pointers there).
 	Common::Array<byte> dialogue;
 	for (uint i = 0; i < dialogueSize; ++i)
-		dialogue.push_back(body[kMapFlagBytes + extraSize + i]);
+		dialogue.push_back(i < header ? _dialogue.data()[i] : body[kMapFlagBytes + extraSize + i]);
 	_dialogue.setData(dialogue);
+	_slack.clear();
+	for (uint i = 0; i < slack; ++i)
+		_slack.push_back(body[kMapFlagBytes + extraSize + dialogueSize + i]);
 	GameState &state = _world.mutableState();
-	memcpy(state.vars, body.data() + kMapFlagBytes + extraSize + dialogueSize, _world.savedSize());
+	memcpy(state.vars, body.data() + kMapFlagBytes + extraSize + dialogueSize + slack, _world.savedSize());
 	state.notebook.clear();
 	_world.markPlaceCells();
 	_log.line(Common::String::format("Saves: slot %u loaded, time %u, place %u room %u", slot,

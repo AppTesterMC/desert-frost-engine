@@ -458,7 +458,7 @@ void GameScreen::thirstCheck() {
 		_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 152);
 		_system->updateScreen();
 		dumpScreen(_system, "desert-glare");
-		if (!isRecording() && !isDumpRun() && !isDuneHarnessRun())
+		if (!isRecording() && !isDumpRun() && !isDuneFastHarness())
 			_system->delayMillis(300u * (uint)MIN(10, k / 16 + 1));
 	}
 	_log.line(Common::String::format("Desert: the sun's glare (step %u)", _walkSteps));

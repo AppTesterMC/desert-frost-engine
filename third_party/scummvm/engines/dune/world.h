@@ -147,6 +147,7 @@ public:
 		kExitWalkOut = 0xfb, ///< exits 0xFB-0xFF walk out into the desert (floppy 422C)
 		kTroopTable = 0x8aa,
 		kTroopSize = 27,
+		kProspectorTroop = 3,   ///< the prospectors (troops[2], ds:08e0)
 		kTroops = 68,
 		kFremen = 14,       ///< DIALOGUE/PERS group of a troop not hired yet
 		kFremenChief = 15,  ///< and of a hired troop's chief
@@ -286,6 +287,15 @@ public:
 	bool rallyTroop(uint id);
 	/** A new occupation (seg000:6acb): the job clocks restart; ecology without bulbs becomes bulb growing. */
 	void setTroopOccupation(uint id, byte occupation);
+	/** A troop's whole record (27 bytes), to take an order back (troop_apply_occupation_choice's refusal). */
+	void saveTroopRecord(uint id, byte *record) const {
+		if (id >= 1 && id <= kTroops)
+			memcpy(record, _state.vars + kTroopTable + (id - 1) * kTroopSize, kTroopSize);
+	}
+	void restoreTroopRecord(uint id, const byte *record) {
+		if (id >= 1 && id <= kTroops)
+			memcpy(_state.vars + kTroopTable + (id - 1) * kTroopSize, record, kTroopSize);
+	}
 	/** Motivation modifier (seg000:6efd), which the harvest and the charisma check use. */
 	uint motivationModifier(uint id) const;
 	/** This period's harvest of a mining troop in kg (seg000:708a), 0 when it cannot mine. */
@@ -491,8 +501,27 @@ public:
 	/** The place a troop stands at (or marches to), -1 if none. */
 	int troopPlace(uint id) const;
 	static uint16 placeOffset(uint index);
-	/** troop_issue_move_order (seg000:84a6); false when refused. */
+	/**
+	 * troop_issue_move_order (seg000:84a6); false when refused. The
+	 * prospectors ignore @p dest and march to the head of their queue
+	 * (prospector_sync_destination_queue, 848f), false when it is empty.
+	 */
 	bool issueMoveOrder(uint id, uint dest);
+	/**
+	 * The prospectors' destinations (ARRAY_PTR_Location_prospector_destinations,
+	 * CD ds:11d3, floppy 11e0): three place offsets, 0 ends the list.
+	 */
+	uint16 prospectorDestination(uint slot) const {
+		return slot < 3 ? READ_LE_UINT16(_state.vars + ds(0x11d3) + 2 * slot) : 0;
+	}
+	void setProspectorDestination(uint slot, uint16 offset) {
+		if (slot < 3)
+			WRITE_LE_UINT16(_state.vars + ds(0x11d3) + 2 * slot, offset);
+	}
+	/** seg000:8347: drop the queue's head. */
+	void shiftProspectorQueue();
+	/** Place index of a place offset (0x100 + 28 i), -1 for none. */
+	int placeIndex(uint16 offset) const;
 	/** ESPIONAGE (seg000:6a45): march to the nearest hidden fort within 30 cells. */
 	bool startEspionage(uint id);
 	/** seg000:5274's distance between two places: max(|dlng| >> 8, |dlat|). */

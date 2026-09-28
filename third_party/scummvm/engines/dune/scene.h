@@ -119,10 +119,11 @@ public:
 	/** The game menu lives in the globe's command box (swift-dune Fresk.swift). */
 	enum Menu {
 		kMenuNone,    ///< EXIT GLOBE, SEE MAP OF THIS AREA, SAVE GAME, LOAD GAME, OPTIONS & QUIT GAME
-		kMenuSave,    ///< the four logs
+		kMenuSave,    ///< the two manual logs and Cancel
 		kMenuLoad,
-		kMenuOptions, ///< music, RESTART GAME, EXIT GAME
-		kMenuQuit     ///< YES I WANT TO EXIT GAME / NO I DON'T WANT TO FINISH
+		kMenuOptions, ///< three music choices, EXIT GAME, Cancel
+		kMenuQuit,    ///< YES I WANT TO EXIT GAME / NO I DON'T WANT TO FINISH
+		kMenuMusicOrder ///< STANDARD ORDER / SHUFFLE / Cancel
 	};
 	void openMenu(Menu menu);
 	/** Write or read one of the original's four save files (SaveGame). */
@@ -205,9 +206,12 @@ private:
 		kRowSaveMenu,   ///< SAVE GAME
 		kRowLoadMenu,   ///< LOAD GAME
 		kRowOptionsMenu,///< OPTIONS & QUIT GAME
+		kRowMenuBack,   ///< Cancel to the game menu on the globe or mirror
 		kRowSaveSlot,   ///< a log (rowArgument = slot)
 		kRowLoadSlot,
 		kRowMusic,      ///< MUSIC OFF / MUSIC ON
+		kRowMusicOrderMenu, ///< MUSIC ON (CD-STYLE)
+		kRowMusicOrder, ///< STANDARD ORDER / SHUFFLE
 		kRowRestart,    ///< RESTART GAME
 		kRowExitGame,   ///< EXIT GAME (asks first)
 		kRowConfirmExit,
@@ -228,6 +232,7 @@ private:
 		kRowCompanion,  ///< " COME WITH ME " / " STAY HERE " (characters)
 		kRowAskMore,    ///< ASK FOR MORE INFORMATION (troop contact)
 		kRowMirror,     ///< LOOK AT MIRROR (palace bedroom)
+		kRowMixer,      ///< Mixer Panel (CD rooms; the panel is not built)
 		kRowMirrorAway, ///< Look away from the mirror
 		kRowBargain,    ///< ARGUE / ACCEPT / REFUSE (rowArgument = the ds:9f value)
 		kRowWhat,       ///< " WHAT ? ": the line again
@@ -246,10 +251,15 @@ private:
 		kRowAttack,     ///< ATTACK, for a troop on espionage (seg000:6a2f)
 		kRowMoveTroop,  ///< MOVE TROOP (seg000:8064): the map, choosing where
 		kRowMoveDone,   ///< "  Done" once the troop's destination is chosen (seg000:8214)
+		kRowPickCancel, ///< Cancel while a move order is picked (loc_0824d)
+		kRowPickAdd,    ///< ADD A DESTINATION (the prospectors; the next pick appends)
+		kRowPickNew,    ///< GIVE NEW DESTINATIONS (clears the working queue)
+		kRowPickDone,   ///< Done (the prospectors' queue as it stands)
 		kRowProspectors,///< FIND PROSPECTORS (map)
 		kRowEquipment,  ///< MODIFY EQUIPMENT (troop contact)
 		kRowEquipDone,  ///< "  Done" under the equipment panel
 		kRowCockpitCancel, ///< "  Cancel" on the orni cockpit (menu_multiple_cancel)
+		kRowPlanDone,   ///< "Done" under the palace plan (menu ds:2012)
 		kRowStatus      ///< anything not implemented: shows its name
 	};
 
@@ -338,7 +348,6 @@ private:
 	void cockpitCancel();
 	void updateCockpit(uint32 now);
 	bool cockpitPlayer(int &x, int &y) const;
-	void cockpitCrop(int &cropX, int &cropY) const;
 	bool _cockpit = false;          ///< the map is shown in the cockpit's window
 	bool _cockpitChanging = false;  ///< opened by CHANGE DESTINATION during a flight
 	uint32 _cockpitStart = 0;
@@ -407,6 +416,8 @@ private:
 	void speedrunCompanions(const uint *want, uint count);
 	void speedrunStory();
 	void speedrunShipment();
+	void speedrunSpice();
+	void speedrunSpiceFields(const Common::Array<uint> &troops);
 	bool _speedrunShipping = false;
 	void speedrunTravel(uint place);
 	/** Walk into a room of the place (seg000:3f27): the entry lines may speak. */
@@ -414,6 +425,21 @@ private:
 	bool _speedrunRecruited = false;
 	int speedrunSpot(uint from, uint16 lng, int16 lat);
 	bool speedrunExplore();
+	/**
+	 * Orders as a player gives them: the troop popup (the chief's GIVE ORDERS
+	 * TO TROOP in his sietch, else the map's contact), then its rows, clicked
+	 * where they stand. job < 0 keeps the occupation; harvester takes one
+	 * lying free where the troop stands (MODIFY EQUIPMENT); moveTo >= 0 is a
+	 * MOVE TROOP pick, -1 the prospectors' queue (queue, count).
+	 */
+	void speedrunOrders(uint id, int job, bool harvester, int moveTo, const uint *queue = nullptr, uint count = 0);
+	bool speedrunClickRow(RowAction action, int argument, const char *what);
+	bool speedrunOpenOrders(uint id);
+	void speedrunCloseOrders();
+	/** True the first time a key is seen (the route does each thing once, until something changes). */
+	bool speedrunOnce(const Common::String &key);
+	Common::Array<Common::String> _speedrunDone;
+	uint _speedrunRoundVisits = 0;
 	void showFinal(uint picture);
 	uint _finalPicture = 0;         ///< the final scene's FINAL.HSQ picture on screen (1, 2), 0 none
 	TalkKind _talkKind = kTalkNormal;
@@ -422,6 +448,12 @@ private:
 	Common::Array<byte> _scene;     ///< the running scripted scene's bytes
 	uint _sceneCursor = 0;
 	bool _sceneActive = false;
+	/**
+	 * The palace plan (ui_draw_palace_plan, CD seg000:18ee): a floor plan of
+	 * the Atreides palace over the view, from the red dot in the compass box.
+	 */
+	bool _palacePlan = false;
+	void drawPalacePlan();
 	uint16 _pendingScene = 0;
 	uint _sceneReturnRoom = 0;
 	Common::Array<byte> _cast;      ///< the scene's explicit cast (slot -> person, 0xff empty)
@@ -445,6 +477,7 @@ private:
 	uint _lastContacted = 0;
 	/** draw_orni (seg000:3aa9): ORNYTK parts at a pad slot, @p frame 0 parked .. 0x21 gone. */
 	void drawOrni(Graphics::Surface &target, int x, int y, uint frame);
+	int orniPadX() const;
 	void drawParkedOrnis(Graphics::Surface &target, uint skip);
 	/** orni_anim_loop (seg000:47fb): take-off (+1) or landing (-1) over the current room. */
 	void animateOrni(int step);
@@ -457,6 +490,7 @@ private:
 	uint skyPalette() const;
 	void passTime(uint slots);
 	bool ensureSaves();
+	void setSaveMenuRows();
 	Common::String slotLabel(uint slot) const;
 	void toggleMusic();
 
@@ -479,6 +513,22 @@ private:
 	static void storyEvent(void *context, byte event, bool wasSaid, uint speaker);
 	void stageTroopForConditions(uint troopId);
 	bool nextTroopLine();
+	void troopSceneStep();
+	uint16 _troopScene = 0;      ///< a scripted scene running over the troop popup (the prospector's lesson)
+	uint _troopSceneCursor = 0;
+	/**
+	 * MOVE TROOP over the troop popup (seg000:8064): the density popup is up,
+	 * the caption asks where to go and a tap on the popup's window picks a
+	 * place. The prospectors fill a working queue of three (ds:4274, count
+	 * ds:4294) first.
+	 */
+	bool _troopPicking = false;
+	uint16 _pickQueue[3] = { 0, 0, 0 };
+	uint _pickCount = 0;
+	Common::String _pickLineBefore;
+	void startTroopPick();
+	void troopPickTap(int x, int y);
+	void endTroopPick(int dest);
 
 	OSystem *_system;
 	Resource &_resources;
@@ -503,6 +553,7 @@ private:
 	uint16 _menuStatus; ///< COMMAND id shown on the last row after a save (0xffff: none).
 	Music *_music;
 	bool _musicOn;
+	byte _musicOrder; ///< Original ds:33fe menu selection: 0 game relative, 1 standard, 3 shuffle.
 	bool _quitRequested;
 
 	uint _troopId;       ///< the troop whose orders are shown
@@ -532,6 +583,9 @@ private:
 	uint _talkRecruit;   ///< troop whose WORK FOR ME answer is being shown (0: none)
 	bool _talkRecruitOk;
 	Common::Point _personPos[24]; ///< top-left of each person's marker in the current room (-1: absent)
+	uint16 _personFrame[24];      ///< the PERS frame each person stands as (for taps on them)
+	/** The person whose figure is under a view position, or -1. */
+	int personAt(int x, int y) const;
 	Common::String _troopLine;    ///< the troop contact popup's current line
 	uint _talkLine;      ///< First line of _talkLines on screen.
 	uint _talkPage;      ///< Pages shown so far (dump names, animation choice).

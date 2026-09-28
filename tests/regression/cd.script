@@ -1,43 +1,54 @@
 # The CD intro is captured at HNM frame 40 by the harness. These commands
 # exercise the landing screen (throne room), room rendering, a tap on the
 # first command row ("SEE DUNE MAP" opens the globe), and a clean engine exit.
-wait 1000
+#
+# Comments after '#' on a command line say what a click hits and what a
+# wait lets finish; scripts/dune_script_trace.py prints what each line did.
+wait 1000               # the intro (captured at HNM frame 40) to the throne room
 checkpoint cd-landing
 checkpoint cd-room-scripted
 move 160 163
-click left 160 163
-wait 5000
+click left 160 163      # row 1: SEE DUNE MAP: the flat map
+wait 5000               # the map draws with its DUNE MAP popup
 checkpoint cd-after-touch
 # EXIT MAPS (the first row) returns to the throne room.
 move 160 163
-click left 160 163
-wait 1000
+click left 160 163      # row 1: EXIT MAPS: back to the throne room
+wait 1000               # the room draws
 # Paul's head opens the globe with the game menu; SAVE GAME (third row)
-# lists the four logs; the last row is EXIT GLOBE.
-move 160 145
-click left 160 145
-wait 4000
+# lists Log 1, Log 2 and Cancel, as the original does. Cancel returns to the
+# menu, EXIT GLOBE (first row) to the flat map and EXIT MAPS to the room.
+move 160 155            # the pointer (the checkpoint records the cursor)
+click left 160 155      # the box's top edge under Paul's head: the globe
+wait 4000               # the globe opens
 checkpoint cd-globe
 move 160 179
-click left 160 179
-wait 1500
+click left 160 179      # row 3: SAVE GAME: the save list
+wait 1500               # the list opens
 checkpoint cd-menu-save
-move 160 195
-click left 160 195
-wait 1500
-# Duke Leto's opening conversation: the second command row, then a tap per
-# page (view area) until the throne room returns.
-move 160 171
-click left 160 171
-wait 1500
+move 160 179
+click left 160 179      # row 3: Cancel: back to the globe menu
+wait 1500               # the menu comes back
+move 160 163
+click left 160 163      # row 1: EXIT GLOBE: the flat map
+wait 3000               # the map draws
+move 160 163
+click left 160 163      # row 1: EXIT MAPS: back to the throne room
+wait 1500               # the room draws
+# Duke Leto's opening conversation: the third command row (the CD's rows
+# are SEE DUNE MAP, Mixer Panel, DUKE LETO ATREIDES), then a tap per page
+# (view area) until the throne room returns.
+move 160 179
+click left 160 179      # row 3: DUKE LETO ATREIDES: “I am the Duke Leto Atreides, your father”
+wait 1500               # Leto's first line shows
 checkpoint cd-leto-1
 move 160 80
-click left 160 80
-wait 1500
+click left 160 80       # view: next line “My son, we must mine the spice…”
+wait 1500               # the line shows
 checkpoint cd-leto-2
-click left 160 80
-wait 1500
+click left 160 80       # view: next line “We've spotted three troops of Fremen…”
+wait 1500               # the line shows
 checkpoint cd-leto-3
-click left 160 80
-wait 1000
+click left 160 80       # view, after the last line: closes the talk
+wait 1000               # back to the throne room
 quit

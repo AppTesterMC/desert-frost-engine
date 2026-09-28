@@ -246,10 +246,11 @@ void Panel::draw(Graphics::ManagedSurface &surface, const bool exits[4], int pre
 
 Panel::Action Panel::hitTest(int x, int y, int &row, int &arrow) const {
 	row = arrow = -1;
-	// Paul's head (ICONES 26 at 150,137) sticks up from the box's top edge;
-	// the original's zone is that edge (92..229 x 152..159), widened here
-	// around the head for fingers.
-	if (x >= 138 && x < 182 && y >= 134 && y < 160)
+	// Paul's head (ICONES 26 at 150,137) sticks up from the box's top edge.
+	// The original's zone is that edge alone (92..229 x 152..159): a click
+	// on the head itself, in the view, does nothing (the user chose the
+	// original's zone on 2026-09-28; it was widened round the head before).
+	if (x >= 92 && x <= 229 && y >= 152 && y <= 159)
 		return kActionHead;
 
 	if (y < kTop) {
@@ -260,6 +261,12 @@ Panel::Action Panel::hitTest(int x, int y, int &row, int &arrow) const {
 
 	if (Common::Rect(24, 155, 70, 177).contains(x, y))
 		return kActionBook;
+
+	// The red dot of the Atreides palace's compass box (UI element ds:1cbc:
+	// 269,173-280,181, handler seg000:18ee) opens the palace plan. It comes
+	// before the arrows, whose finger-sized zones reach over it.
+	if (_navMode == kNavRoom && _navDot && Common::Rect(269, 173, 281, 182).contains(x, y))
+		return kActionPlan;
 
 	for (uint i = 0; i < 4; ++i) {
 		Common::Rect zone = arrowRect(i);
@@ -324,6 +331,13 @@ void Panel::drawIcon(Graphics::ManagedSurface &surface, uint16 frame, int x, int
 		return;
 	Sprite icons(_system, _icons);
 	icons.drawFrame(frame, surface.surfacePtr(), x, y);
+}
+
+bool Panel::iconSize(uint16 frame, uint16 &width, uint16 &height) const {
+	if (_icons.empty())
+		return false;
+	Sprite icons(_system, _icons);
+	return icons.frameSize(frame, width, height);
 }
 
 } // namespace Dune

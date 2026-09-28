@@ -485,12 +485,6 @@ void MapScreen::drawIcons(Graphics::ManagedSurface &surface) {
 		int x, y;
 		if (!placeOnScreen(l, x, y))
 			continue;
-		if (_density && _mode == kFlat && l.isSietch() && l.spiceDensity) {
-			// ONMAP 133-140: eight rings from a dot to 19 pixels, one per
-			// 32 of density (the original's scale is not decoded).
-			const uint16 ring = (uint16)(133 + MIN<uint>(7, l.spiceDensity / 32));
-			_icons->drawFrame(ring, target, x - 9, y - 9);
-		}
 		// ONMAP 122-126: the sietch mound, the red Atreides palace, a village,
 		// a fortress, the blue Harkonnen palace (58-70 are the troops' green
 		// ornithopters). The far-sietch variant (127, +5) needs the distance
@@ -512,7 +506,285 @@ void MapScreen::drawIcons(Graphics::ManagedSurface &surface) {
 	}
 }
 
+// ---- The zoomed window (map_draw_zoomed_globe's windowed mode) ------------------
+
+namespace {
+enum {
+	kMapCentreCell = 0x62fc, ///< the equator's first cell in MAP.HSQ / MAP2.HSQ
+	kBackdrop = 0x70,        ///< build_spice_density_xlat's backdrop
+	kUnprospected = 0x75,    ///< a known field not yet prospected
+	kDensityRamp = 0x50,     ///< + density >> 4
+	kDensityPanel = 0x8d,    ///< ONMAP: the SPICE DENSITY panel (170 x 108)
+	kDensityPanelX = 75,     ///< the panel's first place (floppy ds:426C/426E)
+	kDensityPanelY = 15
+};
+} // namespace
+
+bool MapScreen::windowRow(int latitude, int &start, int &cells) const {
+	const uint row = (uint)ABS(latitude);
+	if ((row + 1) * 8 > _tablatData.size())
+		return false;
+	const int offset = READ_BE_UINT16(_tablatData.data() + 8 * row);
+	cells = 2 * READ_BE_UINT16(_tablatData.data() + 8 * row + 2);
+	start = kMapCentreCell + (latitude < 0 ? -offset : offset);
+	return cells > 0;
+}
+
+int16 MapScreen::clampWindowLatitude(const Common::Rect &window, int16 latitude) {
+	const int limit = 0x56 - window.height() / 2;
+	return (int16)CLIP<int>(latitude, -limit, limit);
+}
+
+void MapScreen::drawZoomedWindow(Graphics::ManagedSurface &surface, const Common::Rect &window, uint16 longitude,
+		int16 latitude, bool density) {
+	if (!_renderer && !loadFlat())
+		return;
+	if (density && _spiceFields.empty() && !_resources.load("MAP2.HSQ", _spiceFields))
+		return;
+	const Common::Array<byte> &layer = density ? _spiceFields : _world.map();
+	const int w = window.width(), h = window.height();
+	latitude = clampWindowLatitude(window, latitude);
+	const int top = latitude - (h - 1) / 2; // the centre row rounds down (checked on 89- and 56-row windows)
+	// build_spice_density_xlat (CD 57e5): the backdrop, then each known
+	// place's field: flat grey until prospected, then its density's shade.
+	byte xlat[256];
+	memset(xlat, kBackdrop, sizeof(xlat));
+	if (density)
+		for (uint i = 0; i < _world.locationCount(); ++i) {
+			const Location l = _world.location(i);
+			if (!l.hidden())
+				xlat[l.spiceField] = (l.status & 0x40) ? (byte)(kDensityRamp + (l.spiceDensity >> 4)) : (byte)kUnprospected;
+		}
+	// One source row (plus one below it for the density's interior test).
+	auto source = [&](int row, int column) -> int {
+		int start, cells;
+		if (!windowRow(top + row, start, cells))
+			return -1;
+		const uint32 centre = ((uint32)longitude * (uint32)cells) >> 16;
+		int col = ((int)centre + column - w / 2) % cells;
+		if (col < 0)
+			col += cells;
+		const int at = start + col;
+		return at >= 0 && at < (int)layer.size() ? layer[at] : -1;
+	};
+	for (int y = 0; y < h; ++y) {
+		byte *dst = (byte *)surface.getBasePtr(window.left, window.top + y);
+		for (int x = 0; x < w; ++x) {
+			const int v = source(y, x);
+			if (v < 0) {
+				dst[x] = 0;
+				continue;
+			}
+			if (!density) {
+				dst[x] = (byte)((v & 0x0f) + 0x10);
+				continue;
+			}
+			// vga_draw_landscape: only where the pixel equals its right and
+			// lower neighbours, so the fields show their outlines. The row
+			// buffer holds the window's rows only, so its last row is backdrop.
+			dst[x] = (y + 1 < h && v == source(y, x + 1) && v == source(y + 1, x)) ? xlat[v] : (byte)kBackdrop;
+		}
+	}
+
+}
+
+bool MapScreen::windowProject(const Common::Rect &window, uint16 longitude, int16 latitude, uint16 pointLongitude,
+		int16 pointLatitude, int &x, int &y) const {
+	latitude = clampWindowLatitude(window, latitude);
+	const int w = window.width(), h = window.height();
+	const int top = latitude - (h - 1) / 2; // the centre row rounds down (checked on 89- and 56-row windows)
+	int start, cells;
+	if (!windowRow(pointLatitude, start, cells))
+		return false;
+	int d = (int)(((uint32)pointLongitude * (uint32)cells) >> 16) - (int)(((uint32)longitude * (uint32)cells) >> 16);
+	if (d > cells / 2)
+		d -= cells;
+	else if (d < -cells / 2)
+		d += cells;
+	x = window.left + w / 2 + d;
+	y = window.top + (pointLatitude - top);
+	return window.contains(x, y);
+}
+
+bool MapScreen::windowUnproject(const Common::Rect &window, uint16 longitude, int16 latitude, int x, int y,
+		uint16 &pointLongitude, int16 &pointLatitude) const {
+	if (!window.contains(x, y))
+		return false;
+	latitude = clampWindowLatitude(window, latitude);
+	const int w = window.width(), h = window.height();
+	pointLatitude = (int16)(latitude - (h - 1) / 2 + (y - window.top));
+	int start, cells;
+	if (!windowRow(pointLatitude, start, cells))
+		return false;
+	const int centre = (int)(((uint32)longitude * (uint32)cells) >> 16);
+	int col = (centre + (x - window.left) - w / 2) % cells;
+	if (col < 0)
+		col += cells;
+	pointLongitude = (uint16)(((uint32)col << 16) / (uint32)cells);
+	return true;
+}
+
+void MapScreen::drawWindowMarkers(Graphics::ManagedSurface &surface, const Common::Rect &window, uint16 longitude,
+		int16 latitude, const Panel &panel) const {
+	// loc_05dce: ICONES 0x3A + the place's kind (sietch, palace, village,
+	// fortress, Harkonnen palace); a sietch beyond the contact range
+	// (ds:1176) shows the distant variant, +5.
+	Graphics::ManagedSurface clip; // drawn through a copy of the window so that they are clipped to it
+	clip.create(window.width(), window.height(), Graphics::PixelFormat::createFormatCLUT8());
+	clip.blitFrom(surface, window, Common::Point(0, 0));
+	const Location here = _world.location(_world.currentLocation());
+	for (uint i = 0; i < _world.locationCount(); ++i) {
+		const Location l = _world.location(i);
+		if (l.hidden())
+			continue;
+		int x, y;
+		if (!windowProject(window, longitude, latitude, l.longitude, l.latitude, x, y))
+			continue;
+		const uint kind = l.type < 0x20 ? 0 : l.type < 0x21 ? 1 : l.type < 0x28 ? 2 : l.type < 0x30 ? 3 : 4;
+		uint frame = 0x3a + kind;
+		if (kind == 0 && _world.cellDistance(here.longitude, here.latitude, l.longitude, l.latitude) >= _world.contactRange())
+			frame += 5;
+		uint16 width, height;
+		if (!panel.iconSize((uint16)frame, width, height))
+			continue;
+		panel.drawIcon(clip, (uint16)frame, x - window.left - width / 2, y - window.top - height / 2);
+	}
+	surface.blitFrom(clip, Common::Point(window.left, window.top));
+	clip.free();
+}
+
+int MapScreen::windowHit(const Common::Rect &window, uint16 longitude, int16 latitude, int x, int y) const {
+	int best = -1, bestDistance = 10;
+	for (uint i = 0; i < _world.locationCount(); ++i) {
+		const Location l = _world.location(i);
+		int px, py;
+		if (l.hidden() || !windowProject(window, longitude, latitude, l.longitude, l.latitude, px, py))
+			continue;
+		const int d = MAX(ABS(px - x), ABS(py - y));
+		if (d < bestDistance) {
+			bestDistance = d;
+			best = (int)i;
+		}
+	}
+	return best;
+}
+
+void MapScreen::setDensityForMap() {
+	_densityX = kDensityPanelX;
+	_densityY = kDensityPanelY;
+	_densityTroop = false;
+	_route.clear();
+}
+
+int MapScreen::densityHit(int x, int y) const {
+	const int px = _densityX, py = _densityY;
+	const Common::Rect window(px + 5, py + 7, px + 5 + 0xa0, py + 7 + 0x59);
+	if (!window.contains(x, y))
+		return -2;
+	return windowHit(window, _longitude, centreLatitude(), x, y);
+}
+
+void MapScreen::drawRoute(Graphics::ManagedSurface &surface, const Common::Rect &window, int16 centreLatitude) {
+	// sub_AD0A: each point projected (sub_D414), then a line per pair in
+	// colour 0x0C with the pattern 0x5555, clipped to the window. A pair more
+	// than 0x50 pixels apart across the date line is joined the short way.
+	Common::Array<Common::Point> screen;
+	for (uint i = 0; i < _route.size(); ++i) {
+		int x = -10000, y = -10000;
+		windowProject(window, _longitude, centreLatitude, (uint16)_route[i].x, (int16)_route[i].y, x, y);
+		if (x == -10000)
+			continue;
+		screen.push_back(Common::Point(x, y));
+	}
+	for (uint i = 1; i < screen.size(); ++i) {
+		int x0 = screen[i - 1].x, y0 = screen[i - 1].y;
+		const int x1 = screen[i].x, y1 = screen[i].y;
+		const int dx = ABS(x1 - x0), dy = ABS(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+		int err = dx - dy;
+		uint16 pattern = 0x5555;
+		for (;;) {
+			pattern = (uint16)((pattern << 1) | (pattern >> 15));
+			if ((pattern & 1) && window.contains(x0, y0))
+				*(byte *)surface.getBasePtr(x0, y0) = 0x0c;
+			if (x0 == x1 && y0 == y1)
+				break;
+			const int e2 = 2 * err;
+			if (e2 > -dy) {
+				err -= dy;
+				x0 += sx;
+			}
+			if (e2 < dx) {
+				err += dx;
+				y0 += sy;
+			}
+		}
+	}
+}
+
+void MapScreen::drawDensityOverlay(Graphics::ManagedSurface &surface, const Panel &panel) {
+	// map_draw_spice_density_overlay (floppy sub_80B0): the panel (ONMAP
+	// 0x8D), the window at +(5,7) centred on the map's position, the
+	// markers, the "you are here" box (80 x 40, dotted, colour 0xFB) round
+	// the map view's centre, and the legend bar: "SPICE DENSITY", then the
+	// sixteen shades 0x50-0x5F between "-" and "+".
+	if (!_icons)
+		return;
+	const int px = _densityX, py = _densityY;
+	_icons->drawFrame(kDensityPanel, surface.surfacePtr(), px, py);
+	const Common::Rect window(px + 5, py + 7, px + 5 + 0xa0, py + 7 + 0x59);
+	const int16 centreLatitude = (int16)CLIP<int>(_latitude + 18, -96, 96);
+	drawZoomedWindow(surface, window, _longitude, centreLatitude, true);
+	drawWindowMarkers(surface, window, _longitude, centreLatitude, panel);
+	// map_draw_player_position_sprite: ICONES 0x4C (the red ornithopter) at (x - 13, y - h).
+	const Location here = _world.location(_world.currentLocation());
+	int hx, hy;
+	uint16 iw, ih;
+	if (!_densityTroop && windowProject(window, _longitude, centreLatitude, here.longitude, here.latitude, hx, hy) &&
+			panel.iconSize(0x4c, iw, ih)) {
+		Graphics::ManagedSurface clip;
+		clip.create(window.width(), window.height(), Graphics::PixelFormat::createFormatCLUT8());
+		clip.blitFrom(surface, window, Common::Point(0, 0));
+		panel.drawIcon(clip, 0x4c, hx - window.left - 13, hy - window.top - ih);
+		surface.blitFrom(clip, Common::Point(window.left, window.top));
+		clip.free();
+	}
+	int cx, cy;
+	if (windowProject(window, _longitude, centreLatitude, _longitude, centreLatitude, cx, cy)) {
+		const Common::Rect box(MAX<int>(window.left, cx - 0x28), MAX<int>(window.top, cy - 0x14),
+				MIN<int>(window.right, cx + 0x28), MIN<int>(window.bottom, cy + 0x14));
+		// The line pattern 0x5555 starts with a gap: the dots are one pixel in from the corners.
+		for (int x = box.left + 1; x < box.right; x += 2) {
+			*(byte *)surface.getBasePtr(x, box.top) = 0xfb;
+			*(byte *)surface.getBasePtr(x, box.bottom - 1) = 0xfb;
+		}
+		for (int y = box.top + 1; y < box.bottom; y += 2) {
+			*(byte *)surface.getBasePtr(box.left, y) = 0xfb;
+			*(byte *)surface.getBasePtr(box.right - 1, y) = 0xfb;
+		}
+	}
+	if (_densityTroop) {
+		// sub_8F62, over a troop's popup: the troop (ICONES 0x36 at (x, y - h))
+		// where it stands or, marching, where it is; then its route (sub_AD0A).
+		if (windowProject(window, _longitude, centreLatitude, (uint16)_densityTroopAt.x, (int16)_densityTroopAt.y, hx, hy) &&
+				panel.iconSize(0x36, iw, ih)) {
+			Graphics::ManagedSurface clip;
+			clip.create(window.width(), window.height(), Graphics::PixelFormat::createFormatCLUT8());
+			clip.blitFrom(surface, window, Common::Point(0, 0));
+			panel.drawIcon(clip, 0x36, hx - window.left, hy - window.top - ih);
+			surface.blitFrom(clip, Common::Point(window.left, window.top));
+			clip.free();
+		}
+		drawRoute(surface, window, centreLatitude);
+	}
+	panel.drawText(surface, "SPICE DENSITY", px + 14, py + 98, 0xfe, true);
+	panel.drawText(surface, "-", px + 89, py + 98, 0xfe, true);
+	for (int k = 0; k < 16; ++k)
+		surface.fillRect(Common::Rect(px + 95 + 4 * k, py + 99, px + 98 + 4 * k, py + 104), (uint32)(kDensityRamp + k));
+	panel.drawText(surface, "+", px + 158, py + 98, 0xfe, true);
+}
+
 void MapScreen::setFlight(bool active, uint16 longitude, int16 latitude, int destination) {
+	const bool starting = active && !_flying;
 	_flying = active;
 	_flightLongitude = longitude;
 	_flightLatitude = latitude;
@@ -521,43 +793,56 @@ void MapScreen::setFlight(bool active, uint16 longitude, int16 latitude, int des
 		_trail.clear();
 		return;
 	}
-	// The minimap recentres on the position (travel_minimap_setup).
+	// travel_minimap_setup centres the minimap on the position; then it
+	// recentres only when the position leaves x 0xD6-0x131, y 0x0A-0x35
+	// (CD 4F3A, floppy 5D0B).
+	const Common::Rect window(204, 4, 316, 60);
+	int x, y;
+	if (starting || !windowProject(window, _minimapLongitude, _minimapLatitude, longitude, latitude, x, y) ||
+			x < 0xd6 || x > 0x131 || y < 0x0a || y > 0x35) {
+		_minimapLongitude = longitude;
+		_minimapLatitude = latitude;
+	}
+	// The map view follows too (the cockpit of CHANGE DESTINATION).
 	_longitude = longitude;
 	_latitude = CLIP<int16>((int16)(latitude - 18), -75, 75);
 }
 
 void MapScreen::drawMinimap(Graphics::ManagedSurface &surface, const Common::Rect &box, const Panel &panel) {
+	// travel_minimap_redraw (CD 49A0): the zoomed window (204,4)-(316,60)
+	// (travel_minimap_rect) in its nested border (0xFC, 0xFA, 0xF8, 0xF6
+	// outwards), the places, the trail (ICONES 0x2F) clipped to
+	// (0xCC,4)-(0x13A,0x3A), the destination (0x2E) and the position (0x30).
+	(void)box;
 	if (!_renderer && !loadFlat())
 		return;
-	Graphics::ManagedSurface full;
-	full.create(320, 152, Graphics::PixelFormat::createFormatCLUT8());
-	Graphics::Surface view = full.surfacePtr()->getSubArea(Common::Rect(0, 0, 320, 152));
-	const int16 latitude = CLIP<int16>((int16)(_flightLatitude - 18), -75, 75);
-	_renderer->draw(view, latitude, _flightLongitude);
-	int cx, cy;
-	if (!_renderer->project(latitude, _flightLongitude, _flightLatitude, _flightLongitude, cx, cy)) {
-		cx = 160;
-		cy = 76;
-	}
-	const int w = box.width() - 4, h = box.height() - 4;
-	const int sx = CLIP<int>(cx - w / 2, 4, 316 - w), sy = CLIP<int>(cy - h / 2, 4, 148 - h);
-	surface.fillRect(box, 0xfc);
-	surface.frameRect(Common::Rect(box.left + 1, box.top + 1, box.right - 1, box.bottom - 1), 0xfa);
-	surface.blitFrom(full, Common::Rect(sx, sy, sx + w, sy + h), Common::Point(box.left + 2, box.top + 2));
-	full.free();
-	int x, y;
+	const Common::Rect window(204, 4, 316, 60);
+	for (int k = 0; k < 4; ++k)
+		surface.frameRect(Common::Rect(window.left - 1 - k, window.top - 1 - k, window.right + 1 + k, window.bottom + 1 + k),
+				(uint32)(0xfc - 2 * k));
+	drawZoomedWindow(surface, window, _minimapLongitude, _minimapLatitude, false);
+	drawWindowMarkers(surface, window, _minimapLongitude, _minimapLatitude, panel);
+	Graphics::ManagedSurface clip;
+	clip.create(window.width(), window.height(), Graphics::PixelFormat::createFormatCLUT8());
+	clip.blitFrom(surface, window, Common::Point(0, 0));
+	auto icon = [&](uint16 frame, uint16 lng, int16 lat) {
+		int x, y;
+		if (windowProject(window, _minimapLongitude, _minimapLatitude, lng, lat, x, y))
+			panel.drawIcon(clip, frame, x - window.left - 1, y - window.top - 1);
+	};
 	for (uint i = 0; i < _trail.size(); ++i)
-		if (_renderer->project(latitude, _flightLongitude, (int16)(_trail[i] & 0xffff), (uint16)(_trail[i] >> 16), x, y)) {
-			x += box.left + 2 - sx;
-			y += box.top + 2 - sy;
-			if (x > box.left + 2 && x < box.right - 4 && y > box.top + 2 && y < box.bottom - 4)
-				panel.drawIcon(surface, 0x2f, x - 1, y - 1);
-		}
-	panel.drawIcon(surface, 0x30, cx + box.left + 2 - sx - 1, cy + box.top + 2 - sy - 1);
+		icon(0x2f, (uint16)(_trail[i] >> 16), (int16)(_trail[i] & 0xffff));
+	if (_flightDestination >= 0 && (uint)_flightDestination < _world.locationCount()) {
+		const Location d = _world.location((uint)_flightDestination);
+		icon(0x2e, d.longitude, d.latitude);
+	}
+	icon(0x30, _flightLongitude, _flightLatitude);
+	surface.blitFrom(clip, Common::Point(window.left, window.top));
+	clip.free();
 }
 
 void MapScreen::addFlightTrail(uint16 longitude, int16 latitude) {
-	if (_trail.size() >= 23) // travel_trail_ring holds 23 positions
+	if (_trail.size() >= 80) // the floppy's trail ring holds 80 positions (cs:5274)
 		_trail.remove_at(0);
 	_trail.push_back(((uint32)longitude << 16) | (uint16)latitude);
 }
@@ -688,13 +973,7 @@ void MapScreen::drawInfoBox(Graphics::ManagedSurface &surface, const Panel &pane
 		uint rallied) {
 	const uint16 id = panel.findCommand("DUNE  MAP", true);
 	if (_density) {
-		// COMMAND "  SPICE DENSITY  " heads the box instead.
-		const uint16 title = panel.findCommand("SPICE DENSITY", true);
-		const Common::Rect box(6, 6, 216, 22);
-		surface.fillRect(box, 250);
-		surface.frameRect(box, 243);
-		if (title != 0xffff)
-			panel.drawText(surface, panel.commandString(title).c_str(), 12, 10, 243, false);
+		drawDensityOverlay(surface, panel);
 		return;
 	}
 	if (!sentences || id == 0xffff)

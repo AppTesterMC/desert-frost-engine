@@ -3,45 +3,50 @@
 # pass enough real time to reach the throne room; keep the engine alive in
 # the first room long enough for the audio window to prove the mixer is not
 # silent.
-wait 15000
+#
+# Comments after '#' on a command line say what a click hits and what a
+# wait lets finish; scripts/dune_script_trace.py prints what each line did.
+wait 15000              # the intro plays through to the throne room
 checkpoint floppy-landing
 checkpoint floppy-room-scripted
-wait 5000
-# Paul's head opens the globe with the game menu; SAVE GAME (third row)
-# lists the four logs; the last row is EXIT GLOBE.
-move 160 145
-click left 160 145
-wait 4000
+wait 5000               # stay in the room: the audio window
+# Paul's head opens the globe with the game menu (EXIT GLOBE, SEE RESULTS,
+# SAVE GAME, LOAD GAME, OPTIONS & QUIT GAME). SAVE GAME (third row) lists
+# Log 1, Log 2 and Cancel, as the original does; Cancel returns to the menu.
+move 160 155            # the pointer (the checkpoint records the cursor)
+click left 160 155      # the box's top edge under Paul's head: the globe
+wait 4000               # the globe opens
 checkpoint floppy-globe
 move 160 179
-click left 160 179
-wait 1500
+click left 160 179      # row 3: SAVE GAME: the save list
+wait 1500               # the list opens
 checkpoint floppy-menu-save
-move 160 195
-click left 160 195
-wait 1500
-# SEE DUNE MAP (the first row): the flat map with its DUNE MAP title popup
-# (seg000:5bb0), the map menu (seg000:878c) and the planet in the left panel.
+move 160 179
+click left 160 179      # row 3: Cancel: back to the globe menu
+wait 1500               # the menu comes back
+# EXIT GLOBE (the first row) leads to the flat map, as in the original: its
+# DUNE MAP title popup (seg000:5bb0), the map menu (seg000:878c) and the
+# planet in the left panel.
 move 160 163
-click left 160 163
-wait 3000
+click left 160 163      # row 1: EXIT GLOBE: the flat map
+wait 3000               # the map draws with its DUNE MAP popup
 checkpoint floppy-map-flat
 move 160 163
-click left 160 163
-wait 1000
+click left 160 163      # row 1: EXIT MAPS: back to the throne room
+wait 1000               # the room draws
 # Duke Leto's opening conversation: the second command row, then a tap per
 # page (view area) until the throne room returns.
 move 160 171
-click left 160 171
-wait 1500
+click left 160 171      # row 2: DUKE LETO ATREIDES: “I'm the Duke Leto Atreides, your father”
+wait 1500               # Leto's first line shows
 checkpoint floppy-leto-1
 move 160 80
-click left 160 80
-wait 1500
+click left 160 80       # view: next line “My son, we must mine the spice…”
+wait 1500               # the line shows
 checkpoint floppy-leto-2
-click left 160 80
-wait 1500
+click left 160 80       # view: next line “We've spotted three troops of Fremen…”
+wait 1500               # the line shows
 checkpoint floppy-leto-3
-click left 160 80
-wait 1000
+click left 160 80       # view, after the last line: closes the talk
+wait 1000               # back to the throne room
 quit

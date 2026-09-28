@@ -90,6 +90,20 @@ int World::troopPlace(uint id) const {
 	return index < locationCount() ? (int)index : -1;
 }
 
+int World::placeIndex(uint16 offset) const {
+	if (offset < Location::kTableOffset)
+		return -1;
+	const uint index = (offset - Location::kTableOffset) / Location::kRecordSize;
+	return index < locationCount() ? (int)index : -1;
+}
+
+void World::shiftProspectorQueue() {
+	// shift_prospector_troop_destinations_array (seg000:8347): the words at
+	// +2..+7 move down one slot; the fourth word (0) ends the list.
+	for (uint k = 0; k < 3; ++k)
+		setProspectorDestination(k, READ_LE_UINT16(_state.vars + ds(0x11d3) + 2 * (k + 1)));
+}
+
 uint16 World::placeOffset(uint index) {
 	return (uint16)(Location::kTableOffset + index * Location::kRecordSize);
 }
@@ -186,6 +200,19 @@ bool World::issueMoveOrder(uint id, uint dest) {
 	if (id < 1 || id > kTroops || dest >= locationCount())
 		return false;
 	byte &occ = troopByte(id, kTroopOccupation);
+	if (id == kProspectorTroop) {
+		// prospector_sync_destination_queue (seg000:848f): drop the heads
+		// already reached (the head is where the troop stands, not moving).
+		uint16 head = prospectorDestination(0);
+		while (head && head == READ_LE_UINT16(&troopByte(id, kTroopLocation)) && !(occ & kMoving)) {
+			shiftProspectorQueue();
+			head = prospectorDestination(0);
+		}
+		const int next = placeIndex(head);
+		if (next < 0)
+			return false;
+		dest = (uint)next;
+	}
 	if (occ & kMoving) {
 		WRITE_LE_UINT16(&troopByte(id, kTroopLocation), placeOffset(dest));
 		if ((occ & 3) == 3)
@@ -281,6 +308,9 @@ void World::troopArrive(uint id) {
 	if (dest < 0)
 		return;
 	const uint index = (uint)dest;
+	// seg000:8357: the prospectors drop their queue's head on reaching it.
+	if (id == kProspectorTroop && prospectorDestination(0) == placeOffset(index))
+		shiftProspectorQueue();
 	const Location d = location(index);
 	WRITE_LE_UINT16(&troopByte(id, kTroopLongitude), d.longitude);
 	WRITE_LE_UINT16(&troopByte(id, kTroopLatitude), (uint16)d.latitude);

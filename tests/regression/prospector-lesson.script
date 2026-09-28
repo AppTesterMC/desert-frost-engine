@@ -1,0 +1,66 @@
+# Prospector lesson (original ch03 saves, phase 0x0C): orders for the Carthag-Timin
+# prospectors, SPECIALIZE IN SPICE, then three Continue steps (map lesson).
+#
+# Comments after '#' on a command line say what a click hits and what a
+# wait lets finish; scripts/dune_script_trace.py prints what each line did.
+wait 15000              # a new game starts: the throne room
+wait 500                # settle
+click left 160 163      # row 1: SEE DUNE MAP: the flat map
+wait 3000               # the map draws
+click left 35 176       # the planet at the map's bottom left: the globe and its game menu
+wait 3000               # the globe opens
+click left 160 187      # row 4: LOAD GAME: the list of logs
+wait 2000               # the list opens
+click left 160 163      # row 1: Log 1 (the original's chapter 3 save): loads, back on the globe
+wait 5000               # the save loads
+click left 160 163      # row 1: EXIT GLOBE: the flat map
+wait 3000               # the map draws
+click left 160 163      # row 1: EXIT MAPS: back to the throne room
+wait 3000               # the room draws
+click left 275 189      # compass, down arrow: towards the palace front
+wait 3000               # the room draws
+click left 291 176      # compass, right arrow
+wait 3000               # the room draws
+click left 275 189      # compass, down arrow: the palace front
+wait 3000               # the room draws
+click left 160 171      # row 2: TAKE AN ORNITHOPTER: the cockpit
+wait 3000               # the cockpit opens
+click left 179 89       # cockpit map: Carthag-Timin (place 11), the flight starts
+wait 30000              # the take-off, the flight and the landing
+click left 275 164      # compass, up arrow: into the sietch, where the Fremen are
+wait 3500               # the room draws
+click left 160 171      # row 2: the Fremen chief: “My troop is settled in Carthag-Timin…”
+wait 2500               # his line shows
+click left 160 171      # row 2: GIVE ORDERS TO TROOP: the troop popup over the map
+wait 3000               # the popup opens
+click left 160 171      # row 2: SELECT TROOP OCCUPATION
+wait 2500               # the choices show
+click left 160 163      # row 1: SPECIALIZE IN SPICE: “We're unbeatable on spice prospection…” (the lesson starts)
+wait 3000               # the answer shows
+checkpoint l-answer
+click left 160 163      # row 1: Continue...: the density map, “Here, take this map of the planet”
+wait 3000               # the map lesson's first step
+checkpoint l-map
+click left 160 163      # row 1: Continue...: “You can update this map as we send back…”
+wait 3000               # the next step
+checkpoint l-update
+click left 160 163      # row 1: Continue...: the lesson ends, the orders come back
+wait 3000               # the orders menu shows
+checkpoint l-end
+# MOVE TROOP: the density popup and "Show me 3 sietchs..."; three sietches
+# picked on the popup (the third commits), NO MORE ORDERS, then 150 periods.
+click left 160 187      # row 4: MOVE TROOP: the density map and “Show me 3 sietchs…”
+wait 3000               # the pick screen opens
+checkpoint p-pick
+click left 169 67       # density map: the first sietch (place 13, Carthag-Harg)
+wait 2000               # the route line draws
+click left 198 94       # density map: the second sietch (place 15)
+wait 2000               # the route line draws
+click left 239 81       # density map: the third sietch (place 17): the order goes, “As soon as we finish prospection here…”
+wait 4000               # the chief's answer shows
+checkpoint p-ordered
+click left 160 195      # row 5: NO MORE ORDERS: back to the map
+wait 2000               # the map draws
+periods 150             # 150 game periods pass (about 12 days): the march 11 -> 13 -> 15 -> 17
+wait 5000               # the periods run
+quit

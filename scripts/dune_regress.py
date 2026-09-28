@@ -292,6 +292,13 @@ def main() -> int:
         return init_golden(root, manifest, outputs)
     passed, rows = compare(root, manifest, outputs, report)
     print(f"HTML report: {report / 'index.html'}")
+    # The served page is the fidelity report (scripts/dune_fidelity.py); set
+    # DUNE_REPORT_SERVE to a folder to publish this regression report too.
+    serve = os.environ.get("DUNE_REPORT_SERVE", "")
+    if serve and Path(serve).parent.is_dir():
+        shutil.rmtree(serve, ignore_errors=True)
+        shutil.copytree(report, serve)
+        print(f"Served report: {serve}/index.html")
     failed = [row for row in rows if not row["passed"]]
     if failed:
         print(f"VERIFY FAILED: {len(failed)} mismatches; inspect {report / 'index.html'}", file=sys.stderr)

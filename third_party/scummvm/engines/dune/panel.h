@@ -72,7 +72,8 @@ public:
 		kActionLeft,
 		kActionBook,
 		kActionCommand,
-		kActionHead ///< Paul's head above the command box: the globe/stats screen
+		kActionHead, ///< Paul's head above the command box: the globe/stats screen
+		kActionPlan  ///< the red dot in the palace's compass box: the palace plan
 	};
 
 	/** The box colours: 240-255 belong to the room sheet, so the panel's tint follows the room. */
@@ -154,6 +155,8 @@ public:
 	}
 	/** Draw one ICONES frame (map and globe navigation arrows). */
 	void drawIcon(Graphics::ManagedSurface &surface, uint16 frame, int x, int y) const;
+	/** An ICONES frame's size. */
+	bool iconSize(uint16 frame, uint16 &width, uint16 &height) const;
 	/** Draws dialogue lines in the command box, one per row from @p first, over the rows draw() painted. */
 	void drawParagraph(Graphics::ManagedSurface &surface, const Common::Array<Common::String> &lines, uint first,
 					   uint count) const;

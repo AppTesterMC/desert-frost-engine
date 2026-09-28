@@ -83,32 +83,32 @@ void GameScreen::openCockpit(bool changing) {
 }
 
 bool GameScreen::cockpitPlayer(int &x, int &y) const {
+	const Common::Rect kWindow = windowRect();
 	if (!_map)
 		return false;
-	if (_cockpitChanging)
-		return _map->projectPosition(_flightLng, _flightLat, x, y);
-	if (_desert)
-		return _map->projectPosition(_walkLng, _walkLat, x, y);
-	const Location l = _world.location(_world.currentLocation());
-	return _map->projectPosition(l.longitude, l.latitude, x, y);
-}
-
-void GameScreen::cockpitCrop(int &cropX, int &cropY) const {
-	const Common::Rect kWindow = windowRect();
-	// The window shows the part of the flat view around its centre, where
-	// centreOn() puts Paul; scrolling moves the view under it.
-	cropX = 160 - kWindow.width() / 2;
-	cropY = CLIP<int>(76 - kWindow.height() / 2, 0, 152 - kWindow.height());
+	uint16 lng;
+	int16 lat;
+	if (_cockpitChanging) {
+		lng = _flightLng;
+		lat = _flightLat;
+	} else if (_desert) {
+		lng = _walkLng;
+		lat = _walkLat;
+	} else {
+		const Location l = _world.location(_world.currentLocation());
+		lng = l.longitude;
+		lat = l.latitude;
+	}
+	return _map->windowProject(kWindow, _map->centreLongitude(), _map->centreLatitude(), lng, lat, x, y);
 }
 
 void GameScreen::drawCockpit() {
 	const Common::Rect kWindow = windowRect();
 	// map_screen_draw_base (CD 439f) in cockpit mode, then map_view_redraw (CD 4377).
 	const uint32 now = _system->getMillis();
-	Graphics::ManagedSurface map;
-	map.create(320, 152, Graphics::PixelFormat::createFormatCLUT8());
-	_map->draw(map, _panel, _sentences, _state.b(GameState::kFremenTroops));
-
+	// The map (floppy map_view_redraw, CD 4377): the palettes, the sky, the
+	// cockpit (ORNYPAN 0, 1), the zoomed window (map_draw_zoomed_globe), the
+	// markers, the grid (ORNYPAN 2) over them, Paul's blinking ornithopter.
 	_surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
 	_panel.applyPalette();
 	_map->applyPalette();
@@ -119,16 +119,13 @@ void GameScreen::drawCockpit() {
 	if (_resources.load("ORNYPAN.HSQ", ornypanData)) {
 		ornypan = new Sprite(_system, ornypanData);
 		ornypan->setPalette();
-		// icon_list_ornypan_cockpit (CD ds:14b4): the body, the dials, the frame.
 		ornypan->drawFrame(0, &view, 0, 19);
 		ornypan->drawFrame(1, &view, 10, 43);
 	}
-	int cropX, cropY;
-	cockpitCrop(cropX, cropY);
-	_surface.blitFrom(map, Common::Rect(cropX, cropY, cropX + kWindow.width(), cropY + kWindow.height()),
-			Common::Point(kWindow.left, kWindow.top));
-	map.free();
-	// icon_list_ornypan_window_overlay (CD ds:14c0): the green frame and grid over the map.
+	const uint16 centreLng = _map->centreLongitude();
+	const int16 centreLat = _map->centreLatitude();
+	_map->drawZoomedWindow(_surface, kWindow, centreLng, centreLat, false);
+	_map->drawWindowMarkers(_surface, kWindow, centreLng, centreLat, _panel);
 	if (ornypan)
 		ornypan->drawFrame(2, &view, 79, 45);
 	delete ornypan;
@@ -137,16 +134,13 @@ void GameScreen::drawCockpit() {
 	int px, py;
 	const bool blinkOn = ((now - _cockpitStart) / kBlinkMillis) % 2 == 0 || isDumpRun();
 	if (blinkOn && cockpitPlayer(px, py)) {
-		const int x = px - cropX + kWindow.left, y = py - cropY + kWindow.top;
-		if (kWindow.contains(x, y)) {
-			// Drawn through a copy of the window so that it is clipped to it.
-			Graphics::ManagedSurface window;
-			window.create(kWindow.width(), kWindow.height(), Graphics::PixelFormat::createFormatCLUT8());
-			window.blitFrom(_surface, kWindow, Common::Point(0, 0));
-			_panel.drawIcon(window, kPlayerIcon, x - kWindow.left - 13, y - kWindow.top - 10);
-			_surface.blitFrom(window, Common::Point(kWindow.left, kWindow.top));
-			window.free();
-		}
+		// Drawn through a copy of the window so that it is clipped to it.
+		Graphics::ManagedSurface window;
+		window.create(kWindow.width(), kWindow.height(), Graphics::PixelFormat::createFormatCLUT8());
+		window.blitFrom(_surface, kWindow, Common::Point(0, 0));
+		_panel.drawIcon(window, kPlayerIcon, px - kWindow.left - 13, py - kWindow.top - 10);
+		_surface.blitFrom(window, Common::Point(kWindow.left, kWindow.top));
+		window.free();
 	}
 
 	// The caption, typed one glyph per 0x18 ticks (spaces are free): "SELECT
@@ -154,7 +148,7 @@ void GameScreen::drawCockpit() {
 	const uint16 captionId = _panel.findCommand("SELECT DESTINATION", true);
 	if (captionId != 0xffff) {
 		const Common::String caption = _panel.commandString(captionId);
-		uint glyphs = isDumpRun() || isDuneHarnessRun() ? 0xffff : (now - _cockpitStart) / kGlyphMillis;
+		uint glyphs = isDumpRun() || isDuneFastHarness() ? 0xffff : (now - _cockpitStart) / kGlyphMillis;
 		Common::String shown;
 		for (uint i = 0; i < caption.size(); ++i) {
 			if (caption[i] != ' ') {
@@ -207,14 +201,18 @@ void GameScreen::cockpitTap(int x, int y) {
 	// the window; the current place is inert unless a flight is under way.
 	if (!kWindow.contains(x, y))
 		return;
-	int cropX, cropY;
-	cockpitCrop(cropX, cropY);
-	const int vx = x - kWindow.left + cropX, vy = y - kWindow.top + cropY;
-	const int hit = _map->hitLocation(vx, vy);
+	const uint16 centreLng = _map->centreLongitude();
+	const int16 centreLat = _map->centreLatitude();
+	const int hit = _map->windowHit(kWindow, centreLng, centreLat, x, y);
 	if (hit >= 0 && (uint)hit == _world.currentLocation() && !_desert && !_cockpitChanging)
 		return;
-	if (hit < 0 && !_map->selectPoint(vx, vy))
-		return;
+	if (hit < 0) {
+		uint16 lng;
+		int16 lat;
+		if (!_map->windowUnproject(kWindow, centreLng, centreLat, x, y, lng, lat))
+			return;
+		_map->selectPosition(lng, lat);
+	}
 	_cockpit = false;
 	if (_cockpitChanging) {
 		// A later confirm re-aims the flight under way (map_confirm_travel_and_close).
@@ -323,7 +321,7 @@ void GameScreen::showSighting(uint place, byte relativeBearing) {
 	drawTalk();
 	dumpScreen(_system, "flight-sighting");
 	// The row closes the talk; the flight goes on toward the place.
-	while (!_quitRequested && !isDumpRun() && !isDuneHarnessRun()) {
+	while (!_quitRequested && !isDumpRun() && !isDuneFastHarness()) {
 		Common::Event event;
 		bool done = false;
 		while (pollDuneEvent(_system, event)) {
@@ -382,16 +380,11 @@ void GameScreen::dumpCockpit() {
 	travelTo(0);
 	showRoom(1);
 	openCockpit(false);
-	int cropX, cropY;
-	cockpitCrop(cropX, cropY);
 	for (uint i = 1; i < _world.locationCount(); ++i) {
 		const Location l = _world.location(i);
 		int x, y;
-		if (l.hidden() || !_map->projectPosition(l.longitude, l.latitude, x, y))
-			continue;
-		x += kWindow.left - cropX;
-		y += kWindow.top - cropY;
-		if (!kWindow.contains(x, y) || _map->hitLocation(x - kWindow.left + cropX, y - kWindow.top + cropY) != (int)i)
+		if (l.hidden() || !_map->windowProject(kWindow, _map->centreLongitude(), _map->centreLatitude(), l.longitude,
+				l.latitude, x, y) || _map->windowHit(kWindow, _map->centreLongitude(), _map->centreLatitude(), x, y) != (int)i)
 			continue;
 		cockpitTap(x, y);
 		dumpScreen(_system, "orni-cockpit-arrived");

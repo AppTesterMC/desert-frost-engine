@@ -65,6 +65,8 @@ public:
 	 * which is written through dumpScreen() under the given name.
 	 */
 	Result play(const Common::Array<byte> &data, const char *name, int dumpFrame = -1);
+	/** The last play() was skipped with Escape (the original's ESC ends the whole intro). */
+	bool skippedWithEscape() const { return _escape; }
 
 	/**
 	 * Decode a whole video offscreen and keep its last picture (320x200
@@ -98,6 +100,7 @@ public:
 	uint frameNumber() const { return _streamFrame; }
 
 private:
+	bool _escape = false;
 	bool readPalette(const byte *data, uint32 size, uint32 &position);
 	bool decodeFrame(const byte *block, uint32 size);
 	void present();

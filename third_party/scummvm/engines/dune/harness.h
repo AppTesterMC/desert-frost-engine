@@ -32,11 +32,30 @@ class OSystem;
 
 namespace Dune {
 
+class StartupLog;
+
+/** The engine's log, where each script step is written with its line number. */
+void setDuneHarnessLog(StartupLog *log);
+
 /** True when named checkpoint capture is enabled for a desktop run. */
 bool isDuneHarnessRun();
 
+/**
+ * A harness run at capture speed: every harness run, unless dune_real_time
+ * asks for the original's timing (flights, animations and the clock run as
+ * in play; the fidelity report's timed CD flight).
+ */
+bool isDuneFastHarness();
+
 /** Capture the current framebuffer and cursor metadata under a checkpoint name. */
 void captureDuneCheckpoint(OSystem *system, const Common::String &name);
+
+/**
+ * Game periods a script asked for ("periods N"), taken once: the clock is
+ * stopped in harness runs, so tests that need time to pass (a troop's march)
+ * ask for it explicitly.
+ */
+uint takeDuneHarnessPeriods();
 
 /** Poll real input, or the next due command from dune_input. */
 bool pollDuneEvent(OSystem *system, Common::Event &event);

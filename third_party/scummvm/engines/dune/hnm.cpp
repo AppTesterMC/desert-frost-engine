@@ -334,6 +334,7 @@ HnmPlayer::Result HnmPlayer::play(const Common::Array<byte> &data, const char *n
 	uint32 audioBytes = 0;
 
 	Result result = kFinished;
+	_escape = false;
 	const uint32 startTime = _system->getMillis();
 	uint32 frame = 0;
 
@@ -410,8 +411,10 @@ HnmPlayer::Result HnmPlayer::play(const Common::Array<byte> &data, const char *n
 						break;
 					case Common::EVENT_KEYDOWN:
 						if (event.kbd.keycode == Common::KEYCODE_ESCAPE || event.kbd.keycode == Common::KEYCODE_RETURN ||
-								event.kbd.keycode == Common::KEYCODE_SPACE)
+								event.kbd.keycode == Common::KEYCODE_SPACE) {
 							result = kSkipped;
+							_escape = event.kbd.keycode == Common::KEYCODE_ESCAPE;
+						}
 						break;
 					default:
 						break;

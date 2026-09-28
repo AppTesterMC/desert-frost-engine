@@ -65,16 +65,17 @@ floppy releases are detected. The table shows what works; the full status is in
 | Saves | save and load in the original `DUNE21S?.SAV` / `DUNE37S?.SAV` format |
 | Sound | HERAD AdLib music through ScummVM's OPL emulator |
 | iOS | direct touch, the audio-session fix, ad-hoc-signed IPA builds |
-| Gameplay | the game clock, flight, hiring Fremen troops (WORK FOR ME) and giving them orders, spice harvest and prospecting, rallying (charisma), the results screen, all following the executable's rules ([gameplay-rules.md](notes/research/gameplay-rules.md)) |
+| Gameplay | the game clock, flight, hiring Fremen troops (WORK FOR ME) and giving them orders, the prospector lesson and MOVE TROOP with the spice-density popup, the palace plan, spice harvest and prospecting, rallying (charisma), the results screen, all following the executable's rules ([gameplay-rules.md](notes/research/gameplay-rules.md)) |
 | Story | story phases and their callbacks, Jessica's lessons, the Emperor's spice demands bargained with Duncan in the COMM room, Paul's visions, the scripted scenes, the sietch chiefs' story lines (the stillsuit maker) and Stilgar's Water of Life |
 | Ecology and ending | the ecology route (wind traps, bulbs, irrigation, vegetation spreading on the map, fortresses taken, MODIFY EQUIPMENT), the Harkonnen zone, deaths on arrival, and the final scene |
 | Desert and flight | walking in the desert with its landscape, the ornithopter cockpit and destination screen, steering in free flight, CHANGE DESTINATION, the flight landscape (seeded row by row as the original, checked against its memory) and sightings of companions |
 | War and the ending | troop marches and espionage, fort battles, MASSIVE ATTACK and FIGHT FOR A WHOLE DAY, the Harkonnen captain, worm riding, the smugglers' village and the final attack on the Harkonnen palace |
-| Not yet | full command lists per room; a complete play-through from a new game is still being checked (see below) |
+| Not yet | full command lists per room |
 
 `scripts/check_speedrun.sh` lets a bot play the known PC speedrun route through
 the engine's own actions and checks that it reaches the Emperor's throne room
-(the route is in [`notes/speedrun/route.md`](notes/speedrun/route.md)).
+(the route is in [`notes/speedrun/route.md`](notes/speedrun/route.md)). It plays from a new game to
+the ending on both the floppy and the CD release.
 
 The reverse-engineering record, with a source and confidence for each fact, is
 in [`FINDINGS.md`](third_party/scummvm/engines/dune/FINDINGS.md).

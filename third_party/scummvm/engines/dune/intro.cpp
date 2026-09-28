@@ -52,7 +52,7 @@ namespace {
 // Regression captures take one deterministic representative frame from each
 // authored scene while normal device runs retain their real timing.
 bool isFastIntroCapture() {
-	return (isDumpRun() && !dumpEveryMillis()) || isDuneHarnessRun();
+	return (isDumpRun() && !dumpEveryMillis()) || isDuneFastHarness();
 }
 
 } // namespace
@@ -148,7 +148,7 @@ bool playCdIntro(OSystem *system, Resource &resources, StartupLog &log) {
 		{ "VIRGIN.HNM", 0 }, { "CRYO.HNM", 0 }, { "CRYO2.HNM", 3500 }, { "PRESENT.HNM", 0 },
 		{ "IRULAN.HNM", 0 }, { "TITLE.HNM", 1500 }
 	};
-	const bool fast = isDumpRun() || isDuneHarnessRun();
+	const bool fast = isDumpRun() || isDuneFastHarness();
 	HnmPlayer player(system);
 	Common::Array<byte> video;
 	const uint first = ConfMan.hasKey("dune_intro_start") ? (uint)ConfMan.getInt("dune_intro_start") : 0;
@@ -178,6 +178,14 @@ bool playCdIntro(OSystem *system, Resource &resources, StartupLog &log) {
 		log.line(Common::String::format("Intro: %s (%u bytes) result %d", name, video.size(), (int)played));
 		if (played == HnmPlayer::kQuit)
 			return false;
+		// ESC ends the whole intro, the story after TITLE too: the original
+		// goes straight to the throne room (DNCDPRG on Spice86, captures/
+		// cd-flight: ESC at 8.0 s, the throne room at 8.2 s). A click or
+		// Return skips only the current video.
+		if (played == HnmPlayer::kSkipped && player.skippedWithEscape()) {
+			log.line("Intro: ESC ends the intro");
+			return true;
+		}
 		if (played == HnmPlayer::kSkipped)
 			continue;
 		if (!fast && steps[i].holdMillis) {
@@ -188,6 +196,10 @@ bool playCdIntro(OSystem *system, Resource &resources, StartupLog &log) {
 				while (pollDuneEvent(system, event)) {
 					if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER)
 						return false;
+					if (event.type == Common::EVENT_KEYDOWN && event.kbd.keycode == Common::KEYCODE_ESCAPE) {
+						log.line("Intro: ESC ends the intro");
+						return true;
+					}
 					if (event.type == Common::EVENT_LBUTTONDOWN || event.type == Common::EVENT_KEYDOWN)
 						skip = true;
 				}

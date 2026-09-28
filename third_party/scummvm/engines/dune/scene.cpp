@@ -58,7 +58,9 @@ namespace {
 bool isFastCapture() {
 	// The speedrun check runs as fast as a capture, unless it is watched
 	// (dune_speedrun_watch: real-time flights and animations, pauses).
-	return (isDumpRun() && !dumpEveryMillis()) || isDuneHarnessRun() ||
+	// dune_real_time keeps a harness run (checkpoints, scripted input) at
+	// the original's speed: the fidelity report's timed CD flight.
+	return (isDumpRun() && !dumpEveryMillis()) || isDuneFastHarness() ||
 		   (ConfMan.hasKey("dune_speedrun") && !ConfMan.hasKey("dune_speedrun_watch"));
 }
 
@@ -344,7 +346,7 @@ GameScreen::GameScreen(OSystem *system, Resource &resources, StartupLog &log) :
 		_system(system), _resources(resources), _log(log), _panel(system, resources), _mode(kRoom),
 		_room(kPalaceFirstRoom), _viewOk(false), _world(_state, resources, log), _sentences(nullptr),
 		_dialogue(nullptr), _conditions(nullptr), _conversation(nullptr), _book(nullptr), _map(nullptr),
-		_saves(nullptr), _menu(kMenuNone), _menuStatus(0xffff), _music(nullptr), _musicOn(false),
+		_saves(nullptr), _menu(kMenuNone), _menuStatus(0xffff), _music(nullptr), _musicOn(false), _musicOrder(0),
 		_quitRequested(false), _troopId(0), _troopFromMap(false), _troopChoosing(false), _recruiting(false), _troopFromRoom(false),
 		_hireTroop(0),
 		_clockStart(0), _talkWho(0), _talkIdle(0), _talkEnded(false), _talkRecruit(0), _talkRecruitOk(false), _talkSheet(nullptr), _talkLine(0), _talkPage(0), _talkAnimation(0), _talkFrame(0), _talkStart(0),
@@ -491,6 +493,7 @@ const RoomRecord *GameScreen::currentRoom() const {
 
 void GameScreen::showRoom(uint number) {
 	applyStory();
+	_palacePlan = false;
 	_mode = kRoom;
 	_menu = kMenuNone;
 	_desert = false;
@@ -633,6 +636,8 @@ void GameScreen::setRows(const RowAction *actions, const int *arguments, const u
 }
 
 void GameScreen::composeView() {
+	for (uint p = 0; p < ARRAYSIZE(_personPos); ++p)
+		_personPos[p] = Common::Point(-1, -1); // only a drawn room places people
 	if (_finalPicture) {
 		showFinal(_finalPicture);
 		return;
@@ -731,6 +736,10 @@ void GameScreen::composeView() {
 				people.clear();
 			}
 			for (uint i = 0; i < people.size() && markers; ++i) {
+				// Floppy CS:4014-401C removes travelling persons from the
+				// room's standing sprites; they occupy the companion slots.
+				if (people[i] < 16 && (_state.w(GameState::kPersonsWith) & (1 << people[i])))
+					continue;
 				uint slot = (people[i] + rotation) % markers;
 				if (slots[slot] != 0xff) {
 					for (slot = 0; slot < markers && slots[slot] != 0xff; ++slot) {
@@ -752,8 +761,10 @@ void GameScreen::composeView() {
 					const uint troop = _world.troopForPerson(who);
 					const uint figure = troop ? World::kFremen + World::fremenHead(troop) : MIN<uint>(who, World::kFremenChief);
 					markerSprites[j] = (uint16)(2 * figure);
-					if (who < ARRAYSIZE(_personPos) && j < positions.size())
+					if (who < ARRAYSIZE(_personPos) && j < positions.size()) {
 						_personPos[who] = positions[j];
+						_personFrame[who] = markerSprites[j];
+					}
 				}
 			}
 		}
@@ -763,7 +774,7 @@ void GameScreen::composeView() {
 		// the panel, so nothing here disturbs the sky.
 		if (!sheet.setPalette())
 			_log.line(Common::String::format("Room: %s has a broken palette chunk", sheetName.c_str()));
-		if (floppy && palace && outdoors)
+		if (floppy && palace && outdoors && salRoom == 10)
 			// The intro's palace scenes, matched against the recording, put
 			// BALCON frame 2 under the pieces the SAL record places.
 			sheet.drawFrame(2, _surface.surfacePtr(), 0, 0);
@@ -903,12 +914,23 @@ void GameScreen::addRoomRows(RowAction *actions, int *arguments, uint16 *command
 	} else if (palace && _room == 9) {
 		add(kRowMirror, 0, "LOOK AT MIRROR");
 	}
+	// The CD's room verbs end with Mixer Panel (CD sub_4DCB, loc_4E73: after
+	// the ornithopter, messages or mirror, before the people; not in the
+	// desert or a battle). The floppy's table has no such row.
+	add(kRowMixer, 0, "Mixer Panel");
 	(void)phase;
 	// build_persons_in_room_records: the people present.
 	Common::Array<byte> people;
 	_world.peopleInRoom(people);
-	for (uint i = 0; i < people.size(); ++i)
-		add(kRowTalk, people[i], characterName(people[i]));
+	// Floppy CS:334D/3353 scans residents first, then companions. Their
+	// travelling bits are the engine's source for the original flag 0x40.
+	const uint16 with = _state.w(GameState::kPersonsWith);
+	for (uint pass = 0; pass < 2; ++pass)
+		for (uint i = 0; i < people.size(); ++i) {
+			const bool companion = people[i] < 16 && (with & (1 << people[i]));
+			if (companion == (pass != 0))
+				add(kRowTalk, people[i], characterName(people[i]));
+		}
 }
 
 void GameScreen::roomNav(bool exits[4], bool &canLeave) {
@@ -941,6 +963,69 @@ void GameScreen::roomNav(bool exits[4], bool &canLeave) {
 		_panel.setNavMode(Panel::kNavRoom, _world.currentLocation() == 0);
 }
 
+void GameScreen::drawPalacePlan() {
+	// ui_draw_palace_plan (CD seg000:18ee): the window ds:143c (160,0 -
+	// 320,116) filled with colour 0xf1 and framed by four rings (loc_15b6e:
+	// ds:1444 grown one pixel per ring, colours 0xf7, 0xf5, 0xf3, 0xf1),
+	// then PALPLAN.HSQ's frames from the list at ds:120b (frame, x, y words
+	// up to 0xffff: the plan at 182,12 and its labels), then the marks
+	// (sub_11948).
+	_surface.fillRect(Common::Rect(160, 0, 320, 116), 0xf1);
+	for (int k = 0; k < 4; ++k)
+		_surface.frameRect(Common::Rect(163 - k, 3 - k, 317 + k, 113 + k), (uint32)(0xf7 - 2 * k));
+	Common::Array<byte> data;
+	if (!_resources.load("PALPLAN.HSQ", data)) {
+		_log.line("Palace plan: PALPLAN.HSQ missing");
+		return;
+	}
+	Sprite plan(_system, data);
+	const byte *v = _state.vars;
+	uint list = _world.ds(0x120b);
+	for (uint guard = 0; guard < 16 && list + 6 <= GameState::kSize; ++guard, list += 6) {
+		const uint16 frame = READ_LE_UINT16(v + list);
+		if (frame == 0xffff)
+			break;
+		plan.drawFrame(frame, _surface.surfacePtr(), (int16)READ_LE_UINT16(v + list + 2), (int16)READ_LE_UINT16(v + list + 4));
+	}
+	// sub_11948: per room, the characters of this place standing there
+	// (records at 0xfd8, byte 3 = location + 1 against ds:7), in two rows by
+	// the record's flag 0x40 (byte 15); sub_1127C leaves Gurney (id 4, byte
+	// 14) out while the phase is 0x15-0x1f. Paul's room (ds:4) gets the red
+	// mark.
+	byte counts[36];
+	memset(counts, 0, sizeof(counts));
+	for (uint i = 0; i < 16; ++i) {
+		const byte *c = v + World::kCharacterTable + i * World::kCharacterSize;
+		if (c[3] != v[7])
+			continue;
+		const byte phase = _state.b(GameState::kPhase);
+		if (c[14] == 4 && phase >= 0x15 && phase < 0x20)
+			continue;
+		const byte room = (byte)(c[0] - 1);
+		const uint index = room + ((c[15] & 0x40) ? 12u : 0u);
+		if (index < 24)
+			counts[index]++;
+	}
+	if (v[4] <= 12)
+		counts[0x17 + v[4]] = 1;
+	// Rooms 2-12 (the first room, the front, is not on the plan): their
+	// offsets from the plan's origin (ds:120d/120f) at ds:1426, x and y bytes.
+	const int originX = (int16)READ_LE_UINT16(v + _world.ds(0x120b) + 2);
+	const int originY = (int16)READ_LE_UINT16(v + _world.ds(0x120b) + 4);
+	const uint offsets = _world.ds(0x1426);
+	for (uint r = 1; r < 12; ++r) {
+		const int x = originX + v[offsets + 2 * (r - 1)] + 3;
+		const int y = originY + v[offsets + 2 * (r - 1) + 1] + 2;
+		// sub_119df: up to five marks (frame 2), four pixels apart.
+		for (uint k = 0; k < MIN<uint>(counts[r], 5); ++k)
+			plan.drawFrame(2, _surface.surfacePtr(), x + 4 * (int)k, y);
+		for (uint k = 0; k < MIN<uint>(counts[r + 12], 5); ++k)
+			plan.drawFrame(2, _surface.surfacePtr(), x + 4 * (int)k, y + 7);
+		if (counts[r + 24])
+			plan.drawFrame(1, _surface.surfacePtr(), x + 9, y + 3);
+	}
+}
+
 void GameScreen::drawRoom(int pressedRow, int pressedArrow) {
 	composeView();
 	const RoomRecord *record = currentRoom();
@@ -962,7 +1047,16 @@ void GameScreen::drawRoom(int pressedRow, int pressedArrow) {
 	uint16 commands[Panel::kCommandRows];
 	bool greyed[Panel::kCommandRows];
 	uint count = 0;
-	addRoomRows(actions, arguments, commands, greyed, count, canLeave);
+	if (_palacePlan) {
+		// The plan's menu (ds:2012): "Done" alone.
+		actions[0] = kRowPlanDone;
+		arguments[0] = 0;
+		commands[0] = _panel.findCommand("Done", true);
+		greyed[0] = false;
+		count = commands[0] != 0xffff ? 1 : 0;
+	} else {
+		addRoomRows(actions, arguments, commands, greyed, count, canLeave);
+	}
 	setRows(actions, arguments, commands, count);
 	for (uint i = 0; i < count; ++i)
 		if (greyed[i])
@@ -975,6 +1069,8 @@ void GameScreen::drawRoom(int pressedRow, int pressedArrow) {
 	if (_sceneActive)
 		_panel.setNavMode(Panel::kNavBlank);
 	_panel.draw(_surface, exits, pressedRow, pressedArrow, day());
+	if (_palacePlan)
+		drawPalacePlan();
 
 	debugSetRoom((int)_room);
 	debugOverlay(*_surface.surfacePtr());
@@ -987,6 +1083,16 @@ void GameScreen::panelAction(Panel::Action action, int row, int arrow) {
 		return;
 	if (action == Panel::kActionHead) {
 		openMap(MapScreen::kGlobe, false);
+		return;
+	}
+	if (action == Panel::kActionPlan) {
+		// seg000:18ee: a second click closes it (the handler checks for its
+		// own menu, bp = 2012h); only in the palace, not its first room.
+		if (_world.currentLocation() != 0 || _room == 1 || _desert)
+			return;
+		_palacePlan = !_palacePlan;
+		_log.line(_palacePlan ? "Palace plan: open" : "Palace plan: closed");
+		drawRoom();
 		return;
 	}
 	if (action == Panel::kActionCommand) {
@@ -1003,6 +1109,17 @@ void GameScreen::panelAction(Panel::Action action, int row, int arrow) {
 			return;
 		case kRowMirror:
 			openMirror();
+			return;
+		case kRowPlanDone:
+			_palacePlan = false;
+			_log.line("Palace plan: closed");
+			drawRoom();
+			return;
+		case kRowMixer:
+			// menu_callback_choice_mixer_panel (CD seg000:a3f0): the volume
+			// sliders and subtitle buttons; not built yet.
+			_log.line("Mixer Panel: not built");
+			showStatus("Dune: the Mixer Panel is not built yet");
 			return;
 		case kRowOrnithopter:
 			openCockpit(false);
@@ -1137,6 +1254,7 @@ void GameScreen::drawMapScreen() {
 		drawCockpit();
 		return;
 	}
+	_map->setDensityForMap();
 	_map->draw(_surface, _panel, _sentences, _state.b(GameState::kFremenTroops));
 	if (_map->mode() == MapScreen::kGlobe && _map->results() >= 100)
 		drawResults();
@@ -1182,15 +1300,16 @@ void GameScreen::drawMapScreen() {
 			add(kRowOrders, 0, "GIVE ORDERS TO TROOP", false, !hiredTroopAt(_world.currentLocation()));
 		else
 			add(kRowContact, 0, "CONTACT FREMEN TROOPS", false, _state.b(GameState::kFremenTroops) == 0);
-		add(kRowDensity, 0, _map->density() ? "STANDARD VISION" : "SEE SPICE DENSITY", false, phase < 5);
+		// The row keeps its name while the overlay is up (it toggles it, as
+		// the panel's close box does).
+		add(kRowDensity, 0, "SEE SPICE DENSITY", false, phase < 5);
 		add(kRowOrnithopter, 0, "TAKE AN ORNITHOPTER", false, parkedOrnis() == 0);
 		if (phase >= 5)
 			add(kRowProspectors, 0, "FIND PROSPECTORS"); // seg000:5b1e
 	} else if (_menu == kMenuNone) {
-		// swift-dune Fresk.swift: the globe screen carries the game menu.
-		// swift-dune Fresk.swift: EXIT GLOBE, SEE RESULTS (STANDARD VISION
-		// while the results show), SAVE GAME, LOAD GAME, OPTIONS.
-		add(kRowExitMap, 0, "EXIT GLOBE");
+		// Floppy DUNEPRG: DS:269c; CS:b840 patches the results row.
+		// EXIT GLOBE's CS:bb80 handler returns to the flat map.
+		add(kRowFlatMap, 0, "EXIT GLOBE");
 		add(kRowResults, 0, _map->results() ? "STANDARD VISION" : "SEE RESULTS");
 		add(kRowSaveMenu, 0, "SAVE GAME");
 		add(kRowLoadMenu, 0, "LOAD GAME");
@@ -1201,19 +1320,18 @@ void GameScreen::drawMapScreen() {
 		else
 			add(kRowOptionsMenu, 0, "EXIT GAME");
 	} else if (_menu == kMenuSave || _menu == kMenuLoad) {
-		// The four logs of the original: two free ones and the automatic
-		// "last entering" saves, then the way back.
-		static const char *const kSlots[SaveGame::kSlots] = {
-			"Log 1:", "Log 2:", "LAST ENTERING INTO A PLACE", "LAST ENTERING NEW SIETCH"
-		};
-		for (uint slot = 0; slot < SaveGame::kSlots; ++slot)
-			add(_menu == kMenuSave ? kRowSaveSlot : kRowLoadSlot, (int)slot, kSlots[slot], true);
-		add(kRowExitMap, 0, "EXIT GLOBE");
+		// Shared with the mirror's save/load menus below.
 	} else if (_menu == kMenuOptions) {
-		add(kRowMusic, 0, _musicOn ? "MUSIC OFF" : "MUSIC ON (GAME RELATIVE)");
-		add(kRowRestart, 0, "RESTART GAME");
+		// Floppy DS:26bc. CD-style opens DS:26d4 (CS:ac52).
+		add(kRowMusic, 0, "MUSIC OFF");
+		add(kRowMusic, 1, "MUSIC ON (GAME RELATIVE)");
+		add(kRowMusicOrderMenu, 0, "MUSIC ON (CD-STYLE)");
 		add(kRowExitGame, 0, "EXIT GAME");
-		add(kRowExitMap, 0, "EXIT GLOBE");
+		add(kRowMenuBack, 0, "Cancel", true);
+	} else if (_menu == kMenuMusicOrder) {
+		add(kRowMusicOrder, 1, "STANDARD ORDER");
+		add(kRowMusicOrder, 3, "SHUFFLE");
+		add(kRowMenuBack, kMenuOptions, "Cancel", true);
 	} else {
 		add(kRowConfirmExit, 0, "YES I WANT TO EXIT GAME");
 		add(kRowCancelExit, 0, _panel.findCommand("NO I WISH TO CONTINUE") != 0xffff ? "NO I WISH TO CONTINUE"
@@ -1223,18 +1341,13 @@ void GameScreen::drawMapScreen() {
 	for (uint i = 0; i < count; ++i)
 		if (greyed[i])
 			_panel.setRowDisabled(i, true);
-	if (_menu == kMenuSave || _menu == kMenuLoad) {
-		for (uint slot = 0; slot < 2 && slot < count; ++slot)
-			_panel.setRowText(slot, slotLabel(slot));
-		if (_menuStatus != 0xffff && count > SaveGame::kSlots) {
-			// " SAVE SUCCESSFUL" / " *** SAVE ERROR " replace the last row for one look.
-			_rowActions[SaveGame::kSlots] = kRowNone;
-			_panel.setRowText(SaveGame::kSlots, _panel.commandString(_menuStatus));
-		}
-	}
+	if (_map->mode() == MapScreen::kGlobe && (_menu == kMenuSave || _menu == kMenuLoad))
+		setSaveMenuRows();
 	_panel.setLeftPanel(Panel::kLeftGlobe);
 	const bool exits[4] = { false, false, false, false };
-	_panel.draw(_surface, exits, -1, -1, day());
+	const int selectedRow = _menu == kMenuOptions ? (!_musicOn ? 0 : (_musicOrder & 1) ? 2 : 1)
+			: _menu == kMenuMusicOrder ? ((_musicOrder & 2) ? 1 : 0) : -1;
+	_panel.draw(_surface, exits, selectedRow, -1, day());
 	_map->drawPanelExtras(_surface, _panel);
 	debugOverlay(*_surface.surfacePtr());
 	_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
@@ -1321,11 +1434,17 @@ void GameScreen::drawOrni(Graphics::Surface &target, int x, int y, uint frame) {
 	orni.drawFrame((uint16)(8 + MIN<uint>(frame, 14)), &target, x - 81, y - 3);
 }
 
+int GameScreen::orniPadX() const {
+	return _world.floppy() ? 0xb5 : 0xca; // floppy sub_5BD4 / CD seg000:3a95
+}
+
 void GameScreen::drawParkedOrnis(Graphics::Surface &target, uint skip) {
-	// get_orni_position (seg000:3a95): the pad at (149, 57) for a sietch,
-	// (202, 73) elsewhere; each further orni 70 to the right, 10 lower.
+	// get_orni_position (CD seg000:3a95, floppy sub_5BD4): the pad at
+	// (149, 57) for a sietch; elsewhere (202, 73) on the CD but (181, 73) on
+	// the floppy (0xB5; the palace front's orni sat 21 px too far right).
+	// Each further orni 70 to the right, 10 lower.
 	const bool sietch = _world.placeType() < Location::kPalace;
-	int x = sietch ? 0x95 : 0xca, y = sietch ? 0x39 : 0x49;
+	int x = sietch ? 0x95 : orniPadX(), y = sietch ? 0x39 : 0x49;
 	const uint count = parkedOrnis();
 	for (uint i = 0; i < count; ++i, x += 0x46, y += 0x0a)
 		if (i >= skip)
@@ -1345,7 +1464,7 @@ void GameScreen::animateOrni(int step) {
 	clean.create(320, 152, Graphics::PixelFormat::createFormatCLUT8());
 	clean.blitFrom(*_surface.surfacePtr(), Common::Rect(0, 0, 320, 152), Common::Point(0, 0));
 	const bool sietch = _world.placeType() < Location::kPalace;
-	const int padX = sietch ? 0x95 : 0xca, padY = sietch ? 0x39 : 0x49;
+	const int padX = sietch ? 0x95 : orniPadX(), padY = sietch ? 0x39 : 0x49;
 	const bool fast = isFastCapture();
 	for (int frame = step > 0 ? 1 : 0x1f; frame >= 0 && frame <= 0x21; frame += step) {
 		_surface.blitFrom(clean, Common::Rect(0, 0, 320, 152), Common::Point(0, 0));
@@ -1378,6 +1497,8 @@ void GameScreen::openMirror() {
 	// menu_callback_choice_palace_look_at_mirror (seg000:0ea6): the game
 	// clock stops and the mirror still comes up.
 	_mode = kMirror;
+	_menu = kMenuNone;
+	_menuStatus = 0xffff;
 	_log.line("Mirror: Paul looks at himself");
 	drawMirror();
 	dumpScreen(_system, "mirror");
@@ -1419,12 +1540,20 @@ void GameScreen::drawMirror() {
 			commands[count++] = id;
 		}
 	};
-	add(kRowRestart, "RESTART GAME");
-	add(kRowLoadMenu, "LOAD GAME");
-	add(kRowSaveMenu, "SAVE GAME");
-	add(kRowExitGame, "EXIT GAME");
-	add(kRowMirrorAway, "Look away from the mirror");
+	if (_menu == kMenuNone) {
+		add(kRowRestart, "RESTART GAME");
+		add(kRowLoadMenu, "LOAD GAME");
+		add(kRowSaveMenu, "SAVE GAME");
+		add(kRowExitGame, "EXIT GAME");
+		add(kRowMirrorAway, "Look away from the mirror");
+	} else if (_menu == kMenuQuit) {
+		add(kRowConfirmExit, "YES I WANT TO EXIT GAME");
+		add(kRowCancelExit, _panel.findCommand("NO I WISH TO CONTINUE") != 0xffff ? "NO I WISH TO CONTINUE"
+																				  : "NO I DON'T WANT TO FINISH");
+	}
 	setRows(actions, arguments, commands, count);
+	if (_menu == kMenuSave || _menu == kMenuLoad)
+		setSaveMenuRows();
 	_panel.setLeftPanel(Panel::kLeftBook);
 	_panel.setCompanions(_world.companion(0), _world.companion(1));
 	const bool exits[4] = { false, false, false, false };
@@ -1475,6 +1604,10 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 	// videos (not yet), so it keeps the flat map with the trail.
 	Common::Array<byte> dunesData;
 	Sprite *dunes = nullptr; // set when the floppy's landscape is drawn (DUNES.HSQ)
+	Common::Array<byte> ornypanData;
+	Sprite *ornypan = nullptr; // its palette colours the minimap (checked against the original's flight)
+	if (_resources.load("ORNYPAN.HSQ", ornypanData))
+		ornypan = new Sprite(_system, ornypanData);
 	if (!skipping && _resources.load("DUNES.HSQ", dunesData))
 		dunes = new Sprite(_system, dunesData);
 	// The route (travel_step_position, floppy 7E87 in IDA numbering; see
@@ -1614,9 +1747,12 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		Graphics::Surface view = _surface.surfacePtr()->getSubArea(Common::Rect(0, 0, 320, 152));
 		_surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
 		_panel.applyPalette();
-		// ONMAP's palette under the sky's: the minimap's terrain (20-31) and
-		// the lavender-blue panel and minimap frame of the recordings (240-254).
+		// ONMAP's palette, then ORNYPAN's (the cockpit's sheet, still
+		// installed from the take-off: the minimap's terrain 0x14-0x1D in its
+		// browns, and the trail's colours), then the sky's.
 		_map->applyPalette();
+		if (ornypan)
+			ornypan->setPalette();
 		drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
 		const uint32 nowMillis = _system->getMillis();
 		// A frame every 16 ticks (546D); the eighth frame since the last step
@@ -1876,6 +2012,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 					if (_map)
 						_map->setFlight(false, 0, 0, -1);
 					delete dunes;
+					delete ornypan;
 					return kShotDown;
 				}
 			} else {
@@ -1927,6 +2064,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 	if (_map)
 		_map->setFlight(false, 0, 0, -1);
 	delete dunes;
+	delete ornypan;
 	stopCdFlightView();
 	_clockStart = _system->getMillis();
 	if (destination < 0) {
@@ -2183,6 +2321,149 @@ void GameScreen::stageTroopForConditions(uint troopId) {
 	_state.setW(names + 16, (uint16)(ranks + MIN<uint>(5, t.ecologySkill >> 4)));
 }
 
+void GameScreen::troopSceneStep() {
+	// The scripted scene over the troop popup (CD 12f8 on the prospectors'
+	// SPECIALIZE IN SPICE): action 07 raises the spice-density overlay and
+	// speaks the next line of character 15's list 7 ("Here, take this map of
+	// the planet."), action 08 drops it and speaks the next ("You can update
+	// this map..."); the end gives the order menu back.
+	Common::Array<byte> bytes;
+	if (!_troopScene || !_world.sceneScript(_troopScene, bytes) || _troopSceneCursor >= bytes.size() ||
+			bytes[_troopSceneCursor] == 0xff) {
+		_troopScene = 0;
+		if (_map)
+			_map->setDensity(false);
+		drawTroop();
+		return;
+	}
+	const byte op = bytes[_troopSceneCursor++];
+	if (op == 0x0e || op == 0x10) {
+		if (_map)
+			_map->setDensity(op == 0x0e);
+		stageTroopForConditions(_troopId);
+		_conversation->start(World::kFremenChief, 7, 0x80, true, true);
+		Common::String page;
+		bool newSentence;
+		if (_conversation->next(page, newSentence))
+			_troopLine = page;
+		_log.line(Common::String::format("Scene: troop lesson action %#x", op));
+	} else {
+		_log.line(Common::String::format("Scene: troop lesson action %#x not built", op));
+	}
+	drawTroop();
+	dumpScreen(_system, Common::String::format("troop-lesson-%u", _troopSceneCursor).c_str());
+}
+
+void GameScreen::startTroopPick() {
+	// seg000:8064 (floppy 8d7a): the caption (COMMAND 0x4a, "Show me where
+	// you want me to go...", or 0x4b for the prospectors, who copy their
+	// queue to the working one), the density popup, and the pick menu.
+	_troopChoosing = false;
+	_troopPicking = true;
+	_pickLineBefore = _troopLine;
+	_pickCount = 0;
+	_pickQueue[0] = _pickQueue[1] = _pickQueue[2] = 0;
+	const uint16 show = _panel.findCommand("Show me where", true);
+	uint16 caption = show;
+	if (_troopId == World::kProspectorTroop) {
+		// The count is the first empty slot of the four words (repne scasw), at most 3.
+		for (uint k = 0; k < 3 && _world.prospectorDestination(k); ++k)
+			_pickQueue[_pickCount++] = _world.prospectorDestination(k);
+		if (show != 0xffff)
+			caption = (uint16)(show + 1);
+	}
+	_troopLine = caption != 0xffff ? _panel.commandString(caption) : Common::String();
+	_log.line(Common::String::format("Troops: troop %u picks a destination (command %#x \"%s\", %u queued)", _troopId,
+			caption, _troopLine.c_str(), _pickCount));
+	if (_map)
+		_map->setDensity(true);
+	drawTroop();
+	dumpScreen(_system, "troop-pick");
+}
+
+void GameScreen::troopPickTap(int x, int y) {
+	// mouse_handler_move_troop_pick (seg000:81ec): the nearest marker within
+	// 9 pixels on the popup's window; move_troop_validate_pick (8256).
+	if (!_map)
+		return;
+	const int hit = _map->densityHit(x, y);
+	if (hit < 0)
+		return;
+	if (_troopId != World::kProspectorTroop) {
+		endTroopPick(hit);
+		return;
+	}
+	// The prospectors take a sietch or an Atreides-held place (status bit 3).
+	const Location l = _world.location((uint)hit);
+	if (!l.isSietch() && !(l.status & 0x08)) {
+		_log.line(Common::String::format("Troops: the prospectors cannot prospect place %d", hit));
+		return;
+	}
+	if (_pickCount >= 3) {
+		_pickCount = 0;
+		_pickQueue[0] = _pickQueue[1] = _pickQueue[2] = 0;
+	}
+	_pickQueue[_pickCount++] = World::placeOffset((uint)hit);
+	_log.line(Common::String::format("Troops: prospector destination %u = place %d (status %#x)", _pickCount, hit, l.status));
+	drawTroop();
+	dumpScreen(_system, Common::String::format("troop-pick-%u", _pickCount).c_str());
+	if (_pickCount < 3)
+		return;
+	_system->delayMillis(isFastCapture() ? 0 : 250); // sub_FD63(0x32): a beat before the order
+	endTroopPick(-3);
+}
+
+void GameScreen::endTroopPick(int dest) {
+	// The teardown (move_troop_teardown, 82b7), then for a pick (-3 the
+	// prospectors' queue) the done path (seg000:8214): the acknowledgement
+	// through list 4 with ds:23 = 0x0b (0x10 when the troop is already
+	// there), then troop_issue_move_order and the map's main menu.
+	_troopPicking = false;
+	if (_map) {
+		_map->setDensity(false);
+		_map->setRoute(Common::Array<Common::Point>());
+	}
+	if (dest == -3) {
+		for (uint k = 0; k < 3; ++k)
+			_world.setProspectorDestination(k, _pickQueue[k]);
+		dest = _world.placeIndex(_pickQueue[0]);
+		if (dest < 0)
+			dest = -1; // an empty head cancels
+	}
+	if (dest < 0) {
+		_troopLine = _pickLineBefore;
+		drawTroop();
+		return;
+	}
+	byte *r = _state.vars + World::kTroopTable + (_troopId - 1) * World::kTroopSize;
+	const uint16 before = READ_LE_UINT16(r + 4);
+	const bool same = _world.troopPlace(_troopId) == dest;
+	if (!same)
+		WRITE_LE_UINT16(r + 4, World::placeOffset((uint)dest));
+	stageTroopForConditions(_troopId);
+	WRITE_LE_UINT16(r + 4, before);
+	_state.setB(0x23, same ? 0x10 : 0x0b);
+	_conversation->start(World::kFremenChief, 4, 0x80, true, true);
+	_conversation->armGate();
+	Common::String page;
+	bool newSentence;
+	if (_conversation->next(page, newSentence))
+		_troopLine = page;
+	if (!_conversation->gateHeld()) {
+		// Event 2 drops the gate: no march now. The prospectors keep their
+		// queue (already stored) and leave once this place is prospected.
+		_log.line(Common::String::format("Troops: troop %u stays for now (\"%s\")", _troopId, _troopLine.c_str()));
+		drawTroop();
+		return;
+	}
+	if (_world.issueMoveOrder(_troopId, (uint)dest))
+		_log.line(Common::String::format("Troops: troop %u answers \"%s\"", _troopId, _troopLine.c_str()));
+	drawTroop();
+	dumpScreen(_system, "troop-moving");
+	_mode = kMap;
+	drawMapScreen();
+}
+
 bool GameScreen::nextTroopLine() {
 	Common::String page;
 	bool newSentence;
@@ -2214,8 +2495,50 @@ void GameScreen::drawTroop() {
 		}
 	};
 	const uint job = t.occupation & 0x0f;
+	(void)job;
 	if (_troopFromMap && _map) {
+		// sub_A5E5: over a troop's popup the density popup is at (0x5c, 0x1e)
+		// with the troop's marker (sub_8F62: its place, or its position on
+		// the march) and its route (sub_AD0A: from its position through its
+		// destinations).
+		Common::Array<Common::Point> route;
+		const byte *r = _state.vars + World::kTroopTable + (_troopId - 1) * World::kTroopSize;
+		const Common::Point position((int16)READ_LE_UINT16(r + 6), (int16)READ_LE_UINT16(r + 8));
+		Common::Point marker = position;
+		if (!(r[3] & 0x40) && _world.troopPlace(_troopId) >= 0) {
+			const Location l = _world.location((uint)_world.troopPlace(_troopId));
+			marker = Common::Point((int16)l.longitude, l.latitude);
+		}
+		_map->setDensityForTroop(0x5c, 0x1e, marker);
+		{
+			route.push_back(position);
+			if (_troopId == World::kProspectorTroop) {
+				// The prospectors' line runs through the working queue (ds:4274),
+				// which outside a pick holds the stored one.
+				uint16 queue[3];
+				uint count = 0;
+				for (uint k = 0; k < 3; ++k) {
+					queue[k] = _troopPicking ? _pickQueue[k] : _world.prospectorDestination(k);
+					if (queue[k] && count == k)
+						++count;
+				}
+				for (uint k = 0; k < count; ++k) {
+					const int p = _world.placeIndex(queue[k]);
+					if (p >= 0)
+						route.push_back(Common::Point((int16)_world.location((uint)p).longitude, _world.location((uint)p).latitude));
+				}
+			} else if (_world.troopPlace(_troopId) >= 0) {
+				const Location l = _world.location((uint)_world.troopPlace(_troopId));
+				route.push_back(Common::Point((int16)l.longitude, l.latitude));
+			}
+		}
+		_map->setRoute(route);
+		// The density popup goes over the troop panel (sub_ACC0 draws the
+		// panel, then sub_80B0 the popup), so the map is drawn without it.
+		const bool overlay = _map->density();
+		_map->setDensity(false);
 		_map->draw(_surface, _panel, _sentences, _state.b(GameState::kFremenTroops));
+		_map->setDensity(overlay);
 		// map_draw_troop_contact_popup (seg000:79ee): the panel at the top
 		// (the troop's icon is below it), a 61x61 head box (fill 0xe4, frame
 		// 0xf5) at +(4,3) and the line at +(0x49,3) in a 153x63 area, all on
@@ -2266,12 +2589,31 @@ void GameScreen::drawTroop() {
 		Common::Array<Common::String> lines;
 		_panel.wrapText(_troopLine, 153 - 8, false, lines);
 		const int lineHeight = 10;
-		int y = panel.top + 3 + (63 - (int)MIN<uint>(lines.size(), 6) * lineHeight) / 2;
-		for (uint i = 0; i < lines.size() && i < 6; ++i, y += lineHeight)
+		// sub_ACC0: while a move is picked the text area is 0x19 high (two lines).
+		const uint maxLines = overlay ? 2 : 6;
+		const int area = overlay ? 0x19 : 63;
+		int y = panel.top + 3 + (area - (int)MIN<uint>(lines.size(), maxLines) * lineHeight) / 2;
+		for (uint i = 0; i < lines.size() && i < maxLines; ++i, y += lineHeight)
 			_panel.drawText(_surface, lines[i].c_str(), panel.left + 0x49 + 4, y, Panel::kDarkColour, false);
+		if (overlay)
+			_map->drawDensityOverlay(_surface, _panel);
 
 		// menu_map_troop_dialog: the contact verbs (greyed when they cannot apply).
-		if (!_troopChoosing) {
+		if (_troopPicking) {
+			if (_troopId == World::kProspectorTroop) {
+				// menu_map_move_prospectors (sub_AC8D): ADD A DESTINATION is
+				// greyed unless the working queue holds one or two places.
+				add(kRowPickAdd, 0, "ADD A DESTINATION", _pickCount < 1 || _pickCount > 2);
+				add(kRowPickNew, 0, "GIVE NEW DESTINATIONS");
+				add(kRowPickDone, 0, "Done", false, true);
+				add(kRowPickCancel, 0, "Cancel", false, true);
+			} else {
+				add(kRowPickCancel, 0, "Cancel", false, true); // menu_multiple_cancel
+			}
+		} else if (_troopScene) {
+			// The prospector's lesson (menu_prospector_troop_after_specializing_in_spice): " Continue...".
+			add(kRowContinue, 0, " Continue...");
+		} else if (!_troopChoosing) {
 			add(kRowAskMore, 0, "ASK FOR MORE INFORMATION");
 			add(kRowTroopOccupation, 0, job == Troop::kWaitingForOrders ? "SELECT TROOP OCCUPATION" : "CHANGE TROOP OCCUPATION");
 			add(kRowEquipment, 0, "MODIFY EQUIPMENT");
@@ -2372,11 +2714,7 @@ void GameScreen::dumpGameplay() {
 	while (inConversation() && !_talkEnded)
 		advanceConversation();
 	// WORK FOR ME: the check, the Fremen's answer, the troop follows.
-	const uint recruit = _world.localTroop(false);
-	_talkRecruitOk = _world.troopAgreesToFollow(recruit);
-	_state.setB(0x23, _talkRecruitOk ? 0 : 2);
-	_talkRecruit = recruit;
-	presentVerb(5);
+	workForMe();
 	dumpScreen(_system, "troop-recruit");
 	while (talking() || _talkRecruit)
 		advanceConversation();
@@ -2429,7 +2767,9 @@ void GameScreen::dumpGameplay() {
 // ---- The game menu: saving, loading, options -----------------------------------
 
 void GameScreen::openMenu(Menu menu) {
-	if (_mode != kMap || !_map || _map->mode() != MapScreen::kGlobe) {
+	// Floppy CS:b171/b183 push DS:26e4/26f4 over the current screen.
+	// Mirror DS:2728 uses those same handlers; CS:cd2b pops back to it.
+	if (_mode != kMirror && (_mode != kMap || !_map || _map->mode() != MapScreen::kGlobe)) {
 		openMap(MapScreen::kGlobe, false);
 		if (_mode != kMap)
 			return;
@@ -2438,10 +2778,42 @@ void GameScreen::openMenu(Menu menu) {
 	_menuStatus = 0xffff;
 	if (menu == kMenuSave || menu == kMenuLoad)
 		ensureSaves();
-	static const char *const kNames[] = { "menu-globe", "menu-save", "menu-load", "menu-options", "menu-quit" };
-	_log.line(Common::String::format("Menu: %s", kNames[menu]));
-	drawMapScreen();
-	dumpScreen(_system, kNames[menu]);
+	static const char *const kNames[] = { "menu-globe", "menu-save", "menu-load", "menu-options", "menu-quit", "menu-music-order" };
+	const char *name = _mode == kMirror && menu == kMenuNone ? "menu-mirror" : kNames[menu];
+	_log.line(Common::String::format("Menu: %s", name));
+	if (_mode == kMirror)
+		drawMirror();
+	else
+		drawMapScreen();
+	dumpScreen(_system, name);
+}
+
+void GameScreen::setSaveMenuRows() {
+	// Floppy DS:26e4/26f4: two manual logs for Save, four entries for Load.
+	static const char *const kSlots[SaveGame::kSlots] = {
+		"Log 1:", "Log 2:", "LAST ENTERING INTO A PLACE", "LAST ENTERING NEW SIETCH"
+	};
+	RowAction actions[Panel::kCommandRows];
+	int arguments[Panel::kCommandRows];
+	uint16 commands[Panel::kCommandRows];
+	const uint slotCount = _menu == kMenuSave ? 2 : SaveGame::kSlots;
+	for (uint slot = 0; slot < slotCount; ++slot) {
+		actions[slot] = _menu == kMenuSave ? kRowSaveSlot : kRowLoadSlot;
+		arguments[slot] = slot;
+		commands[slot] = _panel.findCommand(kSlots[slot], true);
+	}
+	actions[slotCount] = kRowMenuBack;
+	arguments[slotCount] = 0;
+	commands[slotCount] = _panel.findCommand("Cancel", true);
+	setRows(actions, arguments, commands, slotCount + 1);
+	for (uint slot = 0; slot < 2; ++slot)
+		_panel.setRowText(slot, slotLabel(slot));
+	if (_menu == kMenuLoad)
+		for (uint slot = 0; slot < slotCount; ++slot)
+			_panel.setRowDisabled(slot, !_saves || _saves->slotTime(slot) < 0); // CS:b1f4: missing logs have flag 0x4000.
+	if (_menu == kMenuSave && _menuStatus != 0xffff)
+		// CS:b251-b259 draws the status in row CX=4; Cancel stays in row 2.
+		_panel.setRowText(4, _panel.commandString(_menuStatus));
 }
 
 bool GameScreen::ensureSaves() {
@@ -2473,17 +2845,30 @@ bool GameScreen::saveSlot(uint slot) {
 	_menuStatus = _panel.findCommand(ok ? "SAVE SUCCESSFUL" : "*** SAVE ERROR", true);
 	if (_mode == kMap)
 		drawMapScreen();
+	else if (_mode == kMirror)
+		drawMirror();
 	dumpScreen(_system, ok ? "menu-saved" : "menu-save-error");
+	if (ok && (_mode == kMap || _mode == kMirror)) {
+		// CS:b25c-b268 waits 0x12c timer ticks, then pops only on success.
+		if (!isFastCapture())
+			_system->delayMillis(1500);
+		openMenu(kMenuNone);
+	}
 	return ok;
 }
 
 bool GameScreen::loadSlot(uint slot) {
 	if (!ensureSaves() || slot >= SaveGame::kSlots)
 		return false;
+	// CS:b2aa/b2da preserves DS:00fb: a globe load stays on the globe;
+	// the room/mirror branch (CS:b2f5) rebuilds the room.
+	const bool fromGlobe = _menu == kMenuLoad && _mode == kMap && _map && _map->mode() == MapScreen::kGlobe;
 	if (!_saves->load(slot)) {
 		_menuStatus = _panel.findCommand("*** SAVE ERROR", true);
 		if (_mode == kMap)
 			drawMapScreen();
+		else if (_mode == kMirror)
+			drawMirror();
 		return false;
 	}
 	// The book's journal is not in the file: it lists the lines said so
@@ -2503,6 +2888,13 @@ bool GameScreen::loadSlot(uint slot) {
 		_conversation->stop();
 	_mode = kRoom;
 	leaveMap();
+	if (fromGlobe) {
+		openMenu(kMenuNone);
+		if (_mode == kMap && _map) {
+			_map->setResults(100);
+			drawMapScreen();
+		}
+	}
 	return true;
 }
 
@@ -2565,6 +2957,23 @@ void GameScreen::workForMe() {
 	_talkRecruit = troop;
 	_log.line(Common::String::format("Troops: WORK FOR ME to troop %u: %s", troop, _talkRecruitOk ? "yes" : "no"));
 	presentVerb(5);
+	// Floppy CS:A0A8 presents the answer, A0B4 checks its gate, and A0DD
+	// rallies the troop before returning to input. A10C installs the chief's
+	// verbs while the same speaker and acceptance balloon remain visible.
+	_talkRecruit = 0;
+	if (!_conversation->gateHeld()) {
+		_log.line(Common::String::format("Troops: troop %u refused", troop));
+		return;
+	}
+	_world.rallyTroop(troop);
+	for (uint who = World::kFremenChief; who < World::kFremenChief + 8; ++who) {
+		if (_world.troopForPerson(who) != troop)
+			continue;
+		_talkWho = who; // menu identity; keep the current portrait and answer
+		updateRoomVars();
+		drawTalk();
+		break;
+	}
 }
 
 void GameScreen::companionVerb() {
@@ -2710,33 +3119,6 @@ void GameScreen::advanceConversation() {
 			// Out of lines: the verbs stay, over the room (the video's 5:00).
 			_talkEnded = true;
 			_talkLines.clear();
-			if (_talkRecruit) {
-				// WORK FOR ME was answered: the troop follows unless the line
-				// dropped the gate (the refusal's event 2, seg000:95e2).
-				const uint recruit = _talkRecruit;
-				_talkRecruit = 0;
-				if (!_conversation->gateHeld()) {
-					_log.line(Common::String::format("Troops: troop %u refused", recruit));
-					showRoom(_world.room());
-					return;
-				}
-				_world.rallyTroop(recruit);
-				// The Fremen now answer as their troop's chief: the talk stays
-				// open with GIVE ORDERS TO TROOP (setup_npc_dialogue_menu for a
-				// rallied troop's person, seg000:90de).
-				for (uint who = World::kFremenChief; who < World::kFremenChief + 8; ++who) {
-					if (_world.troopForPerson(who) != recruit)
-						continue;
-					openTalk(who);
-					_talkEnded = true;
-					updateRoomVars();
-					drawTalk();
-					dumpScreen(_system, "troop-rallied-talk");
-					return;
-				}
-				showRoom(_world.room());
-				return;
-			}
 			drawTalk();
 			dumpScreen(_system, Common::String::format("talk-%u", ++_talkPage).c_str());
 			return;
@@ -2881,11 +3263,11 @@ void GameScreen::runPhaseTriggers() {
 		return;
 	Conversation triggers(*_sentences, *_dialogue, *_conditions, _state, _log);
 	triggers.setEventHandler(&GameScreen::storyEvent, this);
-	triggers.start(16, 7, 0x80, true);
+	triggers.start(16, 7, 0x80, true, true);
 	Common::String page;
 	bool newSentence;
 	if (triggers.next(page, newSentence))
-		triggers.next(page, newSentence); // finishes the entry: its event fires
+		triggers.finishPending(); // only the selected entry's event fires
 	_state.setW(GameState::kPersonsTalkingTo, 0);
 }
 
@@ -2929,6 +3311,23 @@ void GameScreen::endConversation() {
 	}
 	showRoom(_world.room());
 }
+int GameScreen::personAt(int x, int y) const {
+	const Common::Array<byte> &sheet = _panel.characterSheet();
+	if (sheet.empty())
+		return -1;
+	Sprite characters(_system, sheet);
+	for (uint who = 0; who < ARRAYSIZE(_personPos); ++who) {
+		if (_personPos[who].x < 0)
+			continue;
+		uint16 w, h;
+		if (!characters.frameSize(_personFrame[who], w, h))
+			continue;
+		if (Common::Rect(_personPos[who].x, _personPos[who].y, _personPos[who].x + w, _personPos[who].y + h).contains(x, y))
+			return (int)who;
+	}
+	return -1;
+}
+
 void GameScreen::startTalkAnimation() {
 	// One of the sheet's talking animations per page (the last one is the
 	// lip-sync set), at the resources' 12 fps. Harness and dump runs keep
@@ -2946,6 +3345,15 @@ void GameScreen::update() {
 	// 12000 ticks of its 200.3 Hz timer (seg000:ef6a), stopped while a
 	// dialogue, the book or a menu holds the game (game_suspend_count).
 	// Never in dump or harness runs, whose pictures must not depend on time.
+	if (const uint periods = takeDuneHarnessPeriods()) {
+		_log.line(Common::String::format("Harness: %u periods pass", periods));
+		for (uint n = 0; n < periods && !_quitRequested; ++n)
+			passTime(1);
+		if (_mode == kRoom)
+			drawRoom();
+		else if (_mode == kMap)
+			drawMapScreen();
+	}
 	if (!isFastCapture()) {
 		const uint32 now = _system->getMillis();
 		if (!_clockStart || (_mode != kRoom && _mode != kMap))
@@ -3385,6 +3793,9 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 				case kRowOptionsMenu:
 					openMenu(kMenuOptions);
 					break;
+				case kRowMenuBack:
+					openMenu((Menu)_rowArguments[row]);
+					break;
 				case kRowSaveSlot:
 					saveSlot((uint)_rowArguments[row]);
 					break;
@@ -3392,8 +3803,20 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 					loadSlot((uint)_rowArguments[row]);
 					break;
 				case kRowMusic:
-					toggleMusic();
-					drawMapScreen();
+					if (_rowArguments[row])
+						_musicOrder = 0; // CS:ac42: game-relative selection clears DS:33fe.
+					if (_musicOn != (_rowArguments[row] != 0))
+						toggleMusic();
+					openMenu(kMenuNone); // CS:ac4c/ae48 pop Options.
+					break;
+				case kRowMusicOrderMenu:
+					openMenu(kMenuMusicOrder);
+					break;
+				case kRowMusicOrder:
+					_musicOrder = (byte)_rowArguments[row]; // CS:ac64/ac6b: shuffle=3, standard=1.
+					if (!_musicOn)
+						toggleMusic();
+					openMenu(kMenuNone); // CS:ac85/ac88 pop the order menu and Options.
 					break;
 				case kRowRestart:
 					startNewGame();
@@ -3433,6 +3856,13 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 					leaveMap();
 				return false;
 			}
+			if (_map->density() && _map->mode() == MapScreen::kFlat &&
+					Common::Rect(75, 15, 85, 25).contains(event.mouse.x, event.mouse.y)) {
+				// The SPICE DENSITY panel's close box (ONMAP 0x8D's corner).
+				_map->setDensity(false);
+				drawMapScreen();
+				return false;
+			}
 			if (event.mouse.y < 152)
 				mapTap(event.mouse.x, event.mouse.y);
 		} else if (event.type == Common::EVENT_KEYDOWN && event.kbd.keycode == Common::KEYCODE_ESCAPE) {
@@ -3449,7 +3879,10 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 		if (event.type == Common::EVENT_LBUTTONDOWN) {
 			int row, arrow;
 			const Panel::Action action = _panel.hitTest(event.mouse.x, event.mouse.y, row, arrow);
-			if (action == Panel::kActionBook)
+			// The box where the compass stands closes the book too (the
+			// original's explore capture: a click at (275,176), then the room).
+			const bool exitBox = event.mouse.y >= 152 && event.mouse.x >= 236;
+			if (action == Panel::kActionBook || exitBox)
 				closeBook();
 			else if (action == Panel::kActionCommand && row >= 0)
 				bookAction(kBookTopic, row);
@@ -3466,6 +3899,10 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 		return false;
 	}
 	if (_mode == kTroop) {
+		if (event.type == Common::EVENT_LBUTTONDOWN && _troopPicking && event.mouse.y < 152) {
+			troopPickTap(event.mouse.x, event.mouse.y);
+			return false;
+		}
 		if (event.type == Common::EVENT_LBUTTONDOWN && _troopEquipment && event.mouse.y < 152) {
 			if (equipmentTap(event.mouse.x, event.mouse.y))
 				drawTroop();
@@ -3476,6 +3913,7 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 			const Panel::Action action = _panel.hitTest(event.mouse.x, event.mouse.y, row, arrow);
 			if (action != Panel::kActionCommand || row < 0 || row >= (int)Panel::kCommandRows)
 				return false;
+			_log.line(Common::String::format("Troop command: %s", _panel.commandText(row) ? _panel.commandText(row) : "(none)"));
 			switch (_rowActions[row]) {
 			case kRowTroopTalk:
 				_mode = kRoom;
@@ -3521,11 +3959,21 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 				showRoom(_world.room());
 				return false;
 			case kRowMoveTroop:
-				// seg000:8064: the map, choosing the troop's destination.
-				_movingTroop = _troopId;
-				_troopChoosing = false;
-				_mode = kMap;
-				openMap(MapScreen::kFlat, true);
+				startTroopPick();
+				return false;
+			case kRowPickCancel:
+				endTroopPick(-1);
+				return false;
+			case kRowPickAdd:
+				return false; // seg000:8dc7 (floppy): a bare return, the next pick appends
+			case kRowPickNew:
+				// sub_ACA9 then loc_AE52: the queue emptied, the popup redrawn.
+				_pickCount = 0;
+				_pickQueue[0] = _pickQueue[1] = _pickQueue[2] = 0;
+				drawTroop();
+				return false;
+			case kRowPickDone:
+				endTroopPick(-3);
 				return false;
 			case kRowEspionage:
 				_troopChoosing = false;
@@ -3543,18 +3991,46 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 				dumpScreen(_system, "troop-attack");
 				return false;
 			}
-			case kRowSetOccupation:
-				_world.setTroopOccupation(_troopId, (byte)_rowArguments[row]);
+			case kRowSetOccupation: {
+				// troop_apply_occupation_choice (CD 6a89): the job (SPECIALIZE IN
+				// SPICE makes the prospectors prospect, CD 6a76), then the troop's
+				// answer: one line of its list 4 with pending_room_action 0x0A
+				// (CD 7bbe). A line whose event drops the gate refuses, and the
+				// order is taken back.
+				byte job = (byte)_rowArguments[row];
+				if (job == Troop::kSpiceMining && _troopId == World::kProspectorTroop)
+					job = Troop::kProspecting;
+				byte before[World::kTroopSize];
+				_world.saveTroopRecord(_troopId, before);
+				_world.setTroopOccupation(_troopId, job);
 				_log.line(Common::String::format("Troops: troop %u now %s", _troopId, _panel.commandText(row)));
 				_troopChoosing = false;
 				if (_troopFromMap) {
-					// The chief answers with the list again (production, job).
 					stageTroopForConditions(_troopId);
-					_conversation->start(World::kFremenChief, 2, 0x80, true);
-					nextTroopLine();
+					_state.setB(0x23, 0x0a);
+					_conversation->start(World::kFremenChief, 4, 0x80, true, true);
+					_conversation->armGate();
+					Common::String page;
+					bool newSentence;
+					if (_conversation->next(page, newSentence))
+						_troopLine = page;
+					if (!_conversation->gateHeld()) {
+						_world.restoreTroopRecord(_troopId, before);
+						_log.line(Common::String::format("Troops: troop %u refuses the order", _troopId));
+					}
+					if (_pendingScene == 0x12f8) {
+						// The prospectors' answer (event 3) below phase 0x14: the map lesson, in the popup.
+						_troopScene = _pendingScene;
+						_pendingScene = 0;
+						_troopSceneCursor = 0;
+					}
 				}
 				drawTroop();
 				dumpScreen(_system, "troop-ordered");
+				return false;
+			}
+			case kRowContinue:
+				troopSceneStep();
 				return false;
 			case kRowTroopDone:
 				if (_troopChoosing) {
@@ -3582,6 +4058,7 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 		int row = -1, arrow = -1;
 		if (event.type == Common::EVENT_LBUTTONDOWN &&
 				_panel.hitTest(event.mouse.x, event.mouse.y, row, arrow) == Panel::kActionCommand && row >= 0) {
+			_log.line(Common::String::format("Mirror command: %s", _panel.commandText(row) ? _panel.commandText(row) : "(none)"));
 			switch (_rowActions[row]) {
 			case kRowRestart:
 				startNewGame();
@@ -3592,8 +4069,22 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 			case kRowSaveMenu:
 				openMenu(kMenuSave);
 				break;
+			case kRowSaveSlot:
+				saveSlot((uint)_rowArguments[row]);
+				break;
+			case kRowLoadSlot:
+				loadSlot((uint)_rowArguments[row]);
+				break;
+			case kRowMenuBack:
+			case kRowCancelExit:
+				openMenu(kMenuNone);
+				break;
 			case kRowExitGame:
 				openMenu(kMenuQuit);
+				break;
+			case kRowConfirmExit:
+				_log.line("Options: exit confirmed");
+				_quitRequested = true;
 				break;
 			case kRowMirrorAway:
 				showRoom(_world.room());
@@ -3602,7 +4093,10 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 				break;
 			}
 		} else if (event.type == Common::EVENT_KEYDOWN && event.kbd.keycode == Common::KEYCODE_ESCAPE) {
-			showRoom(_world.room());
+			if (_menu != kMenuNone)
+				openMenu(kMenuNone);
+			else
+				showRoom(_world.room());
 		}
 		return false;
 	}
@@ -3679,8 +4173,18 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 		if ((event.type == Common::EVENT_LBUTTONDOWN && event.mouse.y < 152) ||
 				(event.type == Common::EVENT_KEYDOWN && event.kbd.keycode != Common::KEYCODE_ESCAPE)) {
 			_log.line(Common::String::format("Tap: conversation page %u", _talkPage));
+			// In the original a click after the last line closes the talk and
+			// the room's rows come back (checked on Spice86: Leto's three
+			// pages, a WORK FOR ME answer); the verbs are offered only while a
+			// line is up. The bargain menu, COMM messages and scenes keep theirs.
+			const bool closes = !_talkBargain && _talkKind == kTalkNormal && !_visionDream;
 			if (!_talkEnded)
 				advanceConversation();
+			else if (closes)
+				endConversation();
+			// The line just shown may have opened the bargain menu (events 4/5).
+			if (closes && !_talkBargain && _mode == kTalk && _talkEnded)
+				endConversation();
 		} else if (event.type == Common::EVENT_KEYDOWN) {
 			endConversation();
 		}
@@ -3704,13 +4208,27 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 		default:
 			break;
 		}
+	} else if (event.type == Common::EVENT_LBUTTONDOWN && event.mouse.y < 152 && !_desert && !_sceneActive &&
+			_menu == kMenuNone && _commList < 0) {
+		// The original ignores a click in the view unless it lands on
+		// someone, whose talk it starts (checked on Spice86 in the day-1
+		// tour: clicks in the throne room's view do nothing). That includes
+		// Paul's head above the panel: the globe is reached from the map
+		// (the user chose the original's way on 2026-09-28).
+		const int who = personAt(event.mouse.x, event.mouse.y);
+		_log.line(Common::String::format("Tap: room %u view at (%d, %d) -> %s", _room, event.mouse.x, event.mouse.y,
+				who >= 0 ? characterName((uint)who) : "nothing"));
+		if (who >= 0)
+			startConversation((uint)who);
 	} else if (event.type == Common::EVENT_LBUTTONDOWN) {
 		int row, arrow;
 		const Panel::Action action = _panel.hitTest(event.mouse.x, event.mouse.y, row, arrow);
 		// Taps are logged with what they hit: on a device this is the only
 		// way to tell a touch-mapping problem from a hit-zone problem.
-		static const char *const names[] = { "nothing", "up", "right", "down", "left", "book", "command", "head" };
-		_log.line(Common::String::format("Tap: room %u at (%d, %d) -> %s", _room, event.mouse.x, event.mouse.y, names[action]));
+		static const char *const names[] = { "nothing", "up", "right", "down", "left", "book", "command", "head", "plan" };
+		_log.line(Common::String::format("Tap: room %u at (%d, %d) -> %s%s%s", _room, event.mouse.x, event.mouse.y, names[action],
+				action == Panel::kActionCommand && row >= 0 && _panel.commandText(row) ? " " : "",
+				action == Panel::kActionCommand && row >= 0 && _panel.commandText(row) ? _panel.commandText(row) : ""));
 		panelAction(action, row, arrow);
 	}
 

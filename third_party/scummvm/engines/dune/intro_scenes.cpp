@@ -56,7 +56,9 @@ namespace Dune {
 namespace {
 
 bool isFastCapture() {
-	return (isDumpRun() && !dumpEveryMillis()) || isDuneHarnessRun() ||
+	// dune_real_time keeps a harness run (checkpoints, scripted input) at
+	// the original's speed: the fidelity report's timed CD flight.
+	return (isDumpRun() && !dumpEveryMillis()) || isDuneFastHarness() ||
 		   (ConfMan.hasKey("dune_speedrun") && !ConfMan.hasKey("dune_speedrun_watch"));
 }
 

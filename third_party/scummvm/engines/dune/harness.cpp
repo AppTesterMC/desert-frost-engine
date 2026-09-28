@@ -37,6 +37,7 @@
 
 #include "image/png.h"
 
+#include "dune/debug.h"
 #include "dune/harness.h"
 
 namespace Dune {
@@ -48,7 +49,8 @@ enum StepType {
 	kStepClick,
 	kStepKey,
 	kStepQuit,
-	kStepCheckpoint
+	kStepCheckpoint,
+	kStepPeriods
 };
 
 struct Step {
@@ -58,6 +60,8 @@ struct Step {
 	Common::MouseButton button;
 	Common::KeyCode key;
 	Common::String name;
+	uint line; ///< the script line, for the log
+	Common::String text;
 };
 
 struct HarnessState {
@@ -65,10 +69,13 @@ struct HarnessState {
 	bool warned;
 	uint32 start;
 	uint next;
+	uint periods;
 	Common::Array<Step> steps;
 	Common::String output;
 
-	HarnessState() : loaded(false), warned(false), start(0), next(0) {
+	StartupLog *log;
+
+	HarnessState() : loaded(false), warned(false), start(0), next(0), periods(0), log(nullptr) {
 	}
 };
 
@@ -158,8 +165,19 @@ bool loadScript() {
 	}
 
 	uint32 logicalTime = 0;
+	uint lineNumber = 0;
 	while (!input.eos()) {
-		const Common::String line = input.readLine();
+		Common::String line = input.readLine();
+		++lineNumber;
+		// A '#' after whitespace starts a comment to the end of the line
+		// ("click left 160 163   # SEE DUNE MAP"); a line starting with '#'
+		// is a comment too.
+		for (uint i = 1; i < line.size(); ++i) {
+			if (line[i] == '#' && (line[i - 1] == ' ' || line[i - 1] == '\t')) {
+				line = Common::String(line.c_str(), i);
+				break;
+			}
+		}
 		Common::StringTokenizer tokenizer(line);
 		Common::Array<Common::String> tokens = tokenizer.split();
 		if (tokens.empty() || tokens[0].empty() || tokens[0][0] == '#')
@@ -177,6 +195,9 @@ bool loadScript() {
 
 		Step step;
 		step.at = logicalTime;
+		step.line = lineNumber;
+		step.text = line;
+		step.text.trim();
 		step.x = step.y = 0;
 		step.button = Common::MOUSE_BUTTON_LEFT;
 		step.key = Common::KEYCODE_INVALID;
@@ -189,6 +210,8 @@ bool loadScript() {
 			step.type = kStepKey;
 		} else if (command == "quit" && tokens.size() == 1) {
 			step.type = kStepQuit;
+		} else if (command == "periods" && tokens.size() == 2 && parseInteger(tokens[1], step.x) && step.x > 0) {
+			step.type = kStepPeriods;
 		} else if (command == "checkpoint" && tokens.size() == 2) {
 			step.type = kStepCheckpoint;
 			step.name = tokens[1];
@@ -261,8 +284,24 @@ bool isDuneHarnessRun() {
 	return checkpointing();
 }
 
+bool isDuneFastHarness() {
+	if (!isDuneHarnessRun())
+		return false;
+	return !(ConfMan.hasKey("dune_real_time") && ConfMan.getBool("dune_real_time"));
+}
+
 void captureDuneCheckpoint(OSystem *system, const Common::String &name) {
 	writeCheckpoint(system, name);
+}
+
+void setDuneHarnessLog(StartupLog *log) {
+	g_harness.log = log;
+}
+
+uint takeDuneHarnessPeriods() {
+	const uint n = g_harness.periods;
+	g_harness.periods = 0;
+	return n;
 }
 
 bool pollDuneEvent(OSystem *system, Common::Event &event) {
@@ -276,8 +315,16 @@ bool pollDuneEvent(OSystem *system, Common::Event &event) {
 		if (system->getMillis() - g_harness.start < step.at)
 			break;
 		++g_harness.next;
+		// Each step in the engine's log with its script line, so what it hit
+		// (the lines after it) can be traced back to the script.
+		if (g_harness.log)
+			g_harness.log->line(Common::String::format("Script line %u: %s", step.line, step.text.c_str()));
 		if (step.type == kStepCheckpoint) {
 			writeCheckpoint(system, step.name);
+			continue;
+		}
+		if (step.type == kStepPeriods) {
+			g_harness.periods += (uint)step.x;
 			continue;
 		}
 		return makeEvent(step, event);

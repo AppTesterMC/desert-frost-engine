@@ -248,6 +248,10 @@ void Conversation::start(uint character, uint list, byte mask, bool oneList, boo
 	_pendingFinish = _endAfter = _answered = false;
 	_pages.clear();
 	_pageIndex = 0;
+	// Floppy CS:9EF5 clears the spoken-line flag for a normal conversation.
+	// Verb, contact and phase-trigger scans bypass that initializer.
+	if (!oneList)
+		_state.setB(0x19, 0);
 	// sub_193DF: the character now counts as met and as the one Paul talks to.
 	const uint16 bit = character < 16 ? (uint16)(1 << character) : 0;
 	_state.setW(GameState::kPersonsMet, _state.w(GameState::kPersonsMet) | bit);
@@ -263,6 +267,10 @@ bool Conversation::next(Common::String &page, bool &newSentence) {
 		if (_pageIndex < _pages.size()) {
 			newSentence = _pageIndex == 0;
 			page = _pages[_pageIndex++];
+			// CS:A866 commits the entry when its final segment is presented,
+			// before another input can replace it with a verb's answer.
+			if (_pageIndex == _pages.size())
+				finishPending();
 			return true;
 		}
 		if (_pendingFinish) {
@@ -320,8 +328,15 @@ bool Conversation::findEntry() {
 				}
 				if (!current.empty())
 					_pages.push_back(current);
-				_log.line(Common::String::format("Dialogue: entry %u, condition %u, sentence %u, action %u, %u page(s)",
-						offset, entry.condition, entry.sentence, entry.action(), _pages.size()));
+				// The line's first words too, so a log (or a script trace) shows who said what.
+				Common::String preview = _pages.empty() ? Common::String() : _pages[0];
+				for (uint i = 0; i < preview.size(); ++i)
+					if ((byte)preview[i] < 0x20)
+						preview.setChar(' ', i);
+				if (preview.size() > 60)
+					preview = Common::String(preview.c_str(), 60) + "...";
+				_log.line(Common::String::format("Dialogue: entry %u, condition %u, sentence %u, action %u, %u page(s): \"%s\"",
+						offset, entry.condition, entry.sentence, entry.action(), _pages.size(), preview.c_str()));
 				return true;
 			}
 			offset += 4;
@@ -347,6 +362,7 @@ void Conversation::finishEntry() {
 	_pendingFinish = false;
 	const bool wasSaid = _current.said();
 	applyAction(_current, wasSaid);
+	_state.setB(0x19, 0xff); // Floppy CS:A8B3: suppress first-line-only fallbacks.
 	_dialogue.markSaid(_current.offset);
 	// sub_1A03F records lines flagged with a topic (bits 2-5 of the third
 	// byte) for the book, once.

@@ -2,12 +2,15 @@
 # troops rallied, Carthag-Tuek's chief (place names 0x205, staged at ds:4e by
 # prepare_location_data_for_condit, seg000:331e) talks about the stillsuit
 # maker to the east. Each tap shows his next page or line.
-wait 20000
+#
+# Comments after '#' on a command line say what a click hits and what a
+# wait lets finish; scripts/dune_script_trace.py prints what each line did.
+wait 20000              # the story setup loads; the chief's first line shows
 checkpoint stillsuit-chief-1
-click left 160 80
-wait 1200
+click left 160 80       # view: next line “Yes, I know a stillsuit maker…” (phase 2 -> 3)
+wait 1200               # the line shows
 checkpoint stillsuit-chief-2
-click left 160 80
-wait 1200
+click left 160 80       # view: the lesson line “On Dune, the desert covers the entire planet…”, then “My troop is settled in Carthag-Tuek…”
+wait 1200               # the lines show
 checkpoint stillsuit-chief-3
 quit
