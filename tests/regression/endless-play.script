@@ -1,0 +1,8 @@
+# endless-play (scripts/check_endless_play.sh): the setup (dune_story_setup) does every step;
+# see the check script for what is checked.
+#
+# Comments after '#' on a command line say what a click hits and what a
+# wait lets finish; scripts/dune_script_trace.py prints what each line did.
+wait 15000              # the story setup runs (the vegetation / the battle, the days, the talks)
+checkpoint endless-play-end
+quit

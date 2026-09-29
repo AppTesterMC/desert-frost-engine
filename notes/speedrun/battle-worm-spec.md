@@ -6,10 +6,10 @@ Status: written 2026-09-25 from binary evidence, for the ScummVM `dune` engine. 
 
 **Sources (all local):**
 - `/tmp/seg000.txt`: a capstone disassembly of CD `DNCDPRG.EXE` v3.7, SHA-1 `c55e9e35…afcb`. Addresses are `seg000:XXXX`. Near calls print as `0xffffXXXX`; read them as `XXXX`.
-- madmoose's chani annotations, `/private/tmp/dune-refs/dune-chani/cryo-dune-3.7-cd-dncdprg.chani`. They supply the routine names, the `Troop` and `Location` layouts and the ds variable names. Some chani comments are wrong; where the code disagrees, this spec says so.
-- Jump and callback tables were decoded straight from `/private/tmp/dune-data/DNCDPRG.EXE` (same hash): seg000 is the file at `+0x200`, and seg001 starts at `+0x200+0xf4b0`.
+- madmoose's chani annotations, (github.com/madmoose/dune-chani, `cryo-dune-3.7-cd-dncdprg.chani`). They supply the routine names, the `Troop` and `Location` layouts and the ds variable names. Some chani comments are wrong; where the code disagrees, this spec says so.
+- Jump and callback tables were decoded straight from the CD's `DNCDPRG.EXE` (same hash): seg000 is the file at `+0x200`, and seg001 starts at `+0x200+0xf4b0`.
 - OpenRakis `tools/cd/DuneEdit2/…/Parsers/JobFinder.cs` gives the occupation names. Lionel Debroux's `odrade` (`odrade.go`, `troop.go`) gives the equipment bits and status bits and warns that army skill above 207 breaks battles, which agrees with §3.3. dune-rust and swift-dune only have the night-attack particle effect, which our `attack.cpp` already ports. The `dune` repository has no gameplay logic.
-- Engine baseline, read-only: `~/dune-engine-backup-20260925/engines-dune`.
+- Engine baseline, read-only: a copy of the engine taken on 2026-09-25 (`engines/dune`).
 
 **Version caveat.** The route was played on the **floppy** release, but every address here comes from the **CD 3.7** executable. Data offsets below `ds:1158` are the same in both (`World::ds()`). Before relying on a formula for exact reproduction, check it against the floppy code.
 

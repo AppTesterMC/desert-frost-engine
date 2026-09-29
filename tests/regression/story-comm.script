@@ -35,11 +35,11 @@ click left 160 80       # view: next line “Our stocks of spice are currently 2
 wait 800                # the line shows
 click left 160 80       # view: next line “The Emperor asked for a spice shipment, didn't he?”
 wait 800                # the line shows
-click left 160 80       # view: next line, his offer “We can send him what he asked for…”
-wait 800                # the line shows
+click left 160 80       # view: next line, his offer “We can send him what he asked for…” with the bargaining menu (ARGUE / ACCEPT / REFUSE) at once, as the original (action 4, seg000:a244)
+wait 800                # the line and the menu show
 checkpoint story-duncan-offer
-click left 160 80       # view: the bargaining menu (ARGUE / ACCEPT / REFUSE)
-wait 800                # the menu shows
+click left 160 80       # view: a click on the view while the menu is up changes nothing (as the original, captures/menu-click)
+wait 800                # the line and the menu stay
 checkpoint story-bargain
 move 160 171
 click left 160 171      # row 2: ACCEPT: “Ok Paul, let's go to the communication room…”

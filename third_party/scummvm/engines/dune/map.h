@@ -112,12 +112,36 @@ public:
 	MapScreen(OSystem *system, Resource &resources, StartupLog &log, World &world);
 	~MapScreen();
 
-	bool open(Mode mode, bool selectDestination);
+	/**
+	 * Open the flat map or the globe. @p fromFlatView: the globe opens from
+	 * the flat map's planet and takes the flat view's centre (floppy
+	 * ds:2144/2146, the zoomed-globe position) instead of Paul's place.
+	 */
+	bool open(Mode mode, bool selectDestination, bool fromFlatView = false);
 	Mode mode() const { return _mode; }
 	bool selecting() const { return _selecting; }
 	int destination() const { return _destination; }
 
 	void centreOn(uint locationIndex);
+	/**
+	 * The globe's centre-on-player (CD seg000:ba9e: the centre button, and
+	 * after LOAD GAME): the rotation phase and the tilt of Paul's place,
+	 * the tilt limited only to +-98 (no +-32 floor as when the globe opens).
+	 */
+	void centreOnPlayer();
+	/** The globe's rotation phase, 0..397 (floppy ds:4493): 398 * rotation >> 16. */
+	uint globePhase() const { return (398u * _rotation) >> 16; }
+	int globeTilt() const { return _tilt; }
+	/** Set the rotation to the first longitude whose phase is @p phase (mod 398). */
+	void setGlobePhase(int phase);
+	/**
+	 * The globe's rotation frame task (CD seg000:b9ae): the phase + 1 after
+	 * every pass, about 1.9 per second on the original. Called with the
+	 * time; returns true when the phase moved (the caller redraws).
+	 */
+	bool creep(uint32 now);
+	/** The measured pass time: 6 phases in about 3.12 s (captures/globe-results). */
+	static const uint32 kCreepMillis = 520;
 	/** Centre on a map position (the desert: the orni cockpit's window, seg000:5b5d). */
 	void centreOnPosition(uint16 longitude, int16 latitude);
 	/**
@@ -146,7 +170,12 @@ public:
 	/** Where a map position falls in the flat view (rows 0-151); false off the view. */
 	bool projectPosition(uint16 longitude, int16 latitude, int &x, int &y) const;
 	void scroll(int dx, int dy);
-	void rotate(int deltaRotation, int deltaTilt);
+	/**
+	 * The globe's arrows: @p deltaPhase rotation phases (the handlers at CD
+	 * seg000:b9cc/b9d3 step 0x20, wrapped into 0..397) and @p deltaTilt rows
+	 * (b9b9/b9c0 step 8, globe_increment_tilt clamps to +-98).
+	 */
+	void rotate(int deltaPhase, int deltaTilt);
 	/** Place under a view position (0-151 rows), or -1. */
 	int hitLocation(int x, int y) const;
 	void select(int locationIndex) { _destination = locationIndex; }
@@ -222,8 +251,15 @@ public:
 	 * slide over the planet by @p pixels (0-100, swift-dune Fresk.swift
 	 * renderHousesPanels); the scene writes the figures on them.
 	 */
-	void setResults(uint pixels) { _results = MIN<uint>(pixels, 100); }
+	void setResults(uint pixels) { setResults(pixels, pixels >= 100); }
+	/**
+	 * @p colours: the results flag (floppy ds:FEF2): the globe in the
+	 * ownership colours. SEE RESULTS sets it once the panels are open,
+	 * STANDARD VISION clears it once they are shut.
+	 */
+	void setResults(uint pixels, bool colours) { _results = MIN<uint>(pixels, 100); _resultsColours = colours; }
 	uint results() const { return _results; }
+	bool resultsColours() const { return _resultsColours; }
 
 	/** Draw the view (rows 0-151) into @p surface and install the palette. */
 	void draw(Graphics::ManagedSurface &surface, const Panel &panel, const SentenceBank *sentences, uint rallied);
@@ -233,6 +269,7 @@ public:
 	int hitArrow(int x, int y) const;
 
 private:
+	void seedGlobe(uint16 longitude, int16 latitude);
 	bool loadFlat();
 	bool loadGlobe();
 	void drawIcons(Graphics::ManagedSurface &surface);
@@ -286,6 +323,8 @@ private:
 	int16 _minimapLatitude = 0;
 	Common::Array<uint32> _trail; ///< (longitude << 16) | (uint16)latitude
 	uint _results;
+	bool _resultsColours = false;
+	uint32 _creepStart = 0;
 	byte _index[320 * 152];
 };
 

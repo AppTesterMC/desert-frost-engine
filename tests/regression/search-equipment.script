@@ -1,0 +1,12 @@
+# GO & SEARCH FOR EQUIPMENT (scripts/check_search_equipment.sh): the setup
+# (dune_story_setup=search-equipment) gives the orders through the troop
+# popup's rows over the map (greyed below phase 0x10, nothing found, the
+# march for bulbs with its pickup and the way back, fully equipped, back
+# with nothing, and the CD's pickup at the troop's own place); everything
+# happens during the setup.
+#
+# Comments after '#' on a command line say what a click hits and what a
+# wait lets finish; scripts/dune_script_trace.py prints what each line did.
+wait 15000              # the story setup runs (the orders, the marches, the contacts)
+checkpoint search-equipment-end
+quit

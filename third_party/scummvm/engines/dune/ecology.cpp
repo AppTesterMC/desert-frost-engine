@@ -285,7 +285,8 @@ void World::spreadVegetation(uint index) {
 	// seg000:6515 with the callback at 653a: every cell of the disc not yet
 	// sprouting becomes Atreides land, a quarter of the sand ones sprout
 	// (the rotating mask 0x44 on terrain < 8); a place's cell under it loses
-	// its spice, and a Harkonnen fortress there falls (not the two palaces).
+	// its spice, and a Harkonnen fortress there falls (on the CD not the two
+	// palaces; the floppy takes the Harkonnen palace as well).
 	const byte *l = _state.vars + Location::kTableOffset + index * Location::kRecordSize;
 	byte mask = 0x44;
 	Common::Array<uint> fallen;
@@ -298,7 +299,11 @@ void World::spreadVegetation(uint index) {
 				if (READ_LE_UINT16(p + 6) != o)
 					continue;
 				p[kDensity] = 0;
-				if (!friendlyPlace(i) && i >= 2) {
+				// The CD (6582: cmp di, 138h) spares the two palaces; the
+				// floppy (72da-7326) has no such test, so there the
+				// vegetation takes the Harkonnen palace too (location 1,
+				// type 0x30 >= 0x28): it is held, the ending opens to Paul.
+				if (!friendlyPlace(i) && (i >= 2 || floppy())) {
 					p[10] &= 0x7f;
 					fallen.push_back(i);
 				}
@@ -315,8 +320,10 @@ void World::spreadVegetation(uint index) {
 		}
 		c = v;
 	});
-	for (uint i = 0; i < fallen.size(); ++i)
-		fortressTaken(fallen[i]);
+	for (uint i = 0; i < fallen.size(); ++i) {
+		_log.line(Common::String::format("Ecology: the vegetation takes place %u from the Harkonnens", fallen[i]));
+		fortressWon(fallen[i]); // seg000:658c (floppy 7326): the fortress-won routine itself
+	}
 }
 
 void World::paintArea(uint index, byte stage, uint radius) {
@@ -327,57 +334,6 @@ void World::paintArea(uint index, byte stage, uint radius) {
 		if ((c & 0x30) != 0x10)
 			c = (byte)((c & 0xcf) | stage);
 	});
-}
-
-void World::fortressTaken(uint index) {
-	// location_battle_won_for_fortress (seg000:7443), reached here by the
-	// vegetation: the land round it turns Atreides, charisma + 4, every
-	// troop's motivation + 1, the fortress is held (status bit 3); its
-	// Harkonnens become free Fremen (up to 8, 075ea) or leave the game.
-	byte *l = _state.vars + Location::kTableOffset + index * Location::kRecordSize;
-	paintArea(index, 0x20, 5);
-	l[kDiscRadius] = (byte)((_state.w(GameState::kGameTime) >> 4) + 2);
-	addCharisma(4);
-	for (uint id = 1; id <= kTroops; ++id) {
-		byte *t = _state.vars + kTroopTable + (id - 1) * kTroopSize;
-		if (!(t[3] & 0xa0))
-			t[0x15] = (byte)MIN<uint>(100, t[0x15] + 1);
-	}
-	l[10] |= kStatusAtreides;
-	Common::Array<uint> ids;
-	troopsAt(index, ids);
-	uint freed = 0;
-	for (uint i = 0; i < ids.size(); ++i) {
-		byte *t = _state.vars + kTroopTable + (ids[i] - 1) * kTroopSize;
-		if (!(t[16] & 0x80))
-			continue;
-		t[16] &= 0x7f;
-		if (freed++ < 8) {
-			const uint r1 = randMasked(0x0f7f) + 0x1464, r2 = randMasked(0x1f1f) + 0x0a0a;
-			t[3] = 0xa0;
-			t[26] = (byte)r1;
-			t[21] = (byte)(r1 >> 8);
-			t[22] = (byte)r2;
-			t[23] = (byte)(r2 >> 8);
-			t[25] = 0;
-		} else {
-			t[3] = 0xa0;
-			t[26] = 0;
-		}
-	}
-	_log.line(Common::String::format("Ecology: the vegetation takes place %u from the Harkonnens", index));
-	// accumulate_harkonnen_spice_production (1cda) counts the places still
-	// Harkonnen; with one left (their palace) the final attack begins.
-	uint left = 0;
-	for (uint i = 0; i < locationCount(); ++i)
-		if (!friendlyPlace(i))
-			++left;
-	if (left <= 1) {
-		_state.setB(kShipmentPaused, 1);
-		_state.vars[0xff7] &= 0xfd;
-		_state.vars[0x1007] &= 0xfd;
-		_log.line("Ecology: only the Harkonnen palace is left, the final attack begins");
-	}
 }
 
 void World::ecologyNewDay() {

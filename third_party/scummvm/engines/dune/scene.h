@@ -53,9 +53,16 @@ class SentenceBank;
 class Sprite;
 class StartupLog;
 
+/**
+ * The globe's colour for a map cell (bits 0-3 terrain, 4-5 stage): the VGA
+ * driver's STANDARD VISION or SEE RESULTS path (floppy DUNEVGA 1D26/1DA3,
+ * CD DNVGA 1E4C/1EC9; notes/globe-results.md).
+ */
+byte globeCellColour(byte cell, bool results);
 /** Render the map screen: FRESK frame and the MAP/GLOBDATA globe. */
 bool drawDuneGlobe(OSystem *system, Graphics::Surface &surface, Resource &resources,
-		const Common::Array<byte> &map, uint16 rotation, int tilt, uint results, const Location &player);
+		const Common::Array<byte> &map, uint16 rotation, int tilt, uint results, const Location &player,
+		bool resultsColours);
 /**
  * Render only the globe, centred at (159, 79), with whatever palette is in
  * place: the prologue draws it over the star field, whose palette entries
@@ -88,7 +95,7 @@ public:
 	/** Fly to a place and land in its entrance. */
 	void travelTo(uint locationIndex);
 	/** The flat map (optionally choosing a destination) or the globe. */
-	void openMap(MapScreen::Mode mode, bool selectDestination);
+	void openMap(MapScreen::Mode mode, bool selectDestination, bool fromFlatView = false);
 	bool inMap() const { return _mode == kMap; }
 	/** Tap the map at a view position (dump runs pick destinations this way). */
 	void mapTap(int x, int y);
@@ -249,6 +256,7 @@ private:
 		kRowFightDay,   ///< FIGHT FOR A WHOLE DAY (seg000:0fc5)
 		kRowEspionage,  ///< ESPIONAGE (seg000:6a45)
 		kRowAttack,     ///< ATTACK, for a troop on espionage (seg000:6a2f)
+		kRowSearchEquipment, ///< GO & SEARCH FOR EQUIPMENT (seg000:7734 / 775c / 776d)
 		kRowMoveTroop,  ///< MOVE TROOP (seg000:8064): the map, choosing where
 		kRowMoveDone,   ///< "  Done" once the troop's destination is chosen (seg000:8214)
 		kRowPickCancel, ///< Cancel while a move order is picked (loc_0824d)
@@ -300,9 +308,11 @@ private:
 	void endScene();
 	bool maybeStartScene();
 	void openComm(bool seen);
+	/** init_room_persons at a village (seg000:3166): stage its smugglers (seg000:2318). */
+	void stageVillageSmugglers();
 	void updateRoomVars();
 	/** room_person_present_auto_dialogue over the people here (seg000:35b4); true when one speaks. */
-	bool roomEntryScan();
+	bool roomEntryScan(bool always = false);
 	void landInDesert();
 	void drawDesert();
 	// ---- The walk out into the desert (desert.cpp, notes/desert-walk-spec.md) ----
@@ -366,6 +376,13 @@ private:
 	void checkIdle(uint32 now);
 	void presentVision(bool dream);
 	void emperorEnding();
+	void waterOfLifeWakeUp();
+	void waterOfLifeSetup();
+	void ecologyWinSetup();
+	void firstVisionForSetup();
+	void endlessPlaySetup(bool withPaul);
+	/** Story setups that check a death or the ending keep those rules in a capture run. */
+	static void forceRules(bool on);
 	void drawEnding();
 	void findProspectors();
 	static const char *characterName(uint who);
@@ -464,6 +481,9 @@ private:
 	bool _ending = false;           ///< an ending text is up
 	Common::String _endingText = "As Paul Atreides failed"; ///< the ending's COMMAND, found by its start
 	const char *_pendingEnding = nullptr; ///< an ending waiting for the talk to close
+	bool _pendingWakeUp = false; ///< Paul drank the Water of Life: he comes to after Stilgar's line (seg000:2d1e)
+	uint32 _wakeUpAt = 0;        ///< when, in real play (the line's 600 ticks)
+	Conversation::Position _wakeResume; ///< the talk the wake-up line interrupted, to go on after it
 	uint32 _idleStart = 0;
 	bool _troopEquipment = false;   ///< the MODIFY EQUIPMENT panel is up (seg000:7cbb)
 	Common::Rect _equipRects[2][7]; ///< hit zones: the troop's items, the place's free ones
@@ -512,6 +532,14 @@ private:
 	void runPhaseTriggers();
 	static void storyEvent(void *context, byte event, bool wasSaid, uint speaker);
 	void stageTroopForConditions(uint troopId);
+	/**
+	 * One line of the troop's answer list (character 15, list 4) with
+	 * pending_room_action @p action (troop_present_reaction_line, CD 7bb9):
+	 * the line goes to the popup; false when its event dropped the gate.
+	 */
+	bool troopReaction(byte action);
+	/** GO & SEARCH FOR EQUIPMENT for the open troop (CD seg000:7734-77d4, floppy 8498-852f). */
+	void searchForEquipment();
 	bool nextTroopLine();
 	void troopSceneStep();
 	uint16 _troopScene = 0;      ///< a scripted scene running over the troop popup (the prospector's lesson)
@@ -569,6 +597,7 @@ private:
 
 	// The CD's exterior backdrop: the last picture of the place's arrival video.
 	Common::String _backdropName;
+	Common::String _lastStanding; ///< the last "Room people:" log line
 	Common::Array<byte> _backdrop;
 	byte _backdropPalette[256 * 3];
 

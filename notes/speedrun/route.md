@@ -1,6 +1,6 @@
 # Dune (Cryo, 1992) speedrun: route transcription
 
-Source: `~/Downloads/Dune-Speed-Run.mp4` (7193 s). Transcribed from 48 contact sheets taken every 5 s, plus single frames or 3x2 strips pulled with ffmpeg where a sheet was unclear. Timestamps are video seconds, accurate to about 5 s. Raw per-sheet notes are in `notes.txt` in this folder.
+Source: a recording of the PC speedrun, `Dune-Speed-Run.mp4` (7193 s). Transcribed from 48 contact sheets taken every 5 s, plus single frames or 3x2 strips pulled with ffmpeg where a sheet was unclear. Timestamps are video seconds, accurate to about 5 s. Raw per-sheet notes are in `notes.txt` in this folder.
 
 ## Version
 

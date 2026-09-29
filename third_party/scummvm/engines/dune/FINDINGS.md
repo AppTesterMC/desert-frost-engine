@@ -205,11 +205,25 @@ character is in the room when its record's first two words equal ds:4 and
 ds:6 — (room, place type) and (0x80, location + 1) — as `loc_136EE` tests;
 records with 0xFF as location are elsewhere. `sub_13D83` then fills a buffer
 of as many slots as the room has markers (its first byte): each person, in
-ascending group order, goes to slot `(group + ds:0xC7) mod markers`, or to the
-first free slot; `_sub_13B59_draw_SAL` hands the slots to the markers from the
-last one down, and `sub_13D2F` draws PERS frame 2 x group (groups from 15 on
-as 15). ds:0xC7 is 0 in both executables, so Duke Leto (group 0) lands on
-the throne room's last marker, which the recording confirms. At a sietch
+ascending group order, goes to slot `(group + (ds:0xC5 & 15)) mod markers`, or
+to the first free slot; `_sub_13B59_draw_SAL` hands the slots to the markers
+from the last one down, and `sub_13D2F` draws PERS frame 2 x group (groups
+from 15 on as 15). ds:0xC5 (CD `byte_1F575`) is 0 at the start, so Duke Leto
+(group 0) lands on the throne room's last marker, which the recording
+confirms. The end of every landing draws a new one: CD `loc_14FB0` in
+`sub_14F0C` stores `rand`'s al (`sub_1E3CC`, floppy seg000:e3cc) there, so
+people stand elsewhere after each flight. The floppy dumps of the speedrun
+show 0 in the palace, 5 at Carthag-Tuek, 15 at Carthag-Harg (the unhired
+Fremen, group 14, lands in slot 9, which is marker 0 at (139,25)), 132 at
+Carthag-Timin and 217 back at the palace; walking into the desert keeps it.
+Before 2026-09-28 the engine read ds:0xC7, which is always 0.
+`World::rollRoomRotation` draws it after both landing paths, and
+`scripts/check_room_rotation.sh` checks each room's layout against the rule.
+A compass arrow during a talk ends it and walks on, even while a line is up
+(Spice86, captures/harg-probe: Carthag-Harg's chief says "My troop is settled
+in Carthag-Harg, awaiting your orders.", then the down arrow shows the
+exterior). The engine ignored it until 2026-09-29; the bargain, COMM
+messages, scenes and visions keep their own handling. At a sietch
 (`sub_13127`) the troops of the place stand in room 2: a troop not hired yet
 through group 14 ("Fremen"), each hired troop's chief as groups 15, 16, ...
 ("Fremen Chief", "2nd Fremen Chief", ...).
@@ -381,8 +395,9 @@ the way:
   colours 16-45 are the sun's yellows and browns there, so the planet looks
   flat gold, unlike on the map screen (whose palette is in `ONMAP.HSQ`).
 - The globe renderer is dune-rust's: rotation 398*r rounded to a row table
-  offset, tilt added to the lookup, colour (map & 0x0f) + 0x10, centre
-  (159,79). A wrong tilt sign produced a striped half-black ball.
+  offset, tilt added to the lookup, centre (159,79); the colours are the VGA
+  driver's two paths (see "SEE RESULTS: the globe's colours"). A wrong tilt
+  sign produced a striped half-black ball.
 - `DUNECHAR.HSQ`/`DNCHAR.BIN` (2304 bytes) = 256 widths + 128 ASCII glyphs of
   9 rows + the same 128 glyphs as a 7-row small set at 1408 (widths capped
   at 6). The panel uses the small set.
@@ -579,10 +594,11 @@ palace) plays the final scene with FINAL.HSQ and the cast. Rules and sources
 in `notes/research/gameplay-rules.md`, "Ecology".
 
 **Decisions:** the ending is the same for both routes, as the binary and the
-dune2k players say. Not built: troop marches (GO & SEARCH FOR EQUIPMENT, the
-final attack's march), battles and the night attack, so the palace garrison
+dune2k players say (the details and the floppy's palace takeover: "The
+end-game paths"). Not built at the time: troop marches (GO & SEARCH FOR EQUIPMENT, built
+2026-09-29, see its section; the final attack's march), battles and the night attack, so the palace garrison
 cannot yet be removed in play and the green route ends at the arrival rule
-unless the garrison is gone; the SEE RESULTS globe colours; the credits'
+unless the garrison is gone; the SEE RESULTS globe colours (built 2026-09-29); the credits'
 portrait scenes (the cast is listed on black). The wait before the final
 scene's pictures is a " Continue..." instead of timed fades.
 
@@ -729,6 +745,320 @@ Built from the floppy disassembly (`sub_A5E5`, `sub_ACC0`, `sub_AD0A`, `sub_AE22
   - When a place is prospected, or already was (status bit 6), the prospectors march to the next head (`9d5f`). With none left they stop and report.
 - **Harness.** A `periods N` step passes N game periods. The clock is otherwise stopped in harness runs.
 
+## GO & SEARCH FOR EQUIPMENT (2026-09-29)
+
+Traced in the CD 3.7 executable (capstone on `DNCDPRG.EXE`; the dune-chani names) and in the floppy image (`DUNEPRG.unpacked.bin`, offsets as in the image). Built in `troops.cpp` (`searchedEquipment`, `searchEquipmentHere`, `equipmentSearchTarget`, `startEquipmentSearch`, the `troopArrive` branch) and `scene.cpp` (`searchForEquipment`, `troopReaction`, the class menus). Checked by `scripts/check_search_equipment.sh` and the fidelity scenario `search-equipment`.
+
+- **The row.** It is not only the ecology troop's order: it heads all three class menus of CHANGE TROOP OCCUPATION (`menu_map_troop_dialog_change_troop_occupation`, CD `69b3`, floppy `774d`):
+  - spice troop ds:216e (floppy 27d4): GO & SEARCH FOR EQUIPMENT, SPECIALIZE IN ARMY, SPECIALIZE IN ECOLOGY, Cancel;
+  - army troop ds:2182 (floppy 27e8): GO & SEARCH, ESPIONAGE (greyed while ds:e2 >= 0x1e), SPECIALIZE IN SPICE, SPECIALIZE IN ECOLOGY, Cancel; on espionage ds:219a (ATTACK, Cancel) instead;
+  - ecology troop ds:21a6 (floppy 280c): GO & SEARCH, ASSEMBLY WIND-TRAP, SPECIALIZE IN SPICE, SPECIALIZE IN ARMY, Cancel.
+  - The first entry is greyed below phase 0x10 (`69f6`-`6a02`, floppy `7790`-`779c`), in every class; every SPECIALIZE IN ECOLOGY (entry 0x77) is greyed until Kynes is met, ds:0a bit 5 (`6a07`-`6a23`).
+  - The engine's spice menu had "Spice Mining" / "Spice Prospecting" rows, which the original does not have; it now has the original's rows. The army menu's greying arguments were swapped (ESPIONAGE and ECOLOGY were never greyed); fixed.
+- **What is looked for** (the three handlers, CD `776d` spice, `7734` army, `775c` ecology; floppy `84d1`, `8498`, `84c0`): the first item the class lacks, in this order. Item numbers are the equipment bit's position (troop byte 0x19, bit 7 = item 0):
+  - spice: a harvester (0), then an orni (1);
+  - army: krys knives (2), laser guns (3), weirding modules (4), atomics (5);
+  - ecology: bulbs (6).
+  - With all of them the troop answers with ds:23 = 0x0F, "I have all the equipment I need!" (list 4, condition 685), and nothing else happens.
+  - The item's name goes to subst_id_0c (CD ds:1203 = 0xE8 + item, floppy ds:1210 = 0xDC + item: "a spice-harvester", "an orni", "some krys", "several laser-guns", "weirding modules", "atomics weapons", "some bulbs"), the placeholder 0x8C.
+- **CD only: taken at home** (`77d7`, then `7d81`). The CD first looks at the troop's own place: if the free count there (`7f27`: the place's stock at +0x14..+0x1a less what its troops hold) reaches 1, or 2 for an orni at Paul's place (ds:1150), the troop simply takes it: its bit is set, ds:3d/3e/3f are staged as MODIFY EQUIPMENT's tail does (added, removed, 0x40 for an orni taken where Paul is), and it answers with ds:23 = 0x0C ("Glad to have some Krys knifes. My men will appreciate it.", "I'm sure that we'll do a better job with this harvester!"). The floppy has no such step (`84e4` goes straight to the search).
+- **Where it goes** (`7f90`, floppy `8ca1`): the nearest place, over the location records from 0x138 (the two palaces are never searched) to the 0xFFFF end, that is:
+  - known (status bit 7 clear), not a fortress (type < 0x28), not the troop's own place;
+  - closer than 50: $d=\max(\lvert\Delta\mathrm{lng}\rvert \gg 8,\ \lvert\Delta\mathrm{lat}\rvert)$, compared by low bytes; a village (type >= 0x21) counts $d/4$;
+  - with the item free there (`7f2a` into ds:4c60), less one for each troop already marching there for the same item (`8018`: moving, occupation bits 0-1 = 3, +04 the place, +0c not the place, +0e's low byte the item), and less one orni at Paul's place before phase 0x50 (`804c`);
+  - ties keep the first place in table order.
+  - None: ds:23 = 0x0E, "I don't think I can find some bulbs available in all of the places around here." (condition 684), no march.
+- **The order** (`77a9`-`77c5`, floppy `8504`-`8520`):
+  - `6a33` (floppy `77cd`) sets the occupation to class | 3 (3, 7 or 0x0B) through `troop_apply_occupation_choice` (`6a89`): the reaction line ds:23 = 0x0A ("OK!", condition 666; troop 5 before phase 0x2c refuses: "I don't want to move my troop. I was born here, you know.", 632; also the fortress-turning, sick and repairing refusals). A refusal takes the job back and stops here. Accepted in the army or ecology class, the troop drops its harvester bit (`6abf`).
+  - Troop +0e = item | bit << 8, +0c = the place left, then `troop_issue_move_order` (`84a6`) to the target; then NO MORE ORDERS (`8770`): the map's main menu.
+  - The prospectors (troop 3) are sent to their queue's head by `84a6` instead (`848f`), or nowhere when it is empty: an original quirk kept.
+  - A new MOVE TROOP while searching clears bits 0-1 (`84b8`-`84c4`): the search is dropped.
+- **The march** is the ordinary one (`8308`, `8604`): 7 sub-steps at the order, then 4 a period (8 with an orni), arrival when the gap is under 7 cells (the longitude gap in cell units of the row).
+- **No motivation cost.** In `84a6` (floppy `91a2`) the defence check, the refusal to march into a place under attack and the motivation cost ($-3$, `6f93`) all sit behind `cmp byte [si+3], 6` (`84d2`, floppy `91ce`): they are for a troop whose occupation byte is exactly 6 (attacking). The engine applied the cost and the refusal to every march; fixed in `World::issueMoveOrder`. Confirmed on Spice86: troop 1's motivation stays 29 through the whole search.
+- **At the place** (`8357` → `83a7` → `841f`, floppy `9053` → `90a3` → `911b`), when it is friendly and not under attack (otherwise it arrives as any troop and may fight):
+  - the free count there (`7f27`; the arriving troop is not linked) decides: one left, the place's count drops by one, the troop's bit is set and +0f (the bit) is cleared;
+  - either way +04 = +0c: the troop turns back at once, still marching, and the rest of that period's sub-steps are lost. It never stops at the searched place.
+- **Home again** (`844d`, floppy `9149`): bits 0-1 are cleared, so the class's first job restarts (0 spice mining, 4 military training, 8 irrigation; `6ad4`), and the troop is linked and its items counted at its place as on any arrival (`83bc`).
+- **What the troop says.** No message is queued on the return. Over the map (list 2, sentence mask 0x20):
+  - going out, "My troop is going to - to search for some bulbs." (condition 504: bits 0-1 = 3 and ds:2c != ds:44);
+  - coming back with it, "My troop is going back to - with some bulbs." (505: ds:2c == ds:44, ds:46's high byte 0);
+  - coming back without, CD "My troop is going back to -. You asked us to find some krys. We didn't find any." (506), floppy "... We didn't find some krys available.".
+  - ds:44/46 are troop +0c/+0e, staged by `31f6`, which also stages placeholder 0x83 = 0xE8 + +0e's low byte (the engine now stages it too).
+- **Reaction lines repeat.** `troop_present_reaction_line` (`7bb9`/`7bbe`) presents through `96f1` → `9f8b`, which forces the sentence mask to 0x20; list 4's entries have no bit 5, so a said line is never skipped. The engine used mask 0x80 for list 4 (MOVE TROOP's acknowledgement and SPECIALIZE IN ...), so a second "OK!" never showed and the popup kept the previous line; all three now use 0x20.
+- **The original, on Spice86** (a Spice86 capture of the original, floppy, from the chapter 12 saves: day 3, phase 0x15; the fidelity scenario `search-equipment` with `tests/fidelity/saves/day3-ch12`):
+  - Carthag-Tuek's troop 1 (spice mining, no equipment), GIVE ORDERS TO TROOP, CHANGE TROOP OCCUPATION: the menu is GO & SEARCH FOR EQUIPMENT, SPECIALIZE IN ARMY, SPECIALIZE IN ECOLOGY (greyed, Kynes not met), Cancel.
+  - GO & SEARCH at game time 0x25: occupation 0x43, +04 = place 15 (troop 5's sietch, 12 cells east, one free harvester), +0c = 0x250 (Carthag-Tuek), +0e = 0x8000; the map's main menu returns, with GIVE ORDERS TO TROOP greyed (no troop left where Paul is).
+  - Home by game time 0x2b (about 6 periods): occupation 0, equipment 0x80; place 15's harvester count 1 → 0, Carthag-Tuek's 0 → 1; motivation 29 throughout.
+  - The engine's run of the same script takes the same place and item and comes back with the harvester (`Troops:` lines). The scenario scores 77.6 %; the losses are the outdoor palette at the palace front and the sietch exterior (58 % and 12 %, unrelated to this order) and the map's icons (88 %: the original draws the marching troop's icon).
+- **Engine decision:** ds:1150 (the place Paul is at or last left) is not kept by the engine; `currentLocation()` (ds:7) stands for it in the orni rules (`77e6`, `804c`).
+- **Not done:** the same harvester drop (`6abf`) on a plain SPECIALIZE IN ARMY / ECOLOGY is still not transcribed in the engine's `kRowSetOccupation`.
+
+## The smugglers' trade (2026-09-29)
+
+Traced on 2026-09-29 in the CD 3.7 executable (OpenRakis' `asm/cd/DNCDPRG_RECENT.ASM`, `sub_1xxxx` = seg000:xxxx) and in the floppy image (`notes/temp/dune_scummvm_engine_20260916/results/DUNEPRG.unpacked.bin`, capstone 16-bit, offsets as in the image). The dialogue data was read with `scripts/dune_dialogue_dump.py` (CD `data/DUNE.DAT`; floppy `data/floppy/*.HSQ`). The trade was captured on the original floppy under Spice86.
+
+### Addresses
+
+In this block the floppy code is the CD's moved by +0x318. The data segment is the same up to ds:1156. From ds:1158 the floppy's block is two bytes shorter, and from ds:11c0 it is thirteen bytes longer (`World::ds`).
+
+| What | CD | Floppy |
+| --- | --- | --- |
+| Stage the village's smugglers (`init_room_persons` → at a place of appearance 0x21) | `2318` | `2630` |
+| Copy a record's fields for the conditions | `235f` | `2677` |
+| Smuggler event 8: phase 0x3c, the roll, the date, the next offer | `2388` (the offer `23a5`-`23d4`) | `26a0` (`26bd`-`26ec`) |
+| ARGUE's price cut | `23d5` | `26ed` |
+| The purchase | `23e6` | `26fe` |
+| Smuggler event 9 (a bare `retn`) | `2419` | `2731` |
+| Menu ACCEPT / REFUSE / ARGUE | `241a` / `2432` / `2453` | `2732` / `274a` / `276b` |
+| Common tail: ds:9f, ds:1a + 1, the walk goes on | `2496` → `loc_19472` | `27ae` → `9f3f` |
+| Duncan's event 8 (offers, then the bill to present) | `2239` (bill pick `2253`) | `2551` (`256b`) |
+| Duncan's event 9 (agreed offer, or the bill paid) | `24ee` (pay `2517`, flags `252d`/`2541`) | `2806` (`2829`, `283f`/`2853`) |
+| Dialogue actions 4 / 5 (the bargaining menu; party ds:476d = 0 / 1) | `a244` / `a248` | `aa2d` / `aa31` |
+| The talk walk: at the end of the lists, speaker 13 starts again | `194b9` | `9f83` |
+| New day: stock refill | `1ca5`-`1cd9` (in `sub_11C46`) | `1fe9`-`201c` |
+
+| Variable | CD | Floppy |
+| --- | --- | --- |
+| The six smuggler records, 17 bytes each, 0xff after the last | ds:10d8 | ds:10d8 |
+| The current record | ds:10b4 | ds:10b4 |
+| The number of goods on sale | ds:1141 | ds:1141 |
+| The item's word (placeholder 0x83, subst_id_03) | ds:11f1 = 0xE8 + item | ds:11fe = 0xDC + item |
+| The region's word (Duncan's bill line) | ds:11f7 | ds:1204 |
+| Spice spent today | ds:1172 | ds:1170 |
+| Stock at the start of today | ds:1170 | ds:116e |
+| The place where Paul is | ds:114e | ds:114e |
+| The speaker | ds:47c4 | ds:431b |
+| The bargaining party (0 Duncan's own offer, 1 a smuggler's bill) | ds:476d | ds:42c9 |
+| The walk's sentence mask | ds:47c2 | ds:4319 |
+
+#### The record (ds:10d8 + 17·k)
+
+| Byte | Meaning |
+| --- | --- |
+| +00 | the village's first name (the place's byte 0; all six villages are "-Pyons", place byte 1 = 0x10) |
+| +01 | haggling tolerance (0: "I never haggle") |
+| +02 | flags: 0x08 visited once; 0x20 bill argued, 0x40 bill refused (Duncan's menu); both cleared by a new purchase |
+| +03 | the day of the last offer (event 8) |
+| +04..+08 | stock of goods 0-4: harvester, orni, krys knives, laser guns, weirding modules |
+| +09..+0D | the price of goods 0-4: $(b \mathbin{\&} 0x7F) \times 2$ batches of 10 kg; bit 7 = restocked when sold out |
+| +0E | the unpaid bill (word, batches of 10 kg) |
+| +10 | the day of the last purchase |
+
+The initial records (identical in every floppy dump before any trade; region numbers from the place's first name):
+
+| Record | Region | +01 | Stock H O K L W | Price in kg (R = restocked) |
+| --- | --- | --- | --- | --- |
+| 10d8 | 1 | 0 | 1 2 0 2 2 | 600 R, 1500 R, 200, 800 R, 2500 R |
+| 10e9 | 3 (Tuono) | 1 | 1 2 0 2 1 | 600 R, 1500 R, 200, 800 R, 2000 R |
+| 10fa | 5 (Oxtyn) | 3 | 1 1 0 0 1 | 1000 R, 1980 R, 200, 800, 2000 R |
+| 110b | 6 | 2 | 0 2 3 2 2 | 800, 1600 R, 300 R, 1000 R, 2500 R |
+| 111c | 9 | 3 | 2 1 0 0 1 | 1000 R, 1600 R, 200, 800, 2200 R |
+| 112d | 11 | 6 | 1 1 2 1 0 | 1200 R, 1800 R, 200 R, 800 R, 2000 |
+
+ds:1141 is 3 at the start: only harvesters, ornis and krys knives are on sale. The Duke's death (phase 0x4c, `sub_11166`) adds laser guns, and phase 0x5c (`sub_111b3`) adds weirding modules. The engine already does both increments (`world.cpp`).
+
+### The rules
+
+```text
+stage (2318), on every room draw at a place of appearance 0x21 (init_room_persons 3166):
+    rec = the record whose +00 == place byte 0;  ds:10b4 = rec
+    ds:1c = rec+02; ds:20 = bill; ds:1f = bill ? today - rec+10 : 0; ds:1d = rec+01
+    ds:1e = rec+02 & 8 ? today - rec+03 : 1;  rec+02 |= 8
+    ds:9d = 0 (no offer);  ds:9f = 0
+    item word = base + ((ds:0 & 7) mod ds:1141)        # ds:0 = the rolling random word
+
+smuggler event 8 (2388), "Well, let me see if I have something for you...":
+    phase 0x3c;  ds:9e = rand & 3;  rec+03 = today;  ds:1a = 0
+    i = item - base; up to two wraps: i = i + 1 (mod ds:1141) until rec+04+i != 0
+    if found: item word = base + i;  ds:9d = (rec+09+i & 0x7f) * 2      # else ds:9d stays 0
+
+menu (speaker 13; any other speaker just sets ds:9f = 1/2/3):
+    ACCEPT: rec+02 &= 0x9f;  p = ds:9d, ds:9d = 0;  ds:20 += p;  bill += p
+            if bill == p: ds:22 += 1 (one more smuggler with a bill)
+            rec+10 = today;  rec+04+i -= 1;  (ds:114e)+0x14+i += 1     # into the village's own stock
+            ds:9f = 1
+    REFUSE: if rand & 7 == 0: ds:9e |= 0x10, ds:9f = 3                 # "Eh! ... losing money!"
+            else ds:9d = 0, ds:9f = 2                                 # he looks for something else
+    ARGUE:  r = rand & 3
+            if r == 0: ds:9e |= 0x10                                  # "Eh! ... losing money!", same price
+            else: ds:9e = (ds:9e + 1) & 3
+                  if (r & 1) + ds:1a - rec+01 >= 0: ds:9d = 0         # "Forget it!" (or "I never haggle")
+                  else: ds:9d -= ds:9d >> 3                           # the price cut
+            ds:9f = 3
+    then ds:1a += 1 and the talk goes on after the line that opened the menu.
+
+new day (1ca5): r = one timer-random word
+    for each record while +00 < 0x14, if visited (+02 & 8):
+        for i = 4 .. 0: if stock[i] == 0 and price[i] & 0x80: r = rol(r, 2); stock[i] = r & 3
+
+Duncan (character 3, list 2), event 8 (2239): the offers, then the bill:
+    ds:20 = 0; ds:9f = stock ? 3 : 0; ds:1a = 0
+    rec = the record with a bill and no 0x60 flag whose purchase is the oldest (today - +10 largest),
+          else the next record after ds:113f that has a bill (ds:113f = it); none: no bill
+    stage rec (235f); region word ds:11f7 = rec+00
+Duncan event 9 (24ee), after his answer line:
+    party 0: ACCEPT/0 = the Emperor's offer agreed (engine duncanAccept)
+    party 1: choice < 2: stock ds:a0 -= bill, spent today += bill, bill = 0, ds:22 -= 1
+             choice 2:   rec+02 = rec+02 & 0x9f | 0x40      (refused)
+             choice 3:   rec+02 = rec+02 & 0x9f | 0x20      (argued: "you have more important things")
+```
+
+The price cut is $p \leftarrow p - \lfloor p/8 \rfloor$. From 600 kg: 530, 470, 420 kg.
+
+With tolerance $t$ (+01) and $a$ menu choices already made in this offer (ds:1a), an ARGUE that is not the 1-in-4 "Eh!" lowers the price only while $(r \mathbin{\&} 1) + a < t$. A tolerance-1 smuggler therefore cuts at most once, on the first ARGUE with an even roll. A tolerance-0 smuggler never cuts: every ARGUE ends the talk with "I never haggle over the price" (condition 454 CD / 451 floppy, action 6).
+
+Payment is never taken at the village. Every purchase is on credit. The bill is paid only through Duncan, from the palace stock.
+
+#### The talk walk
+
+When the lists run out, the walk (`194b9`) starts again, but only for speaker 13. It goes back to his list 0 with the sentence mask 0x20 (`ds:47c2`). His first line (flags 0x20) then stays said, while all his other lines are repeatable. So the talk runs until a line with action 6 ends it. Otherwise it keeps coming back to "let me see" (`ds:9d == 0`), the offer (`ds:1a == 0`), a price line (`ds:9e` 0-3) or "Eh!" (`ds:9e & 0x10`). After a menu choice the walk goes on after the line that opened the menu (`loc_19472`: `ds:47ba`, the saved position).
+
+The item's name comes from placeholder 0x83 (subst_id_03, the same word a searching troop's lines use). On the floppy the price is printed by `0x91 0x9d` "0 kgs" (byte ds:9d, then a literal 0). The CD lines carry no price: none of the CD code reads ds:9d except the conditions.
+
+#### Smuggler lines (character 13, list 2; CD condition, floppy condition)
+
+| # | Condition | Action | Line (CD / floppy) |
+| --- | --- | --- | --- |
+| 1 | 1 / 1, once (flag 0x20) | – | "Here you are, the best place on Dune to buy all kinds of equipment..." |
+| 2 | 440 / 437: at Oxtyn-Pyons (ds:4e = 0x510), phase > 0x47 | – | "another village on the Fish's Tail" |
+| 3 | 441 / 438: bill, 1-2 days old | 6 end | "I prefer that you pay my last bill before I deal with you again." |
+| 4 | 442 / 439: bill, 3+ days old | – | "I don't want to do business with you..." |
+| 5 | 443 / 440: the same, ds:e2 < 0x32 | – | "...no problems getting paid by the Harkonnens." |
+| 6 | 442 / 439 | 6 end | "Don't waste my time!" (so line 7 is never reached) |
+| 7 | 444 / 441: the same, ds:1e < 5 | – | "...I will give you another chance." |
+| 8 | 445 / 442: ds:19 = 0, visited today | – | "It seems I see you very often, these days." |
+| 9 | 446 / 443: ds:19 = 0, 6+ days | – | "Good to see you, it's been many days." |
+| 10 | 447 / 444: ds:9d = 0 | 8 | "Well, let me see if I have something for you." |
+| 11 | 447 / 444 | 6 end | "I have nothing to trade at the moment..." |
+| 12 | 448 / 445: offer, ds:1a = 0 | 4 menu | "I have [item] for trade. (floppy: You can have it for N kgs of spice.)" |
+| 13-16 | 449-452 / 446-449: ds:9e = 0..3 | 4 menu | the four price lines |
+| 17 | 453 / 450: ds:9e & 0x10 | 4 menu | "Eh! [item] of the highest quality! At this price, I'm losing money!" |
+| 18 | 454 / 451: ARGUE, tolerance 0 | 6 end | "I never haggle over the price." |
+| 19-21 | 455-457 / 452-454: ACCEPT, ds:1a < 2, < 4, else | 6 end | "You've got a deal..." / "OK! So, it's always possible..." / "You're a tough guy..." + "It's yours now. Send someone to pick it up..." |
+| 22 | 458 / 455: ARGUE with ds:9d = 0 | 8 | "Forget it! Do I have something else for you?" |
+
+Duncan's bill lines (character 3, list 2; CD 198-206, floppy the same numbers):
+
+- "Ah, one moment, I have received some kind of bill" (ds:22, action 8 → `2239`).
+- "A smuggler from the [region] region is claiming a payment of N kgs" (flags & 0x60 = 0). Variants: 0x20 "I've already told you about it...", 0x40 "are you still refusing to pay...".
+- "we only have N kgs in stock... We can't pay him right now." (stock < bill).
+- "Do you want me to send N kgs to this smuggler?" (bill ≤ stock, action 5: the menu with party 1).
+- "OK that'll be done." / "I hope he'll wait." / "I understand that you have more important things to think about now." (ds:9f = 1/2/3, action 9 → `24ee`).
+- Also Duncan's "I've been told about another village in the east, south of [place]" (condition 169) needs ds:22 = 0.
+
+#### Moving between villages and days
+
+The smugglers never move: each record belongs to one village for the whole game (+00). What changes over the days is:
+
+- the stock, refilled on each new day for goods marked with price bit 7 that are sold out, once the village has been visited;
+- the goods on sale (ds:1141, at phases 0x4c and 0x5c);
+- the lines, through the bill's age (ds:1f) and the days since the last offer (ds:1e).
+
+The item offered first cycles from a random start (ds:0 at the room draw), and each new offer takes the next item in stock.
+
+### The original, captured (floppy, Spice86)
+
+the maintainer's Spice86 captures of the original. `dsx.py` prints the trade variables from a checkpoint's `.ds.bin`.
+
+- **`run1-village`** (`village-save.script`): day-route-v1 chapter 15's Log 1 (Ergsun-Timin, day 4, phase 0x2c), the flight to Tuono-Pyons, saved in Log 2 → `saves-village/`.
+- **`run-e`** (`trade-e.script`), from `saves-village` Log 2, day 5 slot 0. Stock 22 (220 kg). Record 10e9, tolerance 1, ds:1141 = 3.
+  - **Offer.** "let me see" makes the offer: harvester, ds:9d = 60 (600 kg), ds:9e = 3. Then "I have a spice-harvester for trade. You can have it for 600 kgs of spice."
+  - **ARGUE → "Forget it!"** ds:9d = 0, so the next offer is picked in the same line: orni, 150 (1500 kg).
+  - **ARGUE on the orni → "Forget it!"** The harvester is offered again, ds:9e = 0.
+  - **ARGUE on the harvester → the cut.** "Hmm... I don't like to haggle over the price but I'll cut the price down to 530 kgs of spice": ds:9d = 53, ds:9e = 1, ds:1a = 1.
+  - **ACCEPT.** "Ok! So... it's always possible to come to an agreement" (ds:1a = 2), then "It's yours now...". The record becomes `03 01 08 04 00 02 00 02 01 9e cb 0a a8 e4 35 00 04`:
+    - the harvester stock is 0;
+    - the bill is 0x35 (53);
+    - the purchase day is 4.
+  - **After ACCEPT.** ds:20 = 53 and ds:22 = 1. Tuono-Pyons' place +0x14 (harvesters) goes 0 → 1. The stock ds:a0 is unchanged (22).
+  - **STOP TALKING.** The room redraw restages the record: ds:1e = 0, ds:9d = 0 and ds:9f = 0.
+  - Saved in Log 1 → `saves-after-trade/`.
+- **`run3-accept`** (`trade-b.script`): ARGUE → "Forget it!" → orni 1500 kg → ACCEPT. Bill 150, the orni count 1 → 2. A view click after the talk ended starts a new talk: "let me see" → the harvester again, the same day, with a bill open (ds:1f = 0).
+- **`revisit-50` / `revisit-70`** (`revisit.script`): `saves-after-trade` Log 1 with the game time **patched** (`dune_save_patch.py --set 2=50,00` / `70,00`):
+  - day 6 (ds:1f = 1): "Well... I prefer that you pay my last bill before I deal with you again." (end);
+  - day 8 (ds:1f = 3): "I don't want to do business with you...", "I'm sorry... getting paid by the Harkonnens..." (ds:e2 = 0x2e), "Don't waste my time!" (end).
+- **Duncan, `probe-duncan-bill` and `duncan-accept` / `-refuse` / `-argue`** (`duncan-*.script`): day-route-v1 chapter 19's Log 1 (COMM room, day 6, stock 41), **patched**:
+  - Duncan moved to the COMM room (ds:1008 = 8);
+  - record 10e9 given a bill of 53 dated day 4, ds:22 = 1;
+  - for the menu runs, the stock set to 60 (`saves-duncan-bill-paid`).
+  - The run in the COMM room:
+    - Others... → Duncan: his stock and Emperor lines. REFUSE the Emperor offer, then "Ah... one moment... bill" (event 8: ds:20 = 53, ds:1f = 1, region word 3).
+    - "A smuggler from the Tuono region is claiming a payment of 530 kgs of spice."
+    - Stock 41: "the problem is that we only have 410 kgs in stock. And he wants 530 kgs. We can't pay him right now.", then "I understand that you have more important things..." (ds:9f = 3 from `2239`, party 0: no change).
+    - Stock 60: "Our stocks of spice are currently 600 kgs. Do you want me to send 530 kgs to this smuggler?", the menu with party ds:42c9 = 1. Then:
+      - ACCEPT: stock 60 → 7, ds:1170 (floppy spent today) 0 → 53, bill 0, ds:22 0;
+      - REFUSE: record flags 0x08 → 0x48;
+      - ARGUE: 0x08 → 0x28.
+- Not captured: the CD (no CD save near a village) and the day-change refill (a village can't wait for a new day).
+
+### Built (2026-09-29)
+
+- **`world.cpp`**:
+  - `stageSmugglers` also clears the offer and the choice (ds:9d, ds:9f) and sets the first item word from ds:0.
+  - The new day refills the goods (`smugglerRestock`).
+  - The new day computes today's production as the original does, with the spice spent today (ds:1172). It clears that counter and keeps yesterday's stock through `word()`/`setWord()`. The floppy's yesterday's stock had been written to its spent-today word.
+- **`story.cpp`**: `smugglerOffer` (`23a5`), `smugglerChoice` (`241a`/`2432`/`2453`/`2496`) and `smugglerBuy` (`23e6`); `duncanAccept(smugglerBill)` pays, refuses or puts off the bill (`2517`-`2541`).
+- **`scene.cpp` / `story_scene.cpp`**:
+  - speaker 13's event 8 makes the offer;
+  - the bargaining menu with speaker 13 goes to `smugglerChoice`;
+  - Duncan's event 9 passes the party (`Conversation::bargainParty`);
+  - STOP TALKING restages a village's smugglers (`stageVillageSmugglers`, as the original's room redraw does).
+  - The item words' base is the COMMAND id of "a spice-harvester" (`World::setItemWords`).
+- **`dialogue.cpp`**: `findEntry` starts speaker 13's talk again at list 0 with the mask 0x20 (`194b9`), once per search.
+- **`speedrun.cpp`**: the bot stops talking at a smuggler's offer: a REFUSE now only brings the next offer. The route buys nothing. Buying harvesters for spice output was not added; the bill would have to be paid from the stock the Emperor wants.
+- **Checks.**
+  - `scripts/check_smugglers.sh` runs `dune_story_setup=smugglers` on the floppy and the CD. The steps: the offer, ARGUE (forget it / cut / "Eh!"), ACCEPT (the village's count +1, bill = price), the next day's "pay my last bill", Duncan paying the bill, then a new offer.
+  - The fidelity scenario `smugglers-trade` (`tests/fidelity/smugglers-trade.script`, saves `tests/fidelity/saves/smugglers-village`, the original `captures/smugglers/run-e`). It scores low:
+    - the engine's first item and rolls come from other random words;
+    - it was 38.2 % while the engine showed the menu one click late; with the menu fixed (below) it is 44.4 %. All clicks now stay in step with the original up to ACCEPT, and those checkpoints score 50-54 %. The cap is the village exterior itself: 51 % before any talk. After ACCEPT the rolls part ways.
+- **The bargaining menu comes with its line** (fixed 2026-09-29, every action 4/5 question: the smugglers, Duncan's shipment and bill, Stilgar's Water of Life and final attack).
+  - In the original, `sub_1A03F` runs a line's action when its last segment is drawn (after `sub_188D2`; table cs:A107). Actions 4/5 (`a244`/`a248`, floppy `aa2d`/`aa31`) then open menu ds:1ffe (`sub_1D323`) at once, so ARGUE / ACCEPT / REFUSE appear with the question and the line stays up.
+  - A view click at the menu changes nothing (Spice86: `captures/menu-click`, the smuggler's offer and Duncan's offer, two clicks each: only the cursor and the mouth move).
+  - The engine opened the menu one click later, over the room. `advanceConversation` now raises the menu (`_talkBargain`) with the page that commits the action, the balloon's last part. A view click at the menu does nothing, and nothing but the answer moves the talk on.
+  - Goldens replaced after comparison with the original's `captures/chapters/day-route-v1/ch12/c12-04-offer` (Duncan's offer with the menu) and `captures/menu-click/duncan`: `story-comm/story-duncan-offer`, `story-comm/story-bargain`.
+- **Not done:** the CD's lines were not captured on the original.
+
+## The end-game paths (2026-09-29)
+
+Queue item 3, traced in the CD 3.7 executable (capstone on `DNCDPRG.EXE`, `scripts/dune_disasm.py`; the dune-chani names) and in the floppy image (`DUNEPRG.unpacked.bin`, offsets as in the image), with the dialogue data (`scripts/dune_dialogue_dump.py`). Checked on Spice86 where a save could reach it (a patched save, `scripts/dune_save_patch.py`).
+
+### The Water of Life
+
+- **The offer.** Stilgar's list 1 in a sietch's room 4 (the reservoir): condition 299 (CD numbering; the floppy's is one lower) `current_scene < 0x20 & room == 4 & (ds:0a & 2) == 0` asks "The Water of Life extends consciousness ... Do you want to try?" with action 4, so ARGUE / ACCEPT / REFUSE come up with the line (ds:9f = 3 / 1 / 2). Condition 300 (`ds:9f > 1`, ARGUE or REFUSE) answers "You are wise..."; 301 (`ds:9f == 1`) "Your decision frightens me... Drink it if that's your will." Both answers carry event 8.
+- **Event 8** (`callback_event_dialogue_line_08_Stilgar_drink_Water_of_Life`, CD `seg000:2ccf`, floppy `2f96`):
+  - always sets ds:0a bit 3 ("has heard of it"; Jessica's lines 92-94 read it);
+  - with ds:9f != 1 that is all;
+  - with ACCEPT it waits for the voice (CD `1abcc`/`1abd5`) or 600 ticks (`0x258`, floppy only);
+  - charisma (ds:29) below 100: pending_room_screen_request = 3 (CD ds:46d9, floppy ds:4235), the ending "Paul Atreides died as he tried to drink the Water of Life";
+  - 100 or more: ds:0a bit 1 (has drunk), ds:d5 = 0xff, transition 0x38, 1000 ticks, transition 0x36 (on Spice86 the screen is black), three periods pass (`0fd9`, cx = 3), ds:23 = 0x11 and the room scan (`jmp 35ad`). The scan finds Stilgar's topic-4 line of condition 344 (`ds:23 == 0x11`): "Ah, he is coming to. You gave us such a fright, Muad'Dib! You've been unconscious for three hours." (floppy: "Aaah, here he goes again! ... unconscious three hours."). The talk then goes on where the answer left it: "I don't know what the Water of Life has done to you..." (condition 62, `ds:0a & 2`).
+- **What it gives.** ds:d5 (`contact_distance_related_ds_d5`) above 0x80 opens Jessica's lines 76-78 ("Believe me Paul! I can sense that your powers have increased."), whose event 8 is her lesson (CD `a186`, floppy `a967`). With ds:0a bit 1 the lesson gives charisma + 40 (through `6f78`, the troops' motivation moving with it) and the contact range (ds:1176) 0xffce + 0x14 = 0xffe2: the whole planet ("You are now able to contact Fremens on the entire planet."). ds:d5 becomes 0 (range >= 100).
+- **ds:d5 on a new day** (CD `1c62`, floppy `1fa5`, before the stage-7 gate): `d5 + 1` is stored when it is 2 or more, so 0 stays 0, 0xff stays 0xff, and a lesson's 0x80 - range / 6 climbs a step a day until Jessica offers the next lesson. The engine never grew it, so Jessica never offered a second lesson.
+- **Engine changes.** `World::runPeriod` grows ds:d5 on the new day; `raiseContactRange` uses `changeCharisma` (6f78); Stilgar's event 8 with drink 1 arms `_pendingWakeUp`: after the line's 600 ticks (at once in capture runs) `GameScreen::waterOfLifeWakeUp` blacks the screen (5 s in real play), shows the room, sets ds:23 = 0x11 and runs the room scan (`roomEntryScan(true)`, which capture runs otherwise skip); after the wake-up line the talk goes on from the interrupted walk (`Conversation::position` / `resumeAt`). Closing the talk before the wake-up runs it first.
+- **Not the same yet.** The transitions 0x38 / 0x36 are a plain black screen. (ARGUE / ACCEPT / REFUSE now come with the question line, as in the original: see "The smugglers' trade".)
+- **Checks.** `scripts/check_water_of_life.sh` (dune_story_setup=water-of-life: REFUSE, ACCEPT at charisma 120 with Jessica's lesson after it, ACCEPT at 50) and the fidelity scenario `water-of-life` (a patched chapter 20 save, original captured in captures/endgame/water-of-life: ds:0a 0x51 -> 0x5b, ds:d5 0x7e -> 0xff, game time 88 -> 91).
+
+### The ecology win
+
+- **No separate ending.** The only ending is phase 0xc8 (`game_phase_set_to_c8_game_ending`, CD `16fc`, floppy `1aa4`), reached by entering the Harkonnen palace's room 2, the Baron's hall (location_and_room 0x3002, CD `4072`, floppy `42cc`). The other endings are deaths (pending_room_screen_request 3 the Water of Life, 4 shot on arrival, 6 a lost battle, 7 the Emperor's patience). Greening is a second way to the same place.
+- **What the vegetation takes.** The daily disc of an irrigated sietch (`6515`/`653a`, floppy `72b5`/`72da`) passes over place cells (map bit 0x40): the place's spice density (+0x12) becomes 0, and a place that is not Atreides (`5d36`: type >= 0x28 without status bit 3) loses its hidden bit and goes through the fortress-won routine itself (CD `7443`, floppy `81a7`), the same as a won battle: the land round it Atreides (radius 5), held (status bit 3) until the day after tomorrow (+0x0b), charisma + 4 (`6f78`), every troop's motivation + 1 (`6f56`), the hired troops back from the battle (`75af`), its Harkonnens freed as Fremen up to slot 8 (`75ea`) or gone, perhaps one captive raider (`762a`).
+- **The release difference.** The CD skips locations 0 and 1 (`6582: cmp di, 138h; jb`), so its vegetation never takes the Harkonnen palace. The floppy has no such test (`7313`-`7326`): the vegetation takes the Harkonnen palace like a fort. Its garrison is freed or leaves, it is held, Paul lands safely (`503c` finds no Harkonnen), and walking into room 2 ends the game, with no final attack. The palace stays type 0x30 (the conversion `6e20` runs only for a troop stationed there), so room 2 stays the Baron's hall. So on the floppy the wiki's "vegetation reaching the palace makes them abandon it" is true, and the ending follows at once; on the CD it is not.
+- **The final attack's start** (`7493`-`74ac`, floppy `81f7`-`8211`, after both battles and vegetation): `accumulate_harkonnen_spice_production` (`1cda`) also counts the places not Atreides (dl); with at most one left, ds:c2 is SET to 1 whatever it was, Jessica's and Thufir's record byte 0x0f bit 1 ("in the palace") goes (ds:ff7, ds:1007), and `765e` adds the planet's atomics beyond ten (the sum of every place's byte 0x19, in a byte) to this place. So the last fort, by battle or by vegetation, starts the chain Thufir -> council -> 10 000 men -> Stilgar (see "Troops at war"): Thufir's "We're almost ready for the final attack." (condition 127, ds:c2 == 1). ds:c2 != 0 stops the Emperor's demands (`20ae`) and the shipment reminders (`1df0`).
+- **The final battle's conditions**, against the wiki: 1000 or more (x 10 men) in hired troops of occupation 4 (military training) with the atomics bit (troop byte 0x19 bit 2) at locations 2-4 (`1243`/`1258`/`1269`), counted on any Thufir line at stage 4 (`9f48`); the council needs Jessica, Thufir, Gurney, Stilgar and Chani in the room (`w[0x12] & 0xb6 == 0xb6`, condition 131). No skill level and no other weapon is tested.
+- **What else the greening does:** it kills the spice under it (a place's density 0; `1cda`'s Harkonnen production sums density / 8 over the places not Atreides), and sprouting cells turn into tufts (`65b6`). Charisma + 4 and motivation + 1 come with each place taken.
+- **Engine changes.** `World::fortressWon` is the one routine for battles and the vegetation (the separate `fortressTaken` is gone: it skipped `75af`, `762a`, used `addCharisma` and kept Harkonnens past slot 8); `spreadVegetation` takes the Harkonnen palace on the floppy (`World::floppy()`, which includes the Amiga: not checked there); `battleWonTail` sets ds:c2 = 1 unconditionally (the engine had `!ds:c2`) and runs `gatherAtomics` (`765e`); `battleWon` is `7429` (message 7 is now sender 0x0f, 0x0f07, as `71b2` sends it; the palace's message 0x0f0a too, and a chief's message is delivered in person only at its place, `2ad8`).
+- **Checks.** `scripts/check_ecology_win.sh` (dune_story_setup=ecology-win: the last fort falls to a disc, stage 0 -> 1, Thufir's line, no demand; then the palace: floppy taken and the Baron's hall ends the game, CD spared and Paul shot). No original capture: the discs take days of irrigation to reach a place, and a patched disc is only picked up by the irrigation job's own step.
+
+### Playing on after the final battle
+
+- **The normal end.** Stilgar's ACCEPT (action 9, `2d2c`, floppy `2fec`) makes ds:c2 6 and marches the atomics troops at locations 2-4. An attacking troop's period callback (`739e`, floppy `8102`) at the palace (`cmp di, 11ch`) goes to `73a9` (floppy `810d`), with no roll: ds:c2 + 1 (7), the hired troops there train, the Harkonnens there are removed, every Harkonnen cell (0x30) turns Atreides, and message 0x0f0a "The shield is down, the Harkonnen troops here have surrendered!" (a chief tells it at the palace, else a dream). From stage 7 no troop, vegetation, Chani cure or time-of-day event runs (`1b5e`, floppy `1ea1`); the new-day hook still does. The palace is not held, keeps type 0x30, never becomes a sietch; room 2 ends the game.
+- **The wiki's trick.** Paul arrives while the palace is in battle (`503c`: status bit 1 or attacking Fremen there; ds:2b = 1) and chooses MASSIVE ATTACK (`7317`, floppy `807b`). Its rounds call `7419` / `7516` directly, not `739e`, so a won battle goes `7429` -> the fortress path `7443`: the palace is held until day + 2, and with no Harkonnen place left ds:c2 is set back to 1 (checked on Spice86: 6 -> 1, status 0x0a, byte 0x0b = 2, the troops at occupation 4, charisma 4 -> 8). The world goes on. Two days later a troop there converts it (`6e20`: type & 7 = 0, ds:27 + 1, `6dbb` moves the characters whose record says (0x80, palace + 1) to the new type: the Baron, Feyd-Rautha and the Emperor, characters 9-11, whose records start at (room 2, 0x30, 0x80, 2)). Room 2 is then 0x0002, not 0x3002: no ending.
+- **The prisoners.** In room 2 they talk with their lists 3/4 (ds:24 is the COMM message's place, so their message lines do not come up): "I've nothing to say." / "I've nothing to tell you."; COME WITH ME gets their list 5 "Who do you think you are?" (action 2: they refuse).
+- **Kynes as a companion.** His list 5 has condition 94 (`ds:c2 != 0`) "OK!" before his refusal ("All of my life has been devoted to this old Fremen dream..."), so he follows from the last fort on, not only after the battle.
+- **The rest.** ds:c2 = 1 again means no demand from the Emperor (`20ae`) and Thufir back at "We're almost ready for the final attack." (a new COME WITH ME to him would raise it to 2). A fighting troop left in occupation 6 at the palace (the prospectors, whom `75af` skips) would still hit `73a9` later: ds:c2 + 1 and the shield message, but not the freeze unless it reaches 7.
+- **Engine changes.** `battleWonTail` (above) makes ds:c2 1 after the palace's MASSIVE ATTACK; `palaceFalls` sets occupation 4 on the hired troops only and removes only unhired Harkonnens (`7399`, `764d`); `runPeriod` skips the vegetation, the period's actions and the place staging at stage 7 as well; ds:2b is kept with `_battle` (written on arrival and when the battle ends, read back after a load), so a save made in a battle offers MASSIVE ATTACK after loading, as in the original. The palace-as-sietch, its prisoners and Kynes needed no new code: they follow from the data once the palace converts.
+- **Checks.** `scripts/check_endless_play.sh` (dune_story_setup=final-battle: stage 7, the world stops, the Baron's hall ends it; =endless-play: MASSIVE ATTACK, stage 6 -> 1, a sietch two days later, room 2 no ending, the prisoners, Kynes, no demand) and the fidelity scenario `endless-play` (an engine-written save, captured in captures/endgame/endless-play; the data match, the pictures do not: the original shows the night battle, which the engine does not draw).
+- **Not built / seen on the way.** The night battle view (known gap). On the floppy, Kynes's topic-5 "OK!" shows as "Stop it, now!" and his other lines look like other characters' (sentence 110 / 295): the floppy's phrase-file split for characters from 6 on may be off; to check.
+
 ## The palace plan
 
 The red dot in the compass box of the Atreides palace opens a floor plan of the palace over the view (`ui_draw_palace_plan`, CD `seg000:18ee`, `sub_118EE` in `DNCDPRG_RECENT.ASM`). It works from day 1 and needs no story event. It was checked against the original floppy on Spice86: `captures/palace-plan` and `captures/palace-plan-people`, and the fidelity scenarios `palace-plan` and `palace-plan-people`.
@@ -809,7 +1139,7 @@ The Dune wiki says tribes from both hemispheres in one sietch "quarrel and refus
   - The Emperor keeps demanding through the war; shipments pause only when the Harkonnen palace alone is left.
   - A short shipment right after another short one sets the fulfilment to 0, and the Emperor strikes (floppy `sub_4748`; the engine matches it).
   - The demand grows by about 1500 kg each time; by demand 7 it is 13730 kg. The 8 miners' output falls as their fields thin, from about 90 kg a period to about 25.
-  - Only 2 harvesters (×4 output, `seg000:708a`) were found lying free all game. Buying more from the smugglers is not built yet.
+  - Only 2 harvesters (×4 output, `seg000:708a`) were found lying free all game. Buying from the smugglers is built (see "The smugglers' trade"); the bot does not buy.
 
 ## A fort turned sietch moves its people (2026-09-28)
 
@@ -820,6 +1150,8 @@ A captured fort becomes a sietch on a new day (floppy `sub_9A58`, 9A6C–9A7E): 
 - **The troops.** The routine's troop callback (bp 7B77, at 9A4C) also clears flag 0x20 in the troop's word +10h and sets 0x1000 in +12h; the engine had only done the second.
 
 With `battle.cpp`'s conversion completed, `check_speedrun.sh full` passes on floppy with no FORCED step (19 forts, the end on day 58). The CD run still stops at the palace for want of atomics: its atomics troops are captured.
+
+**Speedrun CD campaign, seed 1 (2026-09-29).** It failed at stage 4 with 953 (x 10) men with atomics at locations 2-4: two troops with atomics stood at place 55 in occupation 0x22 (freed after a capture, apologizing: `75af`), and a troop in that state does not march. The end-game rules are not what changed the run: a build with each of them switched back (ds:d5, the lesson's charisma, the ds:c2 reset, the atomics gift, the message senders, the captive's counter, ds:2b) gives the same bot log line for line. The run parts from the Sep 28 pass on day 6 (troop 16's army skill 36, not 35), from changes to the troops and the landing's room rotation roll made before the end-game work (a 01:53 engine without them ends on day 30 with 12 forts). The bot now gives such troops a new job before gathering the atomics troops. A job writes the whole occupation byte (`6aea`), which frees them, as CHANGE TROOP OCCUPATION does for a player. The run then ends on day 43 with 14 forts.
 
 ## Map and globe
 
@@ -851,11 +1183,34 @@ from phase 5). The left panel on the flat map is ICONES 6 (the eye frame
 around a transparent oval) with ICONES 0x0d, the planet, at (22,161): the
 frieze record ds:1ae6 with the map variant ds:1c66
 (`ui_set_and_draw_frieze_sides_map`, seg000:d792). The globe is `drawDuneGlobe` over the
-FRESK frame, with the game menu in the command box (swift-dune Fresk.swift:
-EXIT GLOBE, SEE MAP OF THIS AREA, SAVE GAME, LOAD GAME, OPTIONS & QUIT GAME;
-SEE RESULTS replaces the map row on the results screen, not done). Hot zones
+FRESK frame, with the game menu in the command box: EXIT GLOBE, SEE RESULTS
+(STANDARD VISION while the results are up: the menu push, floppy CS:B840 /
+CD seg000:b941, patches row 2 from the results flag), SAVE GAME, LOAD GAME,
+OPTIONS & QUIT GAME. Hot zones
 from the CD executable at 0x111A0: the book (24, 155)-(69, 176), the five
 command rows 92..228 x 159 + 8 i, Paul's head on the box's top edge.
+
+**SEE RESULTS: the globe's colours (built 2026-09-29).** Research, addresses
+and captures: `notes/globe-results.md`. The VGA driver draws each globe pixel
+from the live map cell through one of two paths, chosen by the results flag
+(floppy ds:FEF2, CD ds:DD02; `vga_globe_init` patches NOP NOP or a jump at
+DUNEVGA 1D24 / DNVGA 1E4A). SEE RESULTS (DUNEVGA 1DA3, DNVGA 1EC9): stage 0
+`0x10 + t`, stage 0x10/0x20 (Atreides) `0x20 + t` (FRESK's reds), stage 0x30
+(Harkonnen) `0x30 + t` (the blues); no place, owner or troop is read.
+STANDARD VISION (DUNEVGA 1D26, DNVGA 1E4C): `0x10 + t`, but sprouting sand
+(stage 0x10, t < 8) 12 higher, on FRESK's greens 0x20-0x23. The engine:
+`globeCellColour` (scene.cpp). The colours change after the panels slide open
+and before they slide shut. Orientation (map.cpp): the globe seeds from the
+flat view's centre when it opens from the flat map's planet (ds:2144/2146),
+else from Paul's place, phase = 398 * longitude >> 16, tilt = latitude with at
+least +-32 (CS:B974); LOAD GAME from the globe opens SEE RESULTS and centres
+on Paul with the tilt only within +-98 (`centreOnPlayer`, CD seg000:ba9e;
+also the centre arrow); the arrows step 0x20 phases and 8 tilt rows (right
+and up add); the globe creeps one phase a pass, about every 520 ms, in real
+play only (never in dump or harness runs, whose pictures must not depend on
+time). The results screen's charisma is half the byte (CS:BD0B `shr ax,1`).
+Checked pixel for pixel against the original at three story stages and with
+greening (`scripts/check_globe_results.sh`, `scripts/globe_ref.py`).
 
 **Open:** what gfx vtable function 9 does for the frieze flag 0x40 (the
 recording rules out a black fill); FIND PROSPECTORS (seg000:5b1e).

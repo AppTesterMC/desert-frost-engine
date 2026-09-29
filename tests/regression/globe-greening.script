@@ -1,0 +1,13 @@
+# The greening on the globe (dune_story_setup=ecology, scripts/check_globe_results.sh):
+# place 12's troop irrigates for 120 days, the flat map opens centred on the
+# place; the planet opens the globe from that view (STANDARD VISION: the
+# sprouting sand green), then SEE RESULTS (the same cells red).
+wait 20000              # the setup plays 120 days of irrigation and opens the flat map
+checkpoint greening-map
+click left 35 176       # the planet at the flat map's bottom left: the globe, seeded from the map's view
+wait 2000               # the globe draws
+checkpoint greening-standard
+click left 160 171      # row 2: SEE RESULTS: the ownership colours
+wait 2000               # the panels open and the globe redraws
+checkpoint greening-results
+quit

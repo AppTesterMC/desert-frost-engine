@@ -163,6 +163,12 @@ off and on, on both releases) and the north/south quarrel. They read
 missing; like the DOS references, seed them from your own data with
 `python3 scripts/dune_regress.py add-missing --manifest tests/regression/other-releases.json`.
 
+`scripts/check_search_equipment.sh`, `check_water_of_life.sh`,
+`check_ecology_win.sh`, `check_endless_play.sh` and `check_smugglers.sh` check
+GO & SEARCH FOR EQUIPMENT, the Water of Life, the ecology win, playing on after
+the final battle and the smugglers' trade on both DOS releases (they read
+`DUNE_DATA_FLOPPY` and `DUNE_DATA_CD`).
+
 `scripts/dune_script_trace.py <script>` runs one harness script and prints the
 engine log grouped by script line (each line is logged as `Script line N`), the
 quickest way to see what a step did. Scripts may carry `#` comments after a
@@ -214,6 +220,9 @@ are documented in `engines/dune/debug.h`:
 | `dune_record=<dir>` | save every shown frame as a BMP with its duration, to make a video of a run |
 | `dune_speedrun_watch=1` | show the speedrun bot's run on screen and leave the game playable afterwards |
 | `dune_test_cockpit=<n>` | open the ornithopter cockpit for a scripted real-time test |
+| `dune_room_rotations=<n,n,...>` | replay given room-rotation bytes, one per landing, instead of random ones (for comparing with a run of the original) |
+| `dune_setup_save=1` | with a story setup, save that state as Log 1 so it can be loaded in the original |
+| `dune_globe_dump=<dir>` | write every globe frame's palette indices, live map and tilt to `<dir>` (read by `scripts/globe_ref.py`) |
 | `dune_real_time=true` | keep a scripted (harness) run at the original's speed instead of as fast as possible |
 | `dune_hnm_dump_frame=<n>` | on a dump run, the video frame at which each intro video is screenshotted (default 40) |
 | `dune_story_setup=<name>` | start from a prepared story state (`comm`, `gathering`, `ecology`, `stillsuit`; used by the story scenarios) |

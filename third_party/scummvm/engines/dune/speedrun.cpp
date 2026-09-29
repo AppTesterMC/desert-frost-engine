@@ -640,6 +640,12 @@ void GameScreen::speedrunConverse() {
 	for (uint guard = 0; guard < 120; ++guard) {
 		if (_ending)
 			return;
+		if (_talkBargain && _talkWho == World::kSmuggler) {
+			// The route buys nothing from the smugglers: a REFUSE only brings
+			// the next offer (their talk starts again, loc_194b9), so the
+			// bot stops talking at the offer.
+			break;
+		}
 		if (_talkBargain) {
 			// ACCEPT Duncan's spice deals and Stilgar's launch of the final
 			// attack; REFUSE the rest (the Water of Life: the route never drinks).
@@ -1682,7 +1688,19 @@ void GameScreen::speedrunFinalAttack() {
 		speedrunLog("step 51 OK: the war council, stage 4");
 	else
 		force(4, Common::String::format("the council did not start, persons in room %#x", _state.w(GameState::kPersonsInRoom)).c_str());
-	// The 10 000 men with atomics (item 52).
+	// The 10 000 men with atomics (item 52). A troop freed after its
+	// capture stands apologizing (occupation 0x22, 75af) and cannot march;
+	// a new job writes the whole occupation byte (6aea) and frees it, as a
+	// player's CHANGE TROOP OCCUPATION does.
+	for (uint id = 1; id <= World::kTroops; ++id) {
+		const Troop c = _world.troop(id);
+		const int at = _world.troopPlace(id);
+		if (c.id && !c.harkonnen() && c.hired() && (c.occupation & 0x20) && (c.equipment & 0x04) && at >= 0 &&
+				_world.friendlyPlace((uint)at) && !_world.placeInBattle((uint)at)) {
+			_world.setTroopOccupation(id, kJobTraining);
+			speedrunLog(Common::String::format("troop %u (atomics, occupation %#x at %d) back to army training", id, c.occupation, at));
+		}
+	}
 	for (uint id = 1; id <= World::kTroops; ++id) {
 		const Troop t = _world.troop(id);
 		const int here = _world.troopPlace(id);

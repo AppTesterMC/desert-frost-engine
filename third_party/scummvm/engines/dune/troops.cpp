@@ -229,6 +229,59 @@ bool World::prepareQuarrelTest(uint &north, uint &south, uint &place) {
 	return true;
 }
 
+uint World::takeFortsForTest(int keep) {
+	for (uint i = 2; i < locationCount(); ++i) {
+		const Location l = location(i);
+		if (!l.isFortress() || (int)i == keep)
+			continue;
+		Common::Array<uint> ids;
+		troopsAt(i, ids);
+		for (uint k = 0; k < ids.size(); ++k)
+			if (troopByte(ids[k], kTroopBits) & kHarkonnenBit)
+				removeFromPlay(ids[k]);
+		locationByte(i, 8) &= 7;
+		locationByte(i, 10) &= 0x7f; // known
+		locationByte(i, 11) = 5;
+	}
+	uint left = 0;
+	for (uint i = 0; i < locationCount(); ++i)
+		if (!friendlyPlace(i))
+			++left;
+	return left;
+}
+
+void World::greenOverForTest(uint sietch, uint target, uint radius) {
+	const Location t = location(target);
+	WRITE_LE_UINT16(&locationByte(sietch, 12), t.longitude);
+	locationByte(sietch, 14) = (byte)(int8)t.latitude;
+	locationByte(sietch, 11) = (byte)radius;
+	spreadVegetation(sietch);
+}
+
+void World::finalBattleForTest(uint count, Common::Array<uint> &ids) {
+	ids.clear();
+	_state.setB(kShipmentPaused, 6);
+	for (uint id = 1; id <= kTroops && ids.size() < count; ++id) {
+		const Troop t = troop(id);
+		// Not the prospectors (troop 3, ds:08e0): the after-battle pass
+		// (75af) leaves them attacking.
+		if (!t.id || t.harkonnen() || troopPlace(id) <= 1 || id == kProspectorTroop)
+			continue;
+		if (!t.hired())
+			rallyTroop(id);
+		unlinkTroop(id);
+		linkTroop(id, 1);
+		troopByte(id, kTroopOccupation) = 6;
+		WRITE_LE_UINT16(&troopByte(id, kTroopSpeech), 0);
+		troopByte(id, kTroopMotivation) = 100;
+		troopByte(id, 0x17) = 0x5f;  // army skill
+		troopByte(id, 0x19) = 0x3c;  // krys knives, laser guns, weirding modules, atomics
+		troopByte(id, 0x1a) = 200;   // 2000 men
+		ids.push_back(id);
+	}
+	locationByte(1, 10) |= 0x02; // the palace is in battle
+}
+
 void World::fremenQuarrel(uint id, uint index) {
 	// The north/south quarrel, the tail of the new-day routine that every
 	// spice, army and irrigation troop runs first (floppy sub_9A58 9A95-9AB8,
@@ -308,7 +361,12 @@ bool World::issueMoveOrder(uint id, uint dest) {
 	}
 	const int from = troopPlace(id);
 	const Location d = location(dest);
-	if (d.type < Location::kFortressMin && (d.status & 0x02)) {
+	// 84d2 (floppy 91ce): the rest of this block, the defence check, the
+	// refusal and the motivation cost, is for a troop whose occupation byte
+	// is 6 (attacking) only; any other troop just marches (checked on
+	// Spice86: a spice troop's GO & SEARCH keeps its motivation).
+	const bool attacking = occ == 6;
+	if (attacking && d.type < Location::kFortressMin && (d.status & 0x02)) {
 		// The executable leaves the troop unlinked and still here (an
 		// original bug, spec section 2.2); refuse the order instead.
 		_log.line(Common::String::format("Troops: troop %u cannot march to place %u under attack", id, dest));
@@ -340,7 +398,7 @@ bool World::issueMoveOrder(uint id, uint dest) {
 		WRITE_LE_UINT16(&troopByte(id, kTroopLongitude), f.longitude);
 		WRITE_LE_UINT16(&troopByte(id, kTroopLatitude), (uint16)f.latitude);
 	}
-	if (d.type < Location::kFortressMin) {
+	if (attacking && d.type < Location::kFortressMin) {
 		// seg000:6f93: motivation - 3; below 5 the troop sulks.
 		byte &m = troopByte(id, kTroopMotivation);
 		m = (byte)(m >= 3 ? m - 3 : 0);
@@ -402,6 +460,130 @@ void World::troopTravelStep(uint id) {
 	travelSubsteps(id, (troopByte(id, kTroopEquipment) & 0x40) ? 8 : 4);
 }
 
+int World::searchedEquipment(uint id) const {
+	// The three GO & SEARCH handlers (CD 7734 army, 775c ecology, 776d
+	// spice). The class is (occupation & 0x0f) >> 2 (troop_get_occupation_
+	// bits_2_and_3, 693b), which picks the menu and so the handler.
+	if (id < 1 || id > kTroops)
+		return -1;
+	const byte *r = _state.vars + kTroopTable + (id - 1) * kTroopSize;
+	const byte eq = r[kTroopEquipment];
+	const uint cls = (r[kTroopOccupation] & 0x0f) >> 2;
+	if (cls == 0) {
+		// 776d: a harvester (bit 7), then an orni (bit 6).
+		if (!(eq & 0x80))
+			return 0;
+		return (eq & 0x40) ? -1 : 1;
+	}
+	if (cls == 1) {
+		// 7734: krys (0x20), laser guns (0x10), weirding modules (0x08), atomics (0x04).
+		for (uint item = 2; item <= 5; ++item)
+			if (!(eq & (0x80 >> item)))
+				return (int)item;
+		return -1;
+	}
+	// 775c: bulbs (0x02).
+	return (eq & 0x02) ? -1 : 6;
+}
+
+bool World::searchEquipmentHere(uint id, uint item) {
+	// seg000:77d7 (CD only): the free count at the troop's own place (7f27,
+	// the troop itself counted out) must reach 1, or 2 for an orni at Paul's
+	// place (ds:1150, the place Paul is at or last left: currentLocation()).
+	const int here = troopPlace(id);
+	if (here < 0 || item >= 7)
+		return false;
+	byte counts[7];
+	placeFreeEquipment((uint)here, counts);
+	const byte need = (item == 1 && (uint)here == currentLocation()) ? 2 : 1;
+	if (counts[item] < need)
+		return false;
+	const byte before = troopByte(id, kTroopEquipment);
+	troopByte(id, kTroopEquipment) |= (byte)(0x80 >> item);
+	const byte after = troopByte(id, kTroopEquipment);
+	// troop_07d81: ds:3d the items added, ds:3e those removed, ds:3f = 0x40
+	// for an orni taken where Paul is ("Thanks for giving me your orni!").
+	const byte changed = before ^ after;
+	_state.setB(0x3d, after & changed);
+	_state.setB(0x3e, before & changed);
+	_state.setB(0x3f, ((after & changed & 0x40) && (uint)here == currentLocation()) ? 0x40 : 0);
+	// 7db1: an irrigation troop's viability is checked again (6c15).
+	if ((troopByte(id, kTroopOccupation) & 0x0f) == Troop::kIrrigation)
+		troopByte(id, kTroopOccupation) &= (byte)~Troop::kStopped;
+	_log.line(Common::String::format("Troops: troop %u takes item %u at its own place %d (equipment %#x)", id, item, here, after));
+	return true;
+}
+
+int World::equipmentSearchTarget(uint id, uint item, uint *distance) const {
+	// seg000:7f90 (floppy 8ca1).
+	if (id < 1 || id > kTroops || item >= 7)
+		return -1;
+	const uint16 hereOffset = READ_LE_UINT16(_state.vars + kTroopTable + (id - 1) * kTroopSize + kTroopLocation);
+	const int here = placeIndex(hereOffset);
+	if (here < 0)
+		return -1;
+	const Location h = location((uint)here);
+	uint16 best = 0xffff;
+	int target = -1;
+	for (uint i = 2; i < locationCount(); ++i) { // di = 0x138: the palaces are not searched
+		const Location l = location(i);
+		if ((l.status & 0x80) || l.type >= Location::kFortressMin || (int)i == here)
+			continue;
+		const int16 dLng = (int16)(uint16)(l.longitude - h.longitude);
+		const int16 dLat = (int16)(uint16)(l.latitude - h.latitude);
+		const uint16 aLng = (uint16)(dLng < 0 ? -dLng : dLng);
+		const uint16 aLat = (uint16)(dLat < 0 ? -dLat : dLat);
+		// 7fcf-7fe6: dl = |dlng| >> 8; the larger (by low bytes) of that and
+		// |dlat|; 50 or more is too far; a village counts a quarter.
+		uint16 dx = (uint16)((aLng >> 8) & 0xff);
+		if ((byte)dx < (byte)aLat)
+			dx = aLat;
+		if ((byte)dx >= 0x32)
+			continue;
+		if (l.type >= Location::kVillageMin)
+			dx >>= 2;
+		if (dx >= best)
+			continue;
+		byte counts[7];
+		placeFreeEquipment(i, counts);
+		if (!counts[item])
+			continue;
+		// 8018: the troops already marching there for the same item (bits
+		// 0-1 set, not on their way back) each take one.
+		for (uint t = 1; t < kTroops; ++t) {
+			const byte *r = _state.vars + kTroopTable + (t - 1) * kTroopSize;
+			if (!(r[kTroopOccupation] & kMoving) || (r[kTroopOccupation] & 3) != 3)
+				continue;
+			if (READ_LE_UINT16(r + kTroopLocation) != placeOffset(i) || READ_LE_UINT16(r + kTroopDepC) == placeOffset(i) ||
+					r[kTroopDepE] != item)
+				continue;
+			if (counts[item])
+				--counts[item];
+		}
+		// 804c: one orni stays for Paul where he is, before the worms (phase 0x50).
+		if (i == currentLocation() && _state.b(0x2a) < 0x50 && counts[1])
+			--counts[1];
+		if (!counts[item])
+			continue;
+		best = dx;
+		target = (int)i;
+	}
+	if (distance)
+		*distance = best;
+	return target;
+}
+
+bool World::startEquipmentSearch(uint id, uint item, uint target) {
+	// seg000:77b4: +0e = item | bit << 8, +0c = the place left, then 84a6.
+	const int from = troopPlace(id);
+	if (from < 0 || item >= 7)
+		return false;
+	WRITE_LE_UINT16(&troopByte(id, kTroopDepE), (uint16)(item | ((0x80u >> item) << 8)));
+	WRITE_LE_UINT16(&troopByte(id, kTroopDepC), placeOffset((uint)from));
+	_log.line(Common::String::format("Troops: troop %u goes from place %d to place %u to search for item %u", id, from, target, item));
+	return issueMoveOrder(id, target);
+}
+
 void World::troopArrive(uint id) {
 	// troop_arrive_at_destination, seg000:8357.
 	const int dest = troopPlace(id);
@@ -415,6 +597,44 @@ void World::troopArrive(uint id) {
 	WRITE_LE_UINT16(&troopByte(id, kTroopLongitude), d.longitude);
 	WRITE_LE_UINT16(&troopByte(id, kTroopLatitude), (uint16)d.latitude);
 	byte &occ = troopByte(id, kTroopOccupation);
+	if (friendlyPlace(index) && !(d.status & 0x02)) {
+		// 83a7-83ba: a friendly place, not under attack; espionage and
+		// attack (5, 6) read as 0 here. Occupation bits 0-1 set (3, 7, 0x0b)
+		// is GO & SEARCH FOR EQUIPMENT.
+		const byte low = occ & 0x0f;
+		if (low != 5 && low != 6 && (low & 3) == 3) {
+			const uint16 home = READ_LE_UINT16(&troopByte(id, kTroopDepC));
+			uint16 wanted = READ_LE_UINT16(&troopByte(id, kTroopDepE));
+			if (placeOffset(index) != home) {
+				// seg000:841f (floppy 911b): at the searched place. The free
+				// count (7f27: the stock less what the troops there hold; the
+				// arriving troop is not linked) gives the item: the place's
+				// count drops, the troop's bit is set and +0f (the bit still
+				// wanted) is cleared. Either way the troop turns back without
+				// stopping (+04 = +0c) and stays on the march.
+				const uint item = wanted & 0xff;
+				byte counts[7];
+				placeFreeEquipment(index, counts);
+				const bool found = item < 7 && counts[item];
+				if (found) {
+					byte &count = locationByte(index, 0x14 + item);
+					count = count ? count - 1 : 0;
+					troopByte(id, kTroopEquipment) |= (byte)(wanted >> 8);
+					wanted &= 0x00ff;
+				}
+				WRITE_LE_UINT16(&troopByte(id, kTroopDepE), wanted);
+				WRITE_LE_UINT16(&troopByte(id, kTroopLocation), home);
+				_log.line(Common::String::format("Troops: troop %u reaches place %u searching for item %u: %s; it goes back to place %d",
+						id, index, item, found ? "found, taken" : "none free", placeIndex(home)));
+				return;
+			}
+			// seg000:844d: home again; bits 0-1 go and the class's first job
+			// (0 spice mining, 4 military training, 8 irrigation) restarts.
+			occ &= 0xfc;
+			_log.line(Common::String::format("Troops: troop %u is back at place %u from the search (%s, equipment %#x)", id,
+					index, (wanted & 0xff00) ? "nothing found" : "item brought", troopByte(id, kTroopEquipment)));
+		}
+	}
 	occ &= ~kMoving;
 	linkTroop(id, index);
 	registerEquipment(id, index, +1);

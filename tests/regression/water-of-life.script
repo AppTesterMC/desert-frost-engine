@@ -1,0 +1,12 @@
+# The Water of Life (scripts/check_water_of_life.sh): the setup
+# (dune_story_setup=water-of-life) puts Paul in a sietch's room 4 with
+# Stilgar and answers his offer three ways (REFUSE; ACCEPT with charisma 120,
+# Paul comes to three hours later and Jessica's lesson makes the range
+# unlimited; ACCEPT with charisma 50, Paul dies); everything happens during
+# the setup.
+#
+# Comments after '#' on a command line say what a click hits and what a
+# wait lets finish; scripts/dune_script_trace.py prints what each line did.
+wait 15000              # the story setup runs (the three offers and Jessica's lesson)
+checkpoint water-of-life-end
+quit

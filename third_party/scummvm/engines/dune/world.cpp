@@ -34,6 +34,7 @@
 #include "dune/amiga.h"
 #include "dune/world.h"
 
+#include "common/config-manager.h"
 #include "common/endian.h"
 #include "common/file.h"
 #include "common/util.h"
@@ -612,6 +613,16 @@ void World::stageSmugglers(uint index) {
 			_state.vars[p + 2] |= 8;
 		}
 		_state.setB(0x1e, since);
+		// No offer yet (ds:9d), no choice (ds:9f), and the offers start
+		// after a random item (ds:0's low bits modulo the goods on sale,
+		// ds:1141): the item word of placeholder 0x83 (ds:11f1).
+		_state.setB(0x9d, 0);
+		byte start = (byte)(_state.w(GameState::kRandomBits) & 7);
+		const byte goods = var(0x1141);
+		while (goods && start >= goods)
+			start -= goods;
+		_state.setW(_state.nameTable + 6, (uint16)(_itemWords + start));
+		_state.setB(0x9f, 0);
 		return;
 	}
 }
@@ -662,10 +673,10 @@ uint World::contactRange() const {
 uint World::raiseContactRange() {
 	uint16 range = (uint16)contactRange();
 	if (_state.b(0x0a) & 2) {
-		addCharisma(0x28);
+		changeCharisma(0x28); // seg000:6f78, with the troops' motivation
 		range = (uint16)(0xffce + 0x14);
 	} else if (range == 1) {
-		addCharisma(10);
+		changeCharisma(10);
 		range = 10 + 0x14;
 	} else {
 		range = (uint16)(range + 0x14);
@@ -1146,9 +1157,9 @@ void World::runPeriod() {
 		if (sighting)
 			addSighting(sighting);
 	}
-	if (timeSlot() == 8 && shipmentReminderDue())
+	if (troopEvents && timeSlot() == 8 && shipmentReminderDue())
 		queueVision(0x30b); // actions_time_in_day_8 (seg000:1dda)
-	if (timeSlot() == 15 && (rollRandom(2) & 1)) {
+	if (troopEvents && timeSlot() == 15 && (rollRandom(2) & 1)) {
 		// seg000:1d10: every Harkonnen troop of 1..199 (x 10 men) gains ten men.
 		for (uint id = 1; id <= kTroops; ++id) {
 			const Troop t = troop(id);
@@ -1156,11 +1167,22 @@ void World::runPeriod() {
 				++troopByte(id, 26);
 		}
 	}
-	if (timeSlot() == 0)
+	if (troopEvents && timeSlot() == 0)
 		ecologyNewDay(); // seg000:63f0, on the new day
-	// seg000:1b86: the current place is staged again for the conditions.
-	stageLocationForConditions(currentLocation());
+	// seg000:1b86: the current place is staged again for the conditions
+	// (skipped with the rest from stage 7 on, seg000:1b5e).
+	if (troopEvents)
+		stageLocationForConditions(currentLocation());
 	if (timeSlot() == 0) {
+		// The new-day hook (CD seg000:1c62, floppy 1fa5) runs before the
+		// stage-7 gate: contact_distance_related ds:d5 grows by one a day
+		// once it is 1..0xfe (0 stays 0, 0xff wraps to 0 and stays 0xff).
+		// Jessica's lesson sets it to 0x80 - range / 6 (seg000:a1bf); above
+		// 0x80 she offers the next one (her lines 76-78), which is how the
+		// Water of Life's ds:d5 = 0xff reaches her at once.
+		const byte d5 = (byte)(_state.b(0xd5) + 1);
+		if (d5 >= 2)
+			_state.setB(0xd5, d5);
 		// New day (seg000:1c46): the Harkonnen production, sum of density / 8
 		// over the places they still work, plus some chance (seg000:1cda).
 		uint sum = 0;
@@ -1170,10 +1192,16 @@ void World::runPeriod() {
 				sum += l.spiceDensity / 8;
 		}
 		_state.setW(0xa8, (uint16)(sum + rollRandom(sum / 16 + 1)));
-		// Today's production (ds:a6): stock gained since yesterday.
+		// Today's production (ds:a6, seg000:1c6e): the stock gained since
+		// yesterday plus what was spent today (shipments, smugglers' bills,
+		// ds:1172, which starts again at 0); yesterday's stock is ds:1170.
 		const uint16 stock = _state.w(kSpiceStock);
-		_state.setW(0xa6, (uint16)(stock >= _state.w(0x1170) ? stock - _state.w(0x1170) : 0));
-		_state.setW(0x1170, stock);
+		const uint16 spent = word(0x1172);
+		setWord(0x1172, 0);
+		const uint32 gained = (uint32)spent + stock;
+		_state.setW(0xa6, (uint16)(gained >= word(0x1170) ? gained - word(0x1170) : 0));
+		setWord(0x1170, stock);
+		smugglerRestock(); // seg000:1ca5
 		// The spice troops at work, for the logs (the harvest is per period).
 		uint miners = 0, rate = 0, idle = 0;
 		for (uint id = 1; id < kTroops; ++id) {
@@ -1208,6 +1236,32 @@ uint World::timeSlot() const {
 
 uint World::spiceStock() const {
 	return _state.w(kSpiceStock) * 10u;
+}
+
+void World::rollRoomRotation() {
+	// CD loc_14FB0 (the end of the landing sequence): ds:0xC5 = rand's al.
+	// sal_read_position_markers adds its low nibble to each person's group
+	// before taking the slot, so people stand elsewhere after every flight.
+	// A comparison run replays the original's bytes, read from its dumps
+	// (dune_room_rotations=5,15,132,217: one per landing, in order).
+	byte value = (byte)lcgRand();
+	if (ConfMan.hasKey("dune_room_rotations")) {
+		const Common::String list = ConfMan.get("dune_room_rotations");
+		uint index = 0;
+		for (const char *p = list.c_str(); *p; ) {
+			const char *end = strchr(p, ',');
+			if (index++ == _roomRotations) {
+				value = (byte)atoi(p);
+				break;
+			}
+			if (!end)
+				break;
+			p = end + 1;
+		}
+		++_roomRotations;
+	}
+	_state.setB(0xc5, value);
+	_log.line(Common::String::format("Room rotation: ds:C5 = %u", _state.b(0xc5)));
 }
 
 void World::markDiscovered(uint index) {

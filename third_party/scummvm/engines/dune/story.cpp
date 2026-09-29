@@ -245,9 +245,145 @@ void World::bargainChoice(byte choice) {
 	_state.setB(kArguing, (byte)(_state.b(kArguing) + 1));
 }
 
-void World::duncanAccept() {
+bool World::smugglerOffer() {
+	// seg000:23a5-23d4, after event 8's phase, roll and date: the next item
+	// after the current word that the smugglers still have, at most two
+	// times round the goods on sale (ds:1141); its price is ds:9d.
+	const uint16 p = READ_LE_UINT16(&_state.vars[kCurrentSmuggler]);
+	if (p < kSmugglers || p + kSmugglerRecord > GameState::kSize)
+		return false;
+	const byte goods = var(0x1141);
+	const uint16 names = _state.nameTable;
+	byte item = (byte)(_state.w(names + 6) - _itemWords);
+	uint turns = 2;
+	for (;;) {
+		++item;
+		while (item >= goods) {
+			item = (byte)(item - goods);
+			if (--turns == 0 || !goods) {
+				_log.line("Smugglers: nothing to trade");
+				return false;
+			}
+		}
+		if (_state.vars[p + 4 + item])
+			break;
+	}
+	_state.setW(names + 6, (uint16)(_itemWords + item));
+	_state.setB(0x9d, (byte)((_state.vars[p + 9 + item] & 0x7f) << 1));
+	_log.line(Common::String::format("Smugglers: offer item %u for %u kg (%u in stock)", item, _state.b(0x9d) * 10,
+			_state.vars[p + 4 + item]));
+	return true;
+}
+
+void World::smugglerBuy(uint p) {
+	// seg000:23e6: the price goes on the bill, the item into the stock of
+	// the place Paul is at (ds:114e, +0x14 + item): someone must fetch it.
+	_state.vars[p + 2] &= 0x9f;
+	const byte price = _state.b(0x9d);
+	_state.setB(0x9d, 0);
+	_state.setW(0x20, (uint16)(_state.w(0x20) + price));
+	const uint16 bill = (uint16)(READ_LE_UINT16(&_state.vars[p + 0x0e]) + price);
+	WRITE_LE_UINT16(&_state.vars[p + 0x0e], bill);
+	if (bill == price)
+		++_state.vars[0x22];
+	_state.vars[p + 0x10] = (byte)(_state.w(GameState::kGameTime) >> 4);
+	const byte item = (byte)(_state.w(_state.nameTable + 6) - _itemWords);
+	if (item < 5)
+		--_state.vars[p + 4 + item];
+	const uint place = currentLocation();
+	uint count = 0;
+	if (place < locationCount() && item < 7) {
+		byte &c = _state.vars[Location::kTableOffset + place * Location::kRecordSize + 0x14 + item];
+		count = ++c;
+	}
+	_log.line(Common::String::format("Smugglers: bought item %u for %u kg, bill %u kg, place %u count %u", item,
+			price * 10, bill * 10, place, count));
+}
+
+void World::smugglerChoice(byte choice) {
+	// seg000:241a ACCEPT, 2432 REFUSE, 2453 ARGUE with speaker 13; then the
+	// common tail 2496: ds:9f, ds:1a + 1, and the talk goes on.
+	const uint16 p = READ_LE_UINT16(&_state.vars[kCurrentSmuggler]);
+	const bool valid = p >= kSmugglers && p + kSmugglerRecord <= GameState::kSize;
+	if (valid && choice == 1) {
+		smugglerBuy(p);
+	} else if (valid && choice == 2) {
+		if (!lcgRandMasked(7)) {
+			_state.setB(0x9e, (byte)(_state.b(0x9e) | 0x10)); // "Eh! ... I'm losing money!"
+			choice = 3;
+			_log.line("Smugglers: REFUSE, losing money");
+		} else {
+			_state.setB(0x9d, 0); // he looks for something else
+			_log.line("Smugglers: REFUSE");
+		}
+	} else if (valid && choice == 3) {
+		const uint16 r = lcgRandMasked(3);
+		if (!r) {
+			_state.setB(0x9e, (byte)(_state.b(0x9e) | 0x10));
+			_log.line("Smugglers: ARGUE, losing money");
+		} else {
+			_state.setB(0x9e, (byte)((_state.b(0x9e) + 1) & 3));
+			const byte a = (byte)((r & 1) + _state.b(kArguing));
+			if (a >= _state.vars[p + 1]) {
+				_state.setB(0x9d, 0); // "Forget it!" (or "I never haggle")
+				_log.line("Smugglers: ARGUE, forget it");
+			} else {
+				const byte price = _state.b(0x9d);
+				_state.setB(0x9d, (byte)(price - (price >> 3))); // 23d5
+				_log.line(Common::String::format("Smugglers: ARGUE, cut to %u kg", _state.b(0x9d) * 10));
+			}
+		}
+	}
+	_state.setB(kChoice, choice);
+	_state.setB(kArguing, (byte)(_state.b(kArguing) + 1));
+}
+
+void World::smugglerRestock() {
+	// seg000:1ca5: one timer-random word for the day, two bits per refill;
+	// a visited record's sold-out goods whose price has bit 7 get 0-3.
+	uint16 r = (uint16)rollRandom(0);
+	uint refills = 0;
+	for (uint p = kSmugglers; p + kSmugglerRecord <= GameState::kSize && _state.vars[p] < 0x14; p += kSmugglerRecord) {
+		if (!(_state.vars[p + 2] & 8))
+			continue;
+		for (int i = 4; i >= 0; --i) {
+			if (_state.vars[p + 4 + i] || !(_state.vars[p + 9 + i] & 0x80))
+				continue;
+			r = (uint16)((r << 2) | (r >> 14));
+			_state.vars[p + 4 + i] = (byte)(r & 3);
+			refills += _state.vars[p + 4 + i];
+		}
+	}
+	if (refills)
+		_log.line(Common::String::format("Smugglers: restocked %u item(s)", refills));
+}
+
+void World::duncanAccept(bool smugglerBill) {
 	// seg000:24ee: an accepted offer is agreed; the shipment waits (ds:1158).
 	const byte choice = _state.b(kChoice);
+	if (smugglerBill) {
+		// The menu of action 5 (ds:476d = 1) was about the bill of the
+		// smuggler staged at ds:10b4 (2239).
+		const uint16 p = READ_LE_UINT16(&_state.vars[kCurrentSmuggler]);
+		if (p < kSmugglers || p + kSmugglerRecord > GameState::kSize)
+			return;
+		if (choice < 2) {
+			// 2517: the whole bill leaves the stock and counts as spent today.
+			const uint16 bill = READ_LE_UINT16(&_state.vars[p + 0x0e]);
+			WRITE_LE_UINT16(&_state.vars[p + 0x0e], 0);
+			--_state.vars[0x22];
+			_state.setW(kSpiceStock, (uint16)(_state.w(kSpiceStock) - bill));
+			setWord(kSpentToday, (uint16)(word(kSpentToday) + bill));
+			_log.line(Common::String::format("Smugglers: bill paid, %u kg (stock %u kg)", bill * 10,
+					_state.w(kSpiceStock) * 10));
+		} else {
+			// 2541 REFUSE: 0x40 ("are you still refusing to pay"); 252d ARGUE: 0x20.
+			_state.vars[p + 2] = (byte)((_state.vars[p + 2] & 0x9f) | (choice == 2 ? 0x40 : 0x20));
+			_log.line(Common::String::format("Smugglers: bill %s (flags %#x)", choice == 2 ? "refused" : "put off",
+					_state.vars[p + 2]));
+		}
+		return;
+	}
 	if (choice >= 2)
 		return;
 	const uint index = (uint)(_state.b(kArguing) - 1) & 3;

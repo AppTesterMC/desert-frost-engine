@@ -301,6 +301,7 @@ bool Conversation::hasLine(uint character, uint list, byte mask) const {
 }
 
 bool Conversation::findEntry() {
+	bool wrapped = false;
 	for (;;) {
 		uint offset = _searchOffset ? _searchOffset : _dialogue.listOffset(_character, _list);
 		Dialogue::Entry entry;
@@ -345,8 +346,17 @@ bool Conversation::findEntry() {
 		// its number is not a multiple of four (loc_194A5).
 		_searchOffset = 0;
 		++_list;
-		if (_oneList || (_list & 3) == 0 || _list >= Dialogue::kListsPerCharacter)
-			return false;
+		if (_oneList || (_list & 3) == 0 || _list >= Dialogue::kListsPerCharacter) {
+			// loc_194b9 (floppy 9f83): only the smuggler (speaker 13) starts
+			// again at his list 0, with the sentence mask 0x20: his first
+			// line (flag 0x20) stays said, the rest repeat, until a line
+			// ends the talk. Once per search here, so it cannot spin.
+			if (_oneList || _character != 13 || wrapped)
+				return false;
+			wrapped = true;
+			_list = 0;
+			_mask = 0x20;
+		}
 	}
 }
 

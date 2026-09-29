@@ -131,6 +131,7 @@ public:
 	void setRowText(uint row, const Common::String &text);
 	/** A greyed row: shown but not selectable (the verbs a troop cannot take yet). */
 	void setRowDisabled(uint row, bool disabled);
+	bool rowDisabled(uint row) const { return row < kCommandRows && _rowDisabled[row]; }
 	/** A COMMAND string by id (0-based), empty when out of range. */
 	Common::String commandString(uint16 index) const {
 		return index < _commandStrings.size() ? _commandStrings[index] : Common::String();

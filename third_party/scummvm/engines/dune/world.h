@@ -325,6 +325,8 @@ public:
 	uint spiceStock() const;  ///< kg
 	/** First arrival at a hidden place (seg000:425b): it becomes known. */
 	void markDiscovered(uint locationIndex);
+	/** The landing draws ds:0xC5, which rotates the room's standing slots (CD sub_14F0C, rand). */
+	void rollRoomRotation();
 	/** A phase the world asked for (Tuono-Harg found: 0x10), for the host to set; 0 none. */
 	byte takeRequestedPhase() {
 		const byte p = _requestedPhase;
@@ -426,8 +428,13 @@ public:
 	bool shipmentReminderDue() const;
 	/** Duncan's event 8 (seg000:2239): the offer ladder (22b1) and the smuggler bill he mentions (235f). */
 	void duncanOffers();
-	/** Duncan's event 9 (seg000:24ee): an accepted offer becomes the agreed amount. */
-	void duncanAccept();
+	/**
+	 * Duncan's event 9 (seg000:24ee): an accepted offer becomes the agreed
+	 * amount; with @p smugglerBill (the menu of action 5, ds:476d = 1) the
+	 * smuggler's bill is paid from the stock (2517), or marked refused (0x40,
+	 * 2541) or argued (0x20, 252d).
+	 */
+	void duncanAccept(bool smugglerBill = false);
 	/** Duncan's event 15 (seg000:24a3); returns the COMM sighting to post (0 none) and whether the talk ends. */
 	uint16 duncanClosing(bool &endTalk);
 	/** seg000:135ad: Paul enters the COMM room with Duncan after agreeing: the shipment goes. */
@@ -436,6 +443,18 @@ public:
 	void shipSpice(uint16 amount);
 	/** A menu choice of the bargaining menu (seg000:241a, 2432, 2453) for Duncan (not the smugglers). */
 	void bargainChoice(byte choice);
+	/**
+	 * The smugglers' trade. @p base is the 1-based COMMAND id of "a
+	 * spice-harvester" (the item words follow it: CD 0xe8, floppy 0xdc),
+	 * which the host looks up.
+	 */
+	void setItemWords(uint16 base) { _itemWords = base; }
+	/** Smuggler event 8's offer (seg000:23a5-23d4): the next item in stock and its price (ds:9d); false when none. */
+	bool smugglerOffer();
+	/** A bargaining-menu choice with the smuggler (seg000:241a ACCEPT, 2432 REFUSE, 2453 ARGUE; tail 2496). */
+	void smugglerChoice(byte choice);
+	/** The new day's refill of sold-out goods (seg000:1ca5-1cd9). */
+	void smugglerRestock();
 
 	/** comm_add_person_sighting (seg000:26da): (variant << 8) | person. Returns true when "a message has arrived" is queued. */
 	void addSighting(uint16 sighting);
@@ -530,6 +549,35 @@ public:
 	 */
 	bool issueMoveOrder(uint id, uint dest);
 	/**
+	 * GO & SEARCH FOR EQUIPMENT (CD seg000:7734 army, 775c ecology, 776d
+	 * spice; floppy 8498, 84c0, 84d1): the item the troop's class looks for,
+	 * 0 harvester .. 6 bulbs (a spice troop: harvester, then orni; army:
+	 * krys, laser guns, weirding modules, atomics; ecology: bulbs), or -1
+	 * when it has them all ("I have all the equipment I need!", ds:23 = 0x0f).
+	 */
+	int searchedEquipment(uint id) const;
+	/**
+	 * CD only (seg000:77d7, not in the floppy): the item is free at the
+	 * troop's own place (two ornis where Paul is, ds:1150), so the troop
+	 * takes it there; ds:3d/3e/3f are staged as MODIFY EQUIPMENT's tail
+	 * does (7d81). False when there is none to take.
+	 */
+	bool searchEquipmentHere(uint id, uint item);
+	/**
+	 * seg000:7f90 (floppy 8ca1): the nearest place with the item free, -1
+	 * none. Places 2.. (not the two palaces), known (status bit 7 clear),
+	 * not a fortress (type < 0x28), not the troop's own; distance
+	 * max(|dlng| >> 8, |dlat|) under 50, a quarter for a village (type >=
+	 * 0x21); the free count less the troops already marching there for the
+	 * same item (8018), and one orni kept for Paul's place before phase 0x50.
+	 */
+	int equipmentSearchTarget(uint id, uint item, uint *distance = nullptr) const;
+	/**
+	 * seg000:77b4-77bd: the march out (troop +0c the place left, +0e the
+	 * item and its bit, 84a6). The occupation (class | 3) is already set.
+	 */
+	bool startEquipmentSearch(uint id, uint item, uint target);
+	/**
 	 * The prospectors' destinations (ARRAY_PTR_Location_prospector_destinations,
 	 * CD ds:11d3, floppy 11e0): three place offsets, 0 ends the list.
 	 */
@@ -558,6 +606,21 @@ public:
 	 * motivation 30; returns false when no such pair exists.
 	 */
 	bool prepareQuarrelTest(uint &north, uint &south, uint &place);
+	/**
+	 * End-game test setups (dune_story_setup=ecology-win / endless-play /
+	 * final-battle): every Harkonnen fortress but @p keep (-1 none) becomes
+	 * a sietch with its Harkonnens gone, as if taken two days ago. Returns
+	 * the number of places still not Atreides.
+	 */
+	uint takeFortsForTest(int keep);
+	/** Point @p sietch's vegetation disc (bytes 0x0b-0x0e) at @p target with @p radius and spread it (seg000:6515). */
+	void greenOverForTest(uint sietch, uint target, uint radius);
+	/**
+	 * The final attack launched (ds:c2 = 6): @p count Fremen troops of 2000
+	 * men with every weapon attack the Harkonnen palace (occupation 6, the
+	 * palace in battle), as Stilgar's troops do when they arrive (8604).
+	 */
+	void finalBattleForTest(uint count, Common::Array<uint> &ids);
 	/** ESPIONAGE (seg000:6a45): march to the nearest hidden fort within 30 cells. */
 	bool startEspionage(uint id);
 	/** seg000:5274's distance between two places: max(|dlng| >> 8, |dlat|). */
@@ -617,6 +680,9 @@ private:
 	uint16 _ecologyLfsr = 1;
 	void raiseSkill(uint id, uint skillClass, byte amount);
 	uint16 _rngA = 1, _rngB = 1;
+	uint16 _itemWords = 0xe8; ///< the COMMAND id of "a spice-harvester" (setItemWords)
+	void smugglerBuy(uint record);
+	uint _roomRotations = 0; ///< landings so far, for dune_room_rotations
 	byte _paulFate = 0;
 	byte *troopRecord(uint id);
 	void unlinkTroop(uint id);
@@ -638,11 +704,14 @@ private:
 	void attackTick(uint id, uint index);
 	void afterBattleWonHired(uint index, bool fortress);
 	void battleWon(uint index);
+	/** location_battle_won_for_fortress (CD seg000:7443, floppy 81a7). */
+	void fortressWon(uint index);
+	void battleWonTail(uint index);
+	void gatherAtomics(uint index);
 	void battleLost(uint index);
 	void militaryTraining(uint id, uint index);
 	void espionageTick(uint id, uint index);
 	void palaceFalls();
-	void fortressTaken(uint index);
 	void paintArea(uint index, byte stage, uint radius);
 	template<typename F> void forDisc(uint16 longitude, int16 latitude, uint radius, int limit, F cell);
 	bool loadTablat();

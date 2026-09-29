@@ -30,6 +30,7 @@
  * notes/research/gameplay-rules.md.
  */
 
+#include "common/config-manager.h"
 #include "common/system.h"
 
 #include "graphics/paletteman.h"
@@ -253,6 +254,15 @@ void GameScreen::openComm(bool seen) {
 	dumpScreen(_system, "comm-list");
 }
 
+void GameScreen::stageVillageSmugglers() {
+	if (_desert || _world.placeType() != Location::kVillageMin)
+		return;
+	const uint16 harvester = _panel.findCommand("a spice-harvester");
+	if (harvester != 0xffff)
+		_world.setItemWords((uint16)(harvester + 1));
+	_world.stageSmugglers(_world.currentLocation()); // seg000:3166
+}
+
 void GameScreen::updateRoomVars() {
 	// current_room (ds:0b), current_scene (ds:8) and persons_in_room (ds:12),
 	// which the dialogue conditions and the story routines read.
@@ -267,18 +277,19 @@ void GameScreen::updateRoomVars() {
 				bits |= (uint16)(1 << people[i]);
 	}
 	_state.setW(GameState::kPersonsInRoom, bits);
-	if (!_desert && _world.placeType() == Location::kVillageMin)
-		_world.stageSmugglers(_world.currentLocation()); // seg000:3166
+	stageVillageSmugglers();
 	if (!_desert)
 		_world.stageLocationForConditions(_world.currentLocation());
 }
 
-bool GameScreen::roomEntryScan() {
+bool GameScreen::roomEntryScan(bool always) {
 	// The room-entry scan (seg000:35b4 via 36ee): with pending_room_action 5
 	// from the move (seg000:3fca), the first person here with a topic-4 line
 	// whose condition holds says it and the talk opens on them (93df); a
 	// person with no such line may deliver a queued vision message instead.
-	if (fastCapture() || _sceneActive || !loadDialogue())
+	// Capture runs skip it (@p always: a story step that needs it, the
+	// Water of Life's wake-up).
+	if ((fastCapture() && !always) || _sceneActive || !loadDialogue())
 		return false;
 	Common::Array<byte> people;
 	_world.peopleInRoom(people);
@@ -468,7 +479,10 @@ void GameScreen::checkIdle(uint32 now) {
 	uint16 id, location;
 	_world.vision(0, id, location);
 	const byte sender = id >> 8;
-	const bool present = sender < 16 && sender != 0x0f && ((_state.w(GameState::kPersonsInRoom) >> sender) & 1);
+	// seg000:2ad8: the sender in the room delivers it; a troop chief's
+	// (sender 0x0f) only at the place the message is about (ds:114e).
+	const bool present = sender < 16 && ((_state.w(GameState::kPersonsInRoom) >> sender) & 1) &&
+						 (sender != 0x0f || (!_desert && location == _world.placeOffset(_world.currentLocation())));
 	if (present && idle >= kIdleSpeakerMillis)
 		presentVision(false);
 	else if (idle >= kIdleDreamMillis)
@@ -645,6 +659,201 @@ void GameScreen::storySetup(const Common::String &what) {
 				_world.troop(north).occupation, _world.troop(north).dissatisfaction));
 		return;
 	}
+	if (what == "smugglers") {
+		// The smugglers' trade (scripts/check_smugglers.sh; the original's
+		// run: a Spice86 capture of the original, notes/smugglers.md):
+		// Tuono-Pyons (place 20, its smugglers' record ds:10e9) at phase
+		// 0x2c; talk: "let me see" makes the offer, ARGUE once, then ACCEPT
+		// the offer on the table. The item goes into the village's stock and
+		// the price on the bill. A day later the smuggler wants his bill
+		// paid; Duncan pays it from the stock (action 5, event 9).
+		const uint village = 20;
+		setGamePhase(0x2c);
+		travelTo(village);
+		const uint16 record = READ_LE_UINT16(&_state.vars[_world.ds(0x10b4)]);
+		_log.line(Common::String::format("Story setup: at place %u (type %#x), smugglers' record %#x, stock %u kg",
+				_world.currentLocation(), _world.placeType(), record, _world.spiceStock()));
+		auto count = [&](uint item) -> uint {
+			return _state.vars[Location::kTableOffset + village * Location::kRecordSize + 0x14 + item];
+		};
+		// Play a talk to its end; @p choices answer the bargaining menus in turn.
+		auto talk = [&](uint who, const Common::Array<byte> &choices) {
+			startConversation(who);
+			uint next = 0;
+			for (uint guard = 0; guard < 80 && inConversation(); ++guard) {
+				if (_talkBargain) {
+					if (next >= choices.size())
+						break; // STOP TALKING at the offer
+					// 0: ACCEPT a smuggler's bill (party 1), REFUSE anything else.
+					const byte c = choices[next++];
+					answerQuestion(c ? c : (_conversation->bargainParty() == 1 ? 1 : 2));
+					continue;
+				}
+				if (!talking())
+					break;
+				advanceConversation();
+			}
+			if (inConversation())
+				endConversation();
+		};
+		uint before[5];
+		for (uint i = 0; i < 5; ++i)
+			before[i] = count(i);
+		talk(World::kSmuggler, { 3, 1 }); // ARGUE, then ACCEPT
+		for (uint i = 0; i < 5; ++i)
+			if (count(i) != before[i])
+				_log.line(Common::String::format("Story setup: village item %u count %u -> %u", i, before[i], count(i)));
+		if (record >= 0x10d8 && record < 0x1140)
+			_log.line(Common::String::format("Story setup: bill %u kg, ds:22 = %u, stock %u kg",
+					READ_LE_UINT16(&_state.vars[record + 0x0e]) * 10, _state.b(0x22), _world.spiceStock()));
+		// The next day: the sold-out goods may be refilled, and the smuggler
+		// wants his bill paid first (condition 441 CD / 438 floppy).
+		_world.advanceTime(World::kSlotsPerDay - _world.timeSlot());
+		showRoom(1);
+		talk(World::kSmuggler, {});
+		// Duncan, with enough spice: the bill (his list 2, conditions 198-206).
+		if (record >= 0x10d8 && record < 0x1140) {
+			const uint16 bill = READ_LE_UINT16(&_state.vars[record + 0x0e]);
+			if (_world.spiceStock() / 10 <= bill)
+				_state.setW(0xa0, (uint16)(bill + 7));
+			_log.line(Common::String::format("Story setup: Duncan, stock %u kg, bill %u kg", _world.spiceStock(), bill * 10));
+		}
+		talk(3, { 0, 0, 0, 0 }); // REFUSE the Emperor's offer if it comes first, ACCEPT the bill
+		if (record >= 0x10d8 && record < 0x1140)
+			_log.line(Common::String::format("Story setup: after Duncan, bill %u kg, ds:22 = %u, stock %u kg",
+					READ_LE_UINT16(&_state.vars[record + 0x0e]) * 10, _state.b(0x22), _world.spiceStock()));
+		// Back at the village with the bill paid: a new offer.
+		showRoom(1);
+		talk(World::kSmuggler, {});
+		return;
+	}
+	if (what == "search-equipment") {
+		// GO & SEARCH FOR EQUIPMENT (scripts/check_search_equipment.sh):
+		// every step through the troop popup's rows over the map, as a
+		// player's taps. Troop 1 (Carthag-Tuek) in ecology looks for bulbs;
+		// troop 2 (Carthag-Harg) in the army for krys knives.
+		auto clickRow = [&](RowAction action) -> bool {
+			for (uint i = 0; i < Panel::kCommandRows; ++i) {
+				if (_rowActions[i] != action)
+					continue;
+				if (_panel.rowDisabled(i))
+					_log.line(Common::String::format("Story setup: row %u (%s) is greyed", i, _panel.commandText(i) ? _panel.commandText(i) : ""));
+				Common::Event event;
+				event.type = Common::EVENT_LBUTTONDOWN;
+				event.mouse = Common::Point(160, 163 + 8 * (int)i);
+				handleEvent(event);
+				return true;
+			}
+			_log.line("Story setup: no such row");
+			return false;
+		};
+		auto place = [&](uint index, uint offset) -> byte & {
+			return _state.vars[Location::kTableOffset + index * Location::kRecordSize + offset];
+		};
+		// The item only at the nearest other sietch 16-49 cells away (made
+		// known), or nowhere; @p atHome also puts one at the troop's own place.
+		auto stock = [&](uint from, uint item, bool anywhere, bool atHome) -> int {
+			int best = -1;
+			uint bestDistance = 0xffff;
+			const Location h = _world.location(from);
+			for (uint i = 2; i < _world.locationCount(); ++i) {
+				place(i, 0x14 + item) = 0;
+				const Location l = _world.location(i);
+				if (i == from || !l.isSietch())
+					continue;
+				const uint d = MAX<uint>((uint)ABS((int16)(uint16)(l.longitude - h.longitude)) >> 8, (uint)ABS(l.latitude - h.latitude));
+				// 16 cells or more, so the march does not end within the order's 7 sub-steps.
+				if (d >= 16 && d < 50 && d < bestDistance) {
+					bestDistance = d;
+					best = (int)i;
+				}
+			}
+			if (atHome)
+				place(from, 0x14 + item) = 1;
+			if (!anywhere || best < 0)
+				return -1;
+			place((uint)best, 10) &= 0x7f;
+			place((uint)best, 0x14 + item) = 1;
+			return best;
+		};
+		auto contact = [&](uint id, const char *when) {
+			openTroop(id, true);
+			_log.line(Common::String::format("Story setup: %s, troop %u says \"%s\"", when, id, _troopLine.c_str()));
+			for (uint g = 0; g < 4 && nextTroopLine(); ++g)
+				_log.line(Common::String::format("Story setup: %s, troop %u says \"%s\"", when, id, _troopLine.c_str()));
+			_mode = kMap;
+		};
+		auto order = [&](uint id) {
+			const byte before = _world.troop(id).motivation;
+			openTroop(id, true);
+			clickRow(kRowTroopOccupation);
+			clickRow(kRowSearchEquipment);
+			const byte motivation = _world.troop(id).motivation;
+			_log.line(Common::String::format("Story setup: after the order, troop %u occupation %#x equipment %#x at place %d, motivation %u -> %u, answer \"%s\"",
+					id, _world.troop(id).occupation, _world.troop(id).equipment, _world.troopPlace(id), before, motivation, _troopLine.c_str()));
+			_mode = kMap;
+		};
+		// Marches until the troop is home again (at most 24 periods).
+		auto march = [&](uint id, int target, bool takeAway) {
+			bool turned = false;
+			for (uint p = 0; p < 24 && (_world.troop(id).occupation & 0x40); ++p) {
+				if (takeAway && target >= 0)
+					place((uint)target, 0x14 + (READ_LE_UINT16(_state.vars + World::kTroopTable + (id - 1) * World::kTroopSize + 0x0e) & 0xff)) = 0;
+				_world.advanceTime(1);
+				const bool back = _world.troopPlace(id) != target;
+				if (back && !turned && (_world.troop(id).occupation & 0x40)) {
+					turned = true;
+					contact(id, "on the way back");
+				}
+			}
+			_log.line(Common::String::format("Story setup: troop %u home at place %d, occupation %#x, equipment %#x", id,
+					_world.troopPlace(id), _world.troop(id).occupation, _world.troop(id).equipment));
+		};
+		setGamePhase(0x14);
+		_world.setPosition(0, 10);
+		for (uint id = 1; id <= 2; ++id)
+			if (!_world.troop(id).hired())
+				_world.rallyTroop(id);
+		_world.setTroopOccupation(1, Troop::kIrrigation);
+		_world.setTroopOccupation(2, Troop::kMilitaryTraining);
+		_state.vars[World::kTroopTable + 0 * World::kTroopSize + 0x19] = 0;
+		_state.vars[World::kTroopTable + 1 * World::kTroopSize + 0x19] = 0;
+		const uint home1 = (uint)MAX(0, _world.troopPlace(1)), home2 = (uint)MAX(0, _world.troopPlace(2));
+		_log.line(Common::String::format("Story setup: troop 1 at place %u (occupation %#x), troop 2 at place %u (occupation %#x)",
+				home1, _world.troop(1).occupation, home2, _world.troop(2).occupation));
+		openMap(MapScreen::kFlat, false);
+		// 1. Below phase 0x10 the row is greyed (seg000:69f6).
+		_state.setB(GameState::kPhase, 0x0f);
+		openTroop(1, true);
+		clickRow(kRowTroopOccupation);
+		clickRow(kRowSearchEquipment);
+		_log.line(Common::String::format("Story setup: phase 0xf, troop 1 occupation %#x", _world.troop(1).occupation));
+		_mode = kMap;
+		_state.setB(GameState::kPhase, 0x14);
+		// 2. No bulbs anywhere: "I don't think I can find some bulbs ..." (0x0e).
+		stock(home1, 6, false, false);
+		order(1);
+		// 3. Bulbs at the nearest sietch: the march, the pickup, the way back.
+		const int target1 = stock(home1, 6, true, false);
+		_log.line(Common::String::format("Story setup: bulbs at place %d", target1));
+		order(1);
+		contact(1, "on the way out");
+		march(1, target1, false);
+		_log.line(Common::String::format("Story setup: place %d bulbs left %u", target1, target1 >= 0 ? place((uint)target1, 0x1a) : 0));
+		// 4. Everything the class needs: "I have all the equipment I need!" (0x0f).
+		order(1);
+		// 5. Krys at the nearest sietch, gone before troop 2 arrives: back with nothing.
+		const int target2 = stock(home2, 2, true, false);
+		_log.line(Common::String::format("Story setup: krys at place %d", target2));
+		order(2);
+		march(2, target2, true);
+		// 6. Krys at troop 2's own place: the CD takes them there (0x0c);
+		// the floppy only searches elsewhere, and finds none (0x0e).
+		stock(home2, 2, false, true);
+		order(2);
+		leaveMap();
+		return;
+	}
 	if (what == "celimyn") {
 		// Celimyn-Tuek (names 0x0c, 0x05): its discovery phase (location
 		// byte 0x0b) at new game, whether the flight search would find it
@@ -694,6 +903,18 @@ void GameScreen::storySetup(const Common::String &what) {
 		_log.line(Common::String::format("Story setup: the throne room after Leto's death, people:%s", list.c_str()));
 		return;
 	}
+	if (what == "ecology-win") {
+		ecologyWinSetup();
+		return;
+	}
+	if (what == "endless-play" || what == "final-battle") {
+		endlessPlaySetup(what == "endless-play");
+		return;
+	}
+	if (what == "water-of-life") {
+		waterOfLifeSetup();
+		return;
+	}
 	if (what == "comm") {
 		_state.setB(GameState::kPhase, 0x14);
 		_world.firstVision();
@@ -708,6 +929,320 @@ void GameScreen::storySetup(const Common::String &what) {
 		_world.setPosition(0, 8);
 		showRoom(8);
 	}
+}
+
+// ---- The Water of Life (scripts/check_water_of_life.sh) --------------------------------
+
+void GameScreen::waterOfLifeSetup() {
+	// Stilgar's offer (DIALOGUE 5 list 1, conditions 299-301: a sietch,
+	// room 4, ds:0a bit 1 clear), answered three ways: REFUSE, ACCEPT with
+	// charisma >= 100 (Paul lives, CD seg000:2ccf / floppy 2f96), then
+	// Jessica's lesson (a186: unlimited range), and ACCEPT below 100 (the
+	// death, ds:46d9 / floppy ds:4235 = 3). Stilgar travels with Paul.
+	_world.firstVision();
+	while (_world.visionCount())
+		_world.dequeueVision();
+	setGamePhase(0x50);
+	_pendingScene = 0;
+	// Stilgar met (ds:0a bit 4, persons_met ds:0e bit 5), Jessica too.
+	_state.vars[World::kPaulEvents] |= 0x10;
+	_state.setW(GameState::kPersonsMet, (uint16)(_state.w(GameState::kPersonsMet) | 0x22));
+	int sietch = -1;
+	for (uint i = 2; i < _world.locationCount() && sietch < 0; ++i) {
+		const Location l = _world.location(i);
+		if (!l.isSietch())
+			continue;
+		_world.setPosition(i, 1);
+		refreshRooms();
+		if (_rooms.size() >= 4)
+			sietch = (int)i;
+	}
+	if (sietch < 0) {
+		_log.line("Story setup: no sietch with a room 4");
+		return;
+	}
+	auto events = [&]() { return _state.b(World::kPaulEvents); };
+	auto report = [&](const char *when) {
+		_log.line(Common::String::format("Story setup: %s: ds:0a %#x, ds:d5 %#x, charisma %u, range %u, day %u period %u",
+				when, events(), _state.b(0xd5), _state.b(0x29), _world.contactRange(), _world.day(), _world.timeSlot()));
+	};
+	Common::String logged;
+	auto say = [&](const char *who) {
+		if (_mode == kTalk && !_talkLastPage.empty() && _talkLastPage != logged && (logged = _talkLastPage, true))
+			_log.line(Common::String::format("Story setup: %s says \"%s\"", who, _talkLastPage.c_str()));
+	};
+	// Talk to Stilgar until his question, answer it, then to the end.
+	auto offer = [&](byte choice) {
+		_world.setPosition((uint)sietch, 4);
+		showRoom(4);
+		startConversation(5);
+		for (uint g = 0; g < 20 && _mode == kTalk && !_talkBargain; ++g) {
+			say("Stilgar");
+			if (_talkEnded)
+				break;
+			advanceConversation();
+		}
+		if (!_talkBargain) {
+			_log.line("Story setup: Stilgar asks nothing");
+			return;
+		}
+		say("Stilgar");
+		answerQuestion(choice);
+		for (uint g = 0; g < 20 && _mode == kTalk && !_talkEnded; ++g) {
+			say("Stilgar");
+			advanceConversation();
+		}
+		say("Stilgar");
+		if (inConversation())
+			endConversation();
+	};
+	_state.setW(GameState::kPersonsWith, (uint16)(_state.w(GameState::kPersonsWith) | 0x20));
+	_state.vars[World::kPaulEvents] &= (byte)~0x0a;
+	_state.setB(0x29, 120);
+	_log.line(Common::String::format("Story setup: Stilgar at place %d room 4 (type %#x)", sietch, _world.placeType()));
+	report("start");
+	_log.line("Story setup: case 1, REFUSE");
+	offer(2);
+	report("after REFUSE");
+	_log.line("Story setup: case 2, ACCEPT with charisma 120");
+	offer(1);
+	report("after ACCEPT");
+	// Jessica's lesson with ds:d5 = 0xff (her lines 76-78, event 8, a186).
+	_state.setW(GameState::kPersonsWith, (uint16)(_state.w(GameState::kPersonsWith) | 0x02));
+	showRoom(_world.room());
+	startConversation(1);
+	for (uint g = 0; g < 20 && _mode == kTalk && !_talkEnded; ++g) {
+		say("Jessica");
+		advanceConversation();
+	}
+	say("Jessica");
+	if (inConversation())
+		endConversation();
+	report("after Jessica");
+	// A day later ds:d5 has not moved (0 or 0xff stay, seg000:1c62).
+	_world.advanceTime(World::kSlotsPerDay);
+	report("a day later");
+	_log.line("Story setup: case 3, ACCEPT with charisma 50");
+	_state.setW(GameState::kPersonsWith, (uint16)(_state.w(GameState::kPersonsWith) & ~0x02));
+	_state.vars[World::kPaulEvents] &= (byte)~0x0a;
+	_state.setB(0x29, 50);
+	offer(1);
+	report("after the fatal ACCEPT");
+}
+
+// ---- The end-game paths (scripts/check_ecology_win.sh, check_endless_play.sh) ---------
+
+namespace {
+Common::String placeLine(World &world, uint index) {
+	const Location l = world.location(index);
+	return Common::String::format("place %u type %#x status %#x density %u", index, l.type, l.status, l.spiceDensity);
+}
+} // namespace
+
+void GameScreen::ecologyWinSetup() {
+	// The vegetation's own route to the end (queue item 3b). Every fort but
+	// one is taken; a sietch's vegetation disc is pointed at the last fort,
+	// then at the Harkonnen palace. The disc's callback (CD seg000:653a,
+	// floppy 72da) takes a Harkonnen place under it through the fortress-won
+	// routine (CD 7443, floppy 81a7): the last fort starts the final attack
+	// (ds:c2 = 1, 7493 / 81f7) and Thufir says so. The CD spares the palace
+	// (6582: cmp di, 138h); the floppy takes it, and the Baron's hall is
+	// open: Paul walks in and the game ends.
+	firstVisionForSetup();
+	setGamePhase(0x58);
+	_pendingScene = 0;
+	int fort = -1, sietch = -1;
+	for (uint i = 2; i < _world.locationCount(); ++i) {
+		const Location l = _world.location(i);
+		if (fort < 0 && l.isFortress())
+			fort = (int)i;
+		else if (sietch < 0 && l.isSietch() && i != 0)
+			sietch = (int)i;
+	}
+	if (fort < 0 || sietch < 0) {
+		_log.line("Story setup: no fort or sietch");
+		return;
+	}
+	const uint left = _world.takeFortsForTest(fort);
+	_log.line(Common::String::format("Story setup: forts taken but place %d, %u Harkonnen place(s) left, stage %u, %s",
+			fort, left, _state.b(0xc2), placeLine(_world, (uint)fort).c_str()));
+	_world.greenOverForTest((uint)sietch, (uint)fort, 2);
+	_log.line(Common::String::format("Story setup: after the vegetation at place %d: stage %u, %s", fort,
+			_state.b(0xc2), placeLine(_world, (uint)fort).c_str()));
+	// Thufir's advice (DIALOGUE 2 list 1, condition 127: ds:c2 == 1).
+	byte *thufir = _state.vars + World::kCharacterTable + 2 * World::kCharacterSize;
+	thufir[0] = 10;
+	thufir[1] = Location::kPalace;
+	thufir[2] = 0x80;
+	thufir[3] = 1;
+	_state.setB(World::kUnread, 0); // no COMM message waiting ("View the message before anything else.")
+	_world.setPosition(0, 10);
+	showRoom(10);
+	Common::String logged;
+	startConversation(2);
+	for (uint g = 0; g < 30 && _mode == kTalk && !_talkEnded; ++g) {
+		if (_talkLastPage != logged) {
+			logged = _talkLastPage;
+			_log.line(Common::String::format("Story setup: Thufir says \"%s\"", logged.c_str()));
+		}
+		advanceConversation();
+	}
+	if (inConversation())
+		endConversation();
+	// A day on: no demand from the Emperor once ds:c2 is set (seg000:20ae).
+	const uint16 shipments = _state.b(World::kShipments);
+	_world.advanceTime(World::kSlotsPerDay);
+	_log.line(Common::String::format("Story setup: a day later, demands %u -> %u, stage %u", shipments,
+			_state.b(World::kShipments), _state.b(0xc2)));
+	// The palace under the disc.
+	_world.greenOverForTest((uint)sietch, 1, 2);
+	const bool held = _world.friendlyPlace(1);
+	_log.line(Common::String::format("Story setup: after the vegetation at the Harkonnen palace: %s, %s, stage %u",
+			placeLine(_world, 1).c_str(), held ? "taken" : "still Harkonnen", _state.b(0xc2)));
+	// Paul flies in (the arrival rule, seg000:503c) and walks to room 2.
+	forceRules(true);
+	_world.setPosition(1, 1);
+	if (arrivalIsFatal(1)) {
+		_log.line("Story setup: Paul is shot at the Harkonnen palace");
+		return;
+	}
+	_log.line("Story setup: Paul lands at the Harkonnen palace");
+	showRoom(1);
+	showRoom(2);
+	_log.line(Common::String::format("Story setup: in room 2 of the palace, phase %#x", _state.b(GameState::kPhase)));
+}
+
+void GameScreen::endlessPlaySetup(bool withPaul) {
+	// The endless play (queue item 3c). Stilgar's troops attack the palace
+	// (ds:c2 = 6). Without Paul the next period's attack callback (CD
+	// seg000:739e -> 73a9, floppy 8102 -> 810d) makes the shield fall: ds:c2
+	// 7, the world stops (1b5e), and the Baron's hall ends the game. With
+	// Paul there, MASSIVE ATTACK (CD 7317, floppy 807b) goes through the
+	// fortress-won routine instead (7419 -> 7429 -> 7443): the palace is
+	// held, ds:c2 goes back to 1, two days later it becomes a sietch
+	// (6e20), room 2 is only a room, and the Baron, Feyd-Rautha and the
+	// Emperor stand there as prisoners.
+	firstVisionForSetup();
+	setGamePhase(0x58);
+	_pendingScene = 0;
+	const uint left = _world.takeFortsForTest(-1);
+	Common::Array<uint> ids;
+	_world.finalBattleForTest(4, ids);
+	_log.line(Common::String::format("Story setup: %u Harkonnen place(s) left, %u troop(s) attack the palace, stage %u",
+			left, ids.size(), _state.b(0xc2)));
+	forceRules(true);
+	if (!withPaul) {
+		_world.advanceTime(1);
+		_log.line(Common::String::format("Story setup: a period later, stage %u, %s", _state.b(0xc2), placeLine(_world, 1).c_str()));
+		const byte d5 = _state.b(0xd5);
+		_world.advanceTime(World::kSlotsPerDay * 2);
+		_log.line(Common::String::format("Story setup: two days later, stage %u, %s, troop %u occupation %#x",
+				_state.b(0xc2), placeLine(_world, 1).c_str(), ids.empty() ? 0 : ids[0], ids.empty() ? 0 : _world.troop(ids[0]).occupation));
+		(void)d5;
+		_world.setPosition(1, 1);
+		if (arrivalIsFatal(1)) {
+			_log.line("Story setup: Paul is shot at the Harkonnen palace");
+			return;
+		}
+		showRoom(1);
+		showRoom(2);
+		_log.line(Common::String::format("Story setup: in room 2 of the palace, phase %#x", _state.b(GameState::kPhase)));
+		return;
+	}
+	// Paul rides in: the palace is in battle, he joins it (503c: ds:2b).
+	_world.setPosition(1, 1);
+	if (arrivalIsFatal(1)) {
+		_log.line("Story setup: Paul is shot at the Harkonnen palace");
+		return;
+	}
+	_log.line(Common::String::format("Story setup: Paul at the palace, battle %d", _battle ? 1 : 0));
+	if (ConfMan.hasKey("dune_setup_save")) {
+		// For the original: this state as Log 1 (an engine-written save).
+		showRoom(1);
+		saveSlot(0);
+		_log.line("Story setup: saved to Log 1 before the battle");
+		return;
+	}
+	bool won = false;
+	for (uint attempt = 0; attempt < 6 && !won && !_ending; ++attempt) {
+		won = _world.massiveAttack(1);
+		_log.line(Common::String::format("Story setup: MASSIVE ATTACK %u: %s, stage %u", attempt + 1, won ? "won" : "not won", _state.b(0xc2)));
+		if (battleCheck())
+			return;
+	}
+	if (!won)
+		return;
+	_battle = false;
+	_log.line(Common::String::format("Story setup: after the battle: %s, stage %u, friendly %d", placeLine(_world, 1).c_str(),
+			_state.b(0xc2), _world.friendlyPlace(1) ? 1 : 0));
+	{
+		Common::Array<uint> here;
+		_world.troopsAt(1, here);
+		Common::String occ;
+		for (uint i = 0; i < here.size(); ++i)
+			occ += Common::String::format(" %u:%#x", here[i], _world.troop(here[i]).occupation);
+		_log.line(Common::String::format("Story setup: troops at the palace:%s", occ.c_str()));
+	}
+	showRoom(1);
+	// Two days, periods one by one (seg000:6e20 on a new day, day >= won + 2).
+	for (uint p = 0; p < 2 * World::kSlotsPerDay + 1 && _world.location(1).type >= Location::kFortressMin; ++p)
+		_world.advanceTime(1);
+	_log.line(Common::String::format("Story setup: day %u: %s, stage %u", _world.day(), placeLine(_world, 1).c_str(), _state.b(0xc2)));
+	for (uint c = 9; c <= 11; ++c) {
+		const byte *r = _state.vars + World::kCharacterTable + c * World::kCharacterSize;
+		_log.line(Common::String::format("Story setup: character %u record %02x %02x %02x %02x", c, r[0], r[1], r[2], r[3]));
+	}
+	// Liet Kynes there too, to ask him along (his topic-5 line: ds:c2 != 0).
+	byte *kynes = _state.vars + World::kCharacterTable + 6 * World::kCharacterSize;
+	kynes[0] = 2;
+	kynes[1] = _world.location(1).type;
+	kynes[2] = 0x80;
+	kynes[3] = 2;
+	_world.setPosition(1, 1);
+	showRoom(1);
+	showRoom(2);
+	Common::Array<byte> people;
+	_world.peopleInRoom(people);
+	Common::String list;
+	for (uint i = 0; i < people.size(); ++i)
+		list += Common::String::format(" %u", people[i]);
+	_log.line(Common::String::format("Story setup: in room 2 of the palace, phase %#x, people:%s", _state.b(GameState::kPhase), list.c_str()));
+	Common::String logged;
+	auto talk = [&](uint who, bool come) {
+		startConversation(who);
+		for (uint g = 0; g < 30 && _mode == kTalk && !_talkEnded; ++g) {
+			if (_talkLastPage != logged) {
+				logged = _talkLastPage;
+				_log.line(Common::String::format("Story setup: %u says \"%s\"", who, logged.c_str()));
+			}
+			advanceConversation();
+		}
+		if (come && _mode == kTalk) {
+			companionVerb();
+			if (_talkLastPage != logged) {
+				logged = _talkLastPage;
+				_log.line(Common::String::format("Story setup: %u answers \"%s\"", who, logged.c_str()));
+			}
+			_log.line(Common::String::format("Story setup: COME WITH ME to %u: %s", who,
+					((_state.w(GameState::kPersonsWith) >> who) & 1) ? "comes" : "stays"));
+		}
+		if (inConversation())
+			endConversation();
+	};
+	talk(9, false);  // the Baron
+	talk(10, true);  // Feyd-Rautha
+	talk(11, true);  // the Emperor
+	talk(6, true);   // Liet Kynes
+	const uint16 shipments = _state.b(World::kShipments);
+	_world.advanceTime(World::kSlotsPerDay);
+	_log.line(Common::String::format("Story setup: a day later, demands %u -> %u, stage %u, phase %#x", shipments,
+			_state.b(World::kShipments), _state.b(0xc2), _state.b(GameState::kPhase)));
+}
+
+void GameScreen::firstVisionForSetup() {
+	_world.firstVision();
+	while (_world.visionCount())
+		_world.dequeueVision();
 }
 
 // ---- MODIFY EQUIPMENT ------------------------------------------------------------

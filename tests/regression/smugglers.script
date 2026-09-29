@@ -1,0 +1,11 @@
+# The smugglers' trade (scripts/check_smugglers.sh): the setup
+# (dune_story_setup=smugglers) lands at Tuono-Pyons, talks to the smuggler
+# (the offer, ARGUE, ACCEPT), passes a day (his bill line), has Duncan pay
+# the bill and talks to the smuggler again; everything happens during the
+# setup.
+#
+# Comments after '#' on a command line say what a click hits and what a
+# wait lets finish; scripts/dune_script_trace.py prints what each line did.
+wait 15000              # the story setup runs (the talks, a day, Duncan's payment)
+checkpoint smugglers-end
+quit

@@ -192,6 +192,36 @@ public:
 	byte bargainParty() const { return _bargainParty; }
 	/** Whether @p character's list @p list has a line to say now (no side effects). */
 	bool hasLine(uint character, uint list, byte mask) const;
+	/** Where the walk stands, to go on after an interruption (the Water of Life's room scan). */
+	struct Position {
+		uint character = 0, list = 0, searchOffset = 0;
+		byte mask = 0x80;
+		bool oneList = false, single = false, valid = false;
+	};
+	Position position() const {
+		Position p;
+		p.character = _character;
+		p.list = _list;
+		p.searchOffset = _searchOffset;
+		p.mask = _mask;
+		p.oneList = _oneList;
+		p.single = _single;
+		p.valid = true;
+		return p;
+	}
+	/** Go on from @p p (the next entry after the one said there). */
+	void resumeAt(const Position &p) {
+		_active = true;
+		_paused = _pendingFinish = _endAfter = _answered = false;
+		_character = p.character;
+		_list = p.list;
+		_searchOffset = p.searchOffset;
+		_mask = p.mask;
+		_oneList = p.oneList;
+		_single = p.single;
+		_pages.clear();
+		_pageIndex = 0;
+	}
 	/** sub_1a1e8: the conversation ends after the current line. */
 	void endAfterLine() { _endAfter = true; }
 

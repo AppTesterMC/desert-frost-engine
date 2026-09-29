@@ -373,7 +373,11 @@ bool MapScreen::loadGlobe() {
 	return true;
 }
 
-bool MapScreen::open(Mode mode, bool selectDestination) {
+bool MapScreen::open(Mode mode, bool selectDestination, bool fromFlatView) {
+	// The flat view's centre (ds:2144/2146) before the globe replaces it.
+	const bool seedFromView = fromFlatView && mode == kGlobe && _mode == kFlat;
+	const uint16 viewLongitude = _longitude;
+	const int16 viewLatitude = (int16)(_latitude + 18);
 	_mode = mode;
 	_selecting = selectDestination;
 	_destination = -1;
@@ -383,11 +387,18 @@ bool MapScreen::open(Mode mode, bool selectDestination) {
 	_flying = false;
 	_trail.clear();
 	_results = 0;
+	_resultsColours = false;
 	if (!loadGlobe())
 		return false;
 	if (mode == kFlat && !loadFlat())
 		return false;
 	centreOn(_world.currentLocation());
+	if (seedFromView) {
+		_longitude = viewLongitude;
+		_latitude = (int16)(viewLatitude - 18);
+		seedGlobe(viewLongitude, viewLatitude);
+	}
+	_creepStart = _system->getMillis();
 	return true;
 }
 
@@ -410,12 +421,48 @@ void MapScreen::centreOn(uint locationIndex) {
 	// the middle of the view, where the place should sit.
 	_latitude = CLIP<int16>((int16)(l.latitude - 18), -75, 75);
 	_longitude = l.longitude;
-	_rotation = l.longitude;
-	_tilt = CLIP<int>(l.latitude, -96, 96);
-	// Floppy CS:B983-B995 starts the globe at least 32 rows from the
-	// equator, exposing the territory around Paul's latitude.
+	seedGlobe(l.longitude, (int16)l.latitude);
+}
+
+void MapScreen::seedGlobe(uint16 longitude, int16 latitude) {
+	// set_globe_tilt_and_rotation (floppy CS:B974, CD seg000:ba75): the phase
+	// is the high word of 398 * longitude; the tilt is the latitude raised to
+	// at least 32 rows from the equator (unsigned compares at CS:B985-B992:
+	// 0..31 becomes +32, -31..-1 becomes -32), so the globe opens showing
+	// the territory north or south of Paul. A negative tilt brings the north
+	// towards the viewer (the Harkonnen zone on day 1: tilt -32).
+	_rotation = longitude;
+	_tilt = CLIP<int>(latitude, -98, 98);
 	if (_mode == kGlobe)
 		_tilt = _tilt < 0 ? MIN(_tilt, -32) : MAX(_tilt, 32);
+}
+
+void MapScreen::centreOnPlayer() {
+	// CD seg000:ba9e steps towards the player's map position until nothing is
+	// clamped; the end state is the position itself, the tilt within +-98.
+	const Location l = _world.location(_world.currentLocation());
+	_rotation = l.longitude;
+	_tilt = CLIP<int>((int16)l.latitude, -98, 98);
+	_creepStart = _system->getMillis();
+}
+
+void MapScreen::setGlobePhase(int phase) {
+	phase %= 398;
+	if (phase < 0)
+		phase += 398;
+	// The smallest longitude with (398 * longitude) >> 16 == phase.
+	_rotation = (uint16)(((uint32)phase * 65536u + 397u) / 398u);
+}
+
+bool MapScreen::creep(uint32 now) {
+	if (_mode != kGlobe)
+		return false;
+	if (now - _creepStart < kCreepMillis)
+		return false;
+	const uint32 steps = (now - _creepStart) / kCreepMillis;
+	_creepStart += steps * kCreepMillis;
+	setGlobePhase((int)globePhase() + (int)(steps % 398));
+	return true;
 }
 
 void MapScreen::centreOnPosition(uint16 longitude, int16 latitude) {
@@ -434,9 +481,9 @@ void MapScreen::scroll(int dx, int dy) {
 	_latitude = CLIP<int16>((int16)(_latitude + dy * 12), -75, 75);
 }
 
-void MapScreen::rotate(int deltaRotation, int deltaTilt) {
-	_rotation = (uint16)(_rotation + deltaRotation);
-	_tilt = CLIP<int>(_tilt + deltaTilt, -96, 96);
+void MapScreen::rotate(int deltaPhase, int deltaTilt) {
+	setGlobePhase((int)globePhase() + deltaPhase);
+	_tilt = CLIP<int>(_tilt + deltaTilt, -98, 98);
 }
 
 int MapScreen::hitLocation(int x, int y) const {
@@ -1048,7 +1095,7 @@ void MapScreen::draw(Graphics::ManagedSurface &surface, const Panel &panel, cons
 		}
 	} else {
 		drawDuneGlobe(_system, *target, _resources, _world.map(), _rotation, _tilt, _results,
-				_world.location(_world.currentLocation()));
+				_world.location(_world.currentLocation()), _resultsColours);
 		memset(_index, 0xff, sizeof(_index)); // the globe has no location markers or hit boxes
 	}
 	if (_mode == kFlat) {

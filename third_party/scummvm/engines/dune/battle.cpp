@@ -291,50 +291,68 @@ void World::afterBattleWonHired(uint index, bool fortress) {
 }
 
 void World::battleWon(uint index) {
-	// seg000:7429 and, for a fortress, location_battle_won_for_fortress (7443).
+	// seg000:7429 (floppy 818d): "We won the battle ..." (message 7) unless
+	// Paul is there; a sietch or village (below 0x28) leaves the battle
+	// (743a) and its hired troops come back (75af); a fortress, and the
+	// Harkonnen palace won by MASSIVE ATTACK (7317 takes this path, never
+	// the final-attack callback 73a9), goes through 7443.
 	if (index != currentLocation() && (_state.b(kPaulEvents) & 1))
-		queueVision(7, placeOffset(index));
+		queueVision(0x0f07, placeOffset(index)); // 71b2: ah = 0x0f, a troop chief tells it
 	const Location l = location(index);
 	if (l.type < Location::kFortressMin) {
 		locationByte(index, 10) &= ~kStatusBattle;
 		afterBattleWonHired(index, false);
+		battleWonTail(index);
 	} else {
-		paintArea(index, 0x20, 5);
-		locationByte(index, 11) = (byte)((_state.w(GameState::kGameTime) >> 4) + 2);
-		changeCharisma(4);
-		for (uint id = 1; id <= kTroops; ++id) {
-			byte *t = troopRecord(id);
-			if (t[0] && !(t[kOcc] & 0xa0))
-				t[kMotivation] = (byte)MIN<uint>(100, t[kMotivation] + 1);
-		}
-		locationByte(index, 10) |= kStatusHeld;
-		afterBattleWonHired(index, true);
-		// seg000:75ea: the fort's Harkonnens become free Fremen while there
-		// is a slot below 8; the others leave the game.
-		Common::Array<uint> ids;
-		troopsAt(index, ids);
-		for (uint i = 0; i < ids.size(); ++i) {
-			byte *t = troopRecord(ids[i]);
-			if (!harkonnen(t) || !(t[kOcc] & 0x80))
-				continue;
-			unlinkTroop(ids[i]);
-			t[kBits] &= ~0x80;
-			const uint slot = linkTroop(ids[i], index);
-			if (slot >= 8) {
-				removeFromPlay(ids[i]);
-				continue;
-			}
-			const uint16 r = lcgRandMasked(0x0f7f);
-			const uint16 s = (uint16)(lcgRandMasked(0x1f1f) + 0x0a0a);
-			t[kOcc] = 0xa0;
-			t[kPopulation] = (byte)((r & 0x7f) + 0x64);
-			t[kMotivation] = (byte)(((r >> 8) & 0x0f) + 0x14);
-			t[0x16] = (byte)s;
-			t[kArmy] = (byte)(s >> 8);
-			t[kEquipment] = 0;
-			t[kBits] &= ~0x10;
-		}
+		fortressWon(index);
 	}
+}
+
+void World::fortressWon(uint index) {
+	// location_battle_won_for_fortress (CD seg000:7443, floppy 81a7), also
+	// called by the vegetation (653a / floppy 72da): the land round it turns
+	// Atreides (radius 5, 644e), the place is held (status bit 3) until the
+	// day after tomorrow (+0x0b), when a troop there turns it into a sietch
+	// (6e20); charisma + 4 (6f78) and every troop's motivation + 1 (6f56).
+	paintArea(index, 0x20, 5);
+	locationByte(index, 11) = (byte)((_state.w(GameState::kGameTime) >> 4) + 2);
+	changeCharisma(4);
+	for (uint id = 1; id <= kTroops; ++id) {
+		byte *t = troopRecord(id);
+		if (t[0] && !(t[kOcc] & 0xa0))
+			t[kMotivation] = (byte)MIN<uint>(100, t[kMotivation] + 1);
+	}
+	locationByte(index, 10) |= kStatusHeld;
+	afterBattleWonHired(index, true);
+	// seg000:75ea: the fort's Harkonnens become free Fremen while there
+	// is a slot below 8; the others leave the game.
+	Common::Array<uint> ids;
+	troopsAt(index, ids);
+	for (uint i = 0; i < ids.size(); ++i) {
+		byte *t = troopRecord(ids[i]);
+		if (!harkonnen(t) || !(t[kOcc] & 0x80))
+			continue;
+		unlinkTroop(ids[i]);
+		t[kBits] &= ~0x80;
+		const uint slot = linkTroop(ids[i], index);
+		if (slot >= 8) {
+			removeFromPlay(ids[i]);
+			continue;
+		}
+		const uint16 r = lcgRandMasked(0x0f7f);
+		const uint16 s = (uint16)(lcgRandMasked(0x1f1f) + 0x0a0a);
+		t[kOcc] = 0xa0;
+		t[kPopulation] = (byte)((r & 0x7f) + 0x64);
+		t[kMotivation] = (byte)(((r >> 8) & 0x0f) + 0x14);
+		t[0x16] = (byte)s;
+		t[kArmy] = (byte)(s >> 8);
+		t[kEquipment] = 0;
+		t[kBits] &= ~0x10;
+	}
+	battleWonTail(index);
+}
+
+void World::battleWonTail(uint index) {
 	// seg000:7479: perhaps one captive raider; the other Harkonnens leave.
 	const uint keep = (lcgRand() & 3) == 0 ? 1 : 0;
 	uint kept = 0;
@@ -346,26 +364,48 @@ void World::battleWon(uint index) {
 			continue;
 		if (kept < keep) {
 			++kept;
-			t[kOcc] = 0xac;
+			t[kOcc] = 0xac; // 762a
 			t[kBits] |= 0x10;
 			t[kPopulation] = 0;
+			WRITE_LE_UINT16(t + kDepC, 0);
 			t[kEquipment] = 0;
 		} else {
 			removeFromPlay(ids[i]);
 		}
 	}
 	_log.line(Common::String::format("Battle: place %u is won, charisma %u", index, _state.b(kCharisma)));
-	// accumulate_harkonnen_spice_production (1cda): with only the palace
-	// left the final attack begins.
+	// seg000:7493-74ac (floppy 81f7-8211): accumulate_harkonnen_spice_production
+	// (1cda) also counts the places not Atreides (dl); with at most one
+	// left, final_attack_stage (ds:c2) is SET to 1 whatever it was, two
+	// characters' bit 1 goes, and 765e hands this place the planet's
+	// atomics beyond ten. So the last fort (by battle or by vegetation)
+	// starts the final attack, and a later battle won with the palace
+	// alone left - a Harkonnen raid, or the palace itself taken by MASSIVE
+	// ATTACK - puts it back to 1: past stage 7 the world would stop
+	// (seg000:1b5e), at 1 it goes on (the endless play).
 	uint hostile = 0;
 	for (uint i = 0; i < locationCount(); ++i)
 		if (!friendlyPlace(i))
 			++hostile;
-	if (hostile <= 1 && !_state.b(kFinalStage)) {
+	if (hostile <= 1) {
+		const byte before = _state.b(kFinalStage);
 		_state.setB(kFinalStage, 1);
 		_state.vars[0xff7] &= 0xfd;
 		_state.vars[0x1007] &= 0xfd;
-		_log.line("Battle: only the Harkonnen palace is left, final attack stage 1");
+		gatherAtomics(index);
+		_log.line(Common::String::format("Battle: %u Harkonnen place(s) left, final attack stage %u -> 1", hostile, before));
+	}
+}
+
+void World::gatherAtomics(uint index) {
+	// seg000:765e (floppy 83c2): the atomics of every place (byte 0x19,
+	// summed in a byte), less ten, are added to this place's.
+	byte sum = 0;
+	for (uint i = 0; i < locationCount(); ++i)
+		sum = (byte)(sum + locationByte(i, 0x19));
+	if (sum > 10) {
+		locationByte(index, 0x19) = (byte)(locationByte(index, 0x19) + sum - 10);
+		_log.line(Common::String::format("Battle: place %u gets %u atomics (now %u)", index, sum - 10, locationByte(index, 0x19)));
 	}
 }
 
@@ -567,20 +607,22 @@ void World::palaceFalls() {
 	// seg000:73a9: no battle at the palace. The troops there train, its
 	// Harkonnens leave, all Harkonnen land turns Atreides.
 	_state.setB(kFinalStage, (byte)(_state.b(kFinalStage) + 1));
+	// 73ad: every hired troop there (661d) takes occupation 4 (7399, the
+	// byte alone); 6e02/764d then removes the unhired Harkonnens (66b1).
 	Common::Array<uint> ids;
 	troopsAt(kHarkonnenPalace, ids);
 	for (uint i = 0; i < ids.size(); ++i) {
 		byte *t = troopRecord(ids[i]);
-		if (harkonnen(t) || (t[kOcc] & 0x80))
+		if (!(t[kOcc] & 0x80))
+			t[kOcc] = Troop::kMilitaryTraining;
+		else if (harkonnen(t))
 			removeFromPlay(ids[i]);
-		else
-			applyJob(ids[i], Troop::kMilitaryTraining);
 	}
 	Common::Array<byte> &m = map();
 	for (uint i = 0; i < m.size(); ++i)
 		if ((m[i] & 0x30) == 0x30)
 			m[i] = (byte)((m[i] & 0xcf) | 0x20);
-	queueVision(0x0a, placeOffset(kHarkonnenPalace));
+	queueVision(0x0f0a, placeOffset(kHarkonnenPalace)); // 73d1: "The shield is down ..." from a chief
 	_log.line(Common::String::format("Battle: the Harkonnen palace falls, final attack stage %u", _state.b(kFinalStage)));
 }
 

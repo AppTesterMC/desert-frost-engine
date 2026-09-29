@@ -6,7 +6,7 @@ offset XXXX. Usage: asm_range.py START END [asm path]. Blank lines are dropped.
 """
 import re, sys
 start, end = int(sys.argv[1], 16), int(sys.argv[2], 16)
-path = sys.argv[3] if len(sys.argv) > 3 else '/private/tmp/dune-refs/OpenRakis/asm/cd/DNCDPRG_RECENT.ASM'
+path = sys.argv[3] if len(sys.argv) > 3 else __import__('os').environ.get('DUNE_OPENRAKIS_ASM', 'DNCDPRG_RECENT.ASM')  # OpenRakis asm/cd listing
 lines = open(path, encoding='latin-1').read().split('\n')
 label = re.compile(r'^(?:sub|loc|locret|nullsub_\d+|_sub)_1([0-9A-F]{4})\b')
 on = False

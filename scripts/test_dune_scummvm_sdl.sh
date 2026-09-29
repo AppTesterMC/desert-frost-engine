@@ -86,7 +86,9 @@ elif [ "${1:-}" = "harness" ]; then
 		*) input_script=$(CDPATH= cd -- "$repo_root/$(dirname -- "$input_script")" && pwd)/$(basename -- "$input_script") ;;
 	esac
 	mkdir -p "$checkpoint_dir"
-	printf '[scummvm]\nsavepath=%s\ndune_input=%s\ndune_checkpoint_dir=%s\n' \
+	# The random generators are pinned (the landing's room rotation draws from
+	# them); an extra config's own dune_rng_seed comes later and wins.
+	printf '[scummvm]\nsavepath=%s\ndune_input=%s\ndune_checkpoint_dir=%s\ndune_rng_seed=1\n' \
 		"$run_root/saves" "$input_script" "$checkpoint_dir" > "$config"
 	if [ -n "$extra_config" ]; then
 		cat "$extra_config" >> "$config"

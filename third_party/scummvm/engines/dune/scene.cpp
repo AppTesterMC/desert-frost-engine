@@ -23,6 +23,7 @@
  */
 
 #include "common/config-manager.h"
+#include "common/file.h"
 #include "common/events.h"
 #include "common/random.h"
 #include "common/str.h"
@@ -67,11 +68,17 @@ bool isFastCapture() {
 
 // The capture runs also skip some rules (deaths, the ending, desert
 // landings) so their pictures stay put; the speedrun check keeps them all.
+bool g_rulesForced = false; ///< a story setup that checks a death or the ending (GameScreen::forceRules)
+
 bool skipsRules() {
-	return isFastCapture() && !ConfMan.hasKey("dune_speedrun");
+	return isFastCapture() && !ConfMan.hasKey("dune_speedrun") && !g_rulesForced;
 }
 
 } // namespace
+
+void GameScreen::forceRules(bool on) {
+	g_rulesForced = on;
+}
 
 namespace {
 
@@ -80,6 +87,29 @@ namespace {
 // dune-re, kept here so SEE DUNE MAP renders the actual resource data.
 enum GlobeSection { kFarNorth, kNearNorth, kNearSouth, kFarSouth };
 struct GlobeSectionLatitude { GlobeSection section; byte latitude; };
+
+} // namespace
+
+byte globeCellColour(byte cell, bool results) {
+	// The VGA driver's two pixel paths, chosen by the byte pair vga_globe_init
+	// patches from the results flag (floppy DUNEVGA 1D24, CD DNVGA 1E4A).
+	const byte terrain = cell & 0x0f, stage = cell & 0x30;
+	if (results) {
+		// SEE RESULTS (DUNEVGA 1DA3, DNVGA 1EC9): neutral 0x10 + t, Atreides
+		// (sprouting 0x10 or land 0x20) 0x20 + t, Harkonnen 0x30 + t; FRESK's
+		// 0x24-0x2f are the reds, 0x34-0x3f the blues.
+		if (!stage)
+			return 0x10 + terrain;
+		return stage == 0x30 ? 0x30 + terrain : 0x20 + terrain;
+	}
+	// STANDARD VISION (DUNEVGA 1D26, DNVGA 1E4C): sprouting sand (stage 0x10,
+	// terrain under 8) is drawn 12 higher, on FRESK's greens at 0x20-0x23.
+	if (stage == 0x10 && terrain < 8)
+		return 0x10 + terrain + 12;
+	return 0x10 + terrain;
+}
+
+namespace {
 
 bool drawRecoveredGlobe(Graphics::Surface &surface, const Common::Array<byte> &globdata,
 		const Common::Array<byte> &map, const Common::Array<byte> &tablat, uint16 rotation, int tilt, bool results = false) {
@@ -120,20 +150,17 @@ bool drawRecoveredGlobe(Graphics::Surface &surface, const Common::Array<byte> &g
 	for (int i = 98; i >= 2; --i) tiltTable[tiltCount++] = { kFarNorth, (byte)i };
 	if (tiltCount != kTiltEntries)
 		return false;
-	tilt = CLIP(tilt, -96, 96);
+	// globe_increment_tilt (CD seg000:ba15) keeps the tilt within +-98.
+	tilt = CLIP(tilt, -98, 98);
 
 	auto mapColour = [&](int offset) -> byte {
 		const int address = (int)kMapStart + offset;
 		if (address < 0 || address >= (int)map.size())
 			return 0;
 		const byte cell = map[address];
-		// Floppy DUNEVGA:1DA3 uses the live map's ownership bits in results:
-		// neutral 0x10, Atreides (including vegetation) 0x20, Harkonnen 0x30.
-		const byte stage = cell & 0x30;
-		const byte bank = results && stage ? (stage == 0x30 ? 0x30 : 0x20) : 0x10;
 		if (amigaRelease())
 			return terrainColour(cell & 0x0f); // the Amiga's ONMAP ramp (map.cpp); no ownership ramps
-		return (cell & 0x0f) | bank;
+		return globeCellColour(cell, results);
 	};
 
 	const int centerX = 159, centerY = 79;
@@ -300,8 +327,40 @@ bool projectGlobePlayer(const Common::Array<byte> &globdata,
 
 } // namespace
 
+namespace {
+
+// dune_globe_dump=<dir> (scripts/check_globe_results.sh): every globe draw
+// writes the sampler's palette indices before the panels and Paul's arrow
+// (globe-NNN.idx, rows 0-151), the live map (globe-NNN.map) and the phase,
+// the tilt and the mode (globe-NNN.txt), for scripts/globe_ref.py.
+void dumpGlobeState(const Graphics::Surface &surface, const Common::Array<byte> &map, uint16 rotation, int tilt, bool results) {
+	static uint counter = 0;
+	const Common::Path dir(ConfMan.get("dune_globe_dump"));
+	const Common::String name = Common::String::format("globe-%03u", counter++);
+	Common::DumpFile idx;
+	if (idx.open(dir.appendComponent(name + ".idx"), true)) {
+		for (int y = 0; y < 152 && y < surface.h; ++y)
+			idx.write(surface.getBasePtr(0, y), 320);
+		idx.close();
+	}
+	Common::DumpFile mapFile;
+	if (mapFile.open(dir.appendComponent(name + ".map"), true)) {
+		mapFile.write(map.data(), map.size());
+		mapFile.close();
+	}
+	Common::DumpFile info;
+	if (info.open(dir.appendComponent(name + ".txt"), true)) {
+		info.writeString(Common::String::format("phase %u tilt %d %s\n", (398u * rotation) >> 16, tilt,
+				results ? "results" : "standard"));
+		info.close();
+	}
+}
+
+} // namespace
+
 bool drawDuneGlobe(OSystem *system, Graphics::Surface &surface, Resource &resources,
-		const Common::Array<byte> &mapData, uint16 rotation, int tilt, uint results, const Location &player) {
+		const Common::Array<byte> &mapData, uint16 rotation, int tilt, uint results, const Location &player,
+		bool resultsColours) {
 	Common::Array<byte> globeData, tablatData, freskData;
 	if (!resources.load("GLOBDATA.HSQ", globeData)
 			|| !resources.load("TABLAT.BIN", tablatData) || !resources.load("FRESK.HSQ", freskData))
@@ -328,7 +387,11 @@ bool drawDuneGlobe(OSystem *system, Graphics::Surface &surface, Resource &resour
 	fresk.drawFrame(2, &surface, 91, 20);
 	// The recovered sampler's tilt convention is opposite to DS:297C;
 	// retain its existing convention for the prologue's separate caller.
-	const bool ok = drawRecoveredGlobe(surface, globeData, mapData, tablatData, rotation, -tilt, results != 0);
+	// The colours follow the results flag (floppy ds:FEF2), which flips after
+	// the panels have slid open (CS:B86A) and before they slide shut (B860).
+	const bool ok = drawRecoveredGlobe(surface, globeData, mapData, tablatData, rotation, -tilt, resultsColours);
+	if (ok && ConfMan.hasKey("dune_globe_dump"))
+		dumpGlobeState(surface, mapData, rotation, tilt, resultsColours);
 	const int slide = (int)MIN<uint>(results, 100) * 112 / 100;
 	fresk.drawFrame(0, &surface, -slide, 0);
 	fresk.drawFrame(1, &surface, 214 + slide, 0);
@@ -476,6 +539,7 @@ bool GameScreen::battleCheck() {
 	}
 	if (_battle && !_world.placeInBattle(_world.currentLocation())) {
 		_battle = false;
+		_state.setB(0x2b, 0);
 		_log.line(Common::String::format("Battle: the battle at place %u is over", _world.currentLocation()));
 	}
 	return false;
@@ -487,6 +551,7 @@ void GameScreen::rideWormTo(int destination) {
 	// charisma + 40); no ornithopter is taken and no Harkonnen zone is
 	// checked on the way (seg000:4182 only runs for the ornithopter).
 	_battle = false;
+	_state.setB(0x2b, 0);
 	_riding = true;
 	setGamePhase(0x50);
 	_log.line(Common::String::format("Travel: riding a worm to %d", destination));
@@ -579,6 +644,7 @@ void GameScreen::travelToward(uint16 longitude, int16 latitude) {
 		return;
 	_world.markDiscovered(arrived);
 	_world.setPosition(arrived, 1);
+	_world.rollRoomRotation();
 	_room = 1;
 	refreshRooms();
 	if (!_riding) {
@@ -623,6 +689,7 @@ void GameScreen::travelTo(uint locationIndex) {
 		// travel_finish_at_destination parks it on the destination's pad, and
 		// the arrival lands it (travel_arrival_landing_sequence): on the CD
 		// the place's approach clip (SIET, PALACE, FORT) plays to its end.
+		_world.rollRoomRotation();
 		if (!_riding)
 			_world.setOrnithopters(arrived, +1);
 		_room = 1;
@@ -744,10 +811,11 @@ void GameScreen::composeView() {
 		Sprite characters(_system, _panel.characterSheet());
 		// The characters stand at the room's markers as the executable
 		// places them (sub_13D83 / sub_13DF4 / sub_13D2F): each person, in
-		// ascending group order, takes slot (group + ds:0xC7) mod markers or
+		// ascending group order, takes slot (group + ds:0xC5) mod markers or
 		// else the first free slot; the markers then read the slots from the
 		// last one down. PERS frame 2 x group; groups from 15 on (the troop
-		// chiefs) are all drawn as 15. ds:0xC7 is 0 in both executables.
+		// chiefs) are all drawn as 15. ds:0xC5 is 0 at the start and a new
+		// random byte after each landing (World::rollRoomRotation).
 		Common::Array<uint16> markerSprites;
 		{
 			Common::Array<byte> people;
@@ -755,7 +823,7 @@ void GameScreen::composeView() {
 			const uint markers = MIN<uint>(Room(roomData).markerCount(salRoom), 23);
 			byte slots[23];
 			memset(slots, 0xff, sizeof(slots));
-			const uint rotation = _state.b(0xc7) & 0x0f;
+			const uint rotation = _state.b(0xc5) & 0x0f;
 			if (_sceneActive && !_cast.empty()) {
 				// A scripted scene places its cast itself (scene action 00:
 				// sal_read_position_markers copies the list verbatim).
@@ -782,9 +850,11 @@ void GameScreen::composeView() {
 			Room(roomData).markerPositions(salRoom, positions);
 			for (uint p = 0; p < ARRAYSIZE(_personPos); ++p)
 				_personPos[p] = Common::Point(-1, -1);
+			Common::String standing;
 			for (uint j = 0; j < markers; ++j) {
 				const byte who = slots[markers - 1 - j];
 				if (who != 0xff) {
+					standing += Common::String::format(" %u@%u", who, j);
 					// A Fremen stands as PERS 14-16 by its troop (seg000:913b).
 					const uint troop = _world.troopForPerson(who);
 					const uint figure = troop ? World::kFremen + World::fremenHead(troop) : MIN<uint>(who, World::kFremenChief);
@@ -794,6 +864,14 @@ void GameScreen::composeView() {
 						_personFrame[who] = markerSprites[j];
 					}
 				}
+			}
+			// person@marker, logged when it changes (check_room_rotation.sh).
+			const bool cast = _sceneActive && !_cast.empty();
+			standing = Common::String::format("Room people: place %u room %u (%u markers, rotation %u%s):",
+					_world.currentLocation(), salRoom, markers, rotation, cast ? ", scene cast" : "") + standing;
+			if (standing != _lastStanding) {
+				_lastStanding = standing;
+				_log.line(standing);
 			}
 		}
 
@@ -914,7 +992,7 @@ void GameScreen::addRoomRows(RowAction *actions, int *arguments, uint16 *command
 	add(kRowMap, 0, "SEE DUNE MAP");
 	if (_desert) {
 		// Outside a place (seg000:2faa): CALL A WORM (greyed before phase
-		// 0x4f; worms are not built), WAIT FOR EVENING before period 11, else
+		// 0x4f), WAIT FOR EVENING before period 11, else
 		// WAIT FOR MORNING. The way back is the ornithopter parked beside
 		// Paul (its hotspot, person 0x2f, gives TAKE AN ORNITHOPTER).
 		add(kRowWorm, 0, "CALL A WORM", false, phase < 0x4f);
@@ -1269,12 +1347,12 @@ void GameScreen::enterRoom(uint room) {
 
 // ---- The map and the globe --------------------------------------------------
 
-void GameScreen::openMap(MapScreen::Mode mode, bool selectDestination) {
+void GameScreen::openMap(MapScreen::Mode mode, bool selectDestination, bool fromFlatView) {
 	_cockpit = false;
 	loadDialogue(); // the sentences: place names and the box text
 	if (!_map)
 		_map = new MapScreen(_system, _resources, _log, _world);
-	if (!_map->open(mode, selectDestination)) {
+	if (!_map->open(mode, selectDestination, fromFlatView)) {
 		showStatus("Dune: map data missing");
 		return;
 	}
@@ -2235,7 +2313,8 @@ bool GameScreen::arrivalIsFatal(uint place) {
 	uint harkonnen = 0, attacking = 0;
 	_world.countHostiles(place, harkonnen, attacking);
 	if (attacking || (l.status & 2)) {
-		_battle = true; // ds:2b
+		_battle = true;
+		_state.setB(0x2b, 1); // 5058
 		_log.line(Common::String::format("Arrival: place %u is in battle, Paul joins it", place));
 		return false;
 	}
@@ -2301,7 +2380,9 @@ void GameScreen::drawResults() {
 	const byte kHarkonnen = 0x3f, kAtreides = 0x25, kTitle = 0xfd, kLabel = 0xfb;
 	const Text texts[] = {
 		{ 16, 6, kTitle, Common::String::format("%u%s day on DUNE", dayNumber, suffix) },
-		{ 216, 6, kTitle, Common::String::format("CHARISMA = %u", _state.b(World::kCharisma)) },
+		// Half the charisma byte (floppy CS:BD06-BD0B: mov al,[29h]; shr ax,1;
+		// the originals show 42 for ds:29 = 84, captures/globe-results).
+		{ 216, 6, kTitle, Common::String::format("CHARISMA = %u", _state.b(World::kCharisma) / 2u) },
 		{ 20, 69, kHarkonnen, Common::String::format("%3u%%", areaH) },
 		{ 48, 69, kAtreides, Common::String::format("%3u%%", areaA) },
 		{ 8, 80, kLabel, _panel.commandString(_panel.findCommand("CONTROLLED AREAS")) },
@@ -2388,6 +2469,11 @@ void GameScreen::stageTroopForConditions(uint troopId) {
 	const uint16 durations = (uint16)(_panel.findCommand("for a very short time") + 1);
 	const uint16 ranks = (uint16)(_panel.findCommand("On trial") + 1);
 	_state.setW(names + 8, (uint16)(jobs + (t.occupation & 0x0f)));
+	// 0x83 (subst_id_03, 326e): the item a searching troop wants, COMMAND
+	// 0xe8 + troop +0e's low byte on the CD ("a spice-harvester" .. "some
+	// bulbs"; 0xdc on the floppy).
+	const uint16 items = (uint16)(_panel.findCommand("a spice-harvester") + 1);
+	_state.setW(names + 6, (uint16)(items + MIN<uint>(6, r[0x0e])));
 	// The duration phrase (sub_132c7; its thresholds are not transcribed):
 	// "for a very short time" ... "for 12 days", or "but our job is finished".
 	const uint periods = (uint16)(_state.w(GameState::kGameTime) - READ_LE_UINT16(r + 0x0a));
@@ -2520,7 +2606,7 @@ void GameScreen::endTroopPick(int dest) {
 	stageTroopForConditions(_troopId);
 	WRITE_LE_UINT16(r + 4, before);
 	_state.setB(0x23, same ? 0x10 : 0x0b);
-	_conversation->start(World::kFremenChief, 4, 0x80, true, true);
+	_conversation->start(World::kFremenChief, 4, 0x20, true, true); // 7bbe -> 96f1 -> 9f8b: sentence mask 0x20
 	_conversation->armGate();
 	Common::String page;
 	bool newSentence;
@@ -2539,6 +2625,101 @@ void GameScreen::endTroopPick(int dest) {
 	dumpScreen(_system, "troop-moving");
 	_mode = kMap;
 	drawMapScreen();
+}
+
+bool GameScreen::troopReaction(byte action) {
+	// troop_present_reaction_line (CD 7bb9, floppy 88d4): the troop's
+	// figures staged (31f6), ds:23 = the reaction, one line of the chief's
+	// list 4 into the popup. The gate (a1c4/a1e2) tells whether the line's
+	// event refused the order.
+	if (!loadDialogue())
+		return true;
+	stageTroopForConditions(_troopId);
+	_state.setB(0x23, action);
+	_conversation->start(World::kFremenChief, 4, 0x20, true, true); // 7bbe -> 96f1 -> 9f8b: sentence mask 0x20
+	_conversation->armGate();
+	Common::String page;
+	bool newSentence;
+	if (_conversation->next(page, newSentence))
+		_troopLine = page;
+	const bool held = _conversation->gateHeld();
+	_log.line(Common::String::format("Troops: troop %u answers (ds:23 = %#x) \"%s\"%s", _troopId, action, _troopLine.c_str(),
+			held ? "" : " (refuses)"));
+	return held;
+}
+
+void GameScreen::searchForEquipment() {
+	// GO & SEARCH FOR EQUIPMENT (CD 7734 army, 775c ecology, 776d spice;
+	// floppy 8498, 84c0, 84d1): the item the class lacks; all of them, the
+	// answer 0x0f "I have all the equipment I need!". The item's name goes
+	// to subst_id_0c (ds:1203, floppy 1210: placeholder 0x8c).
+	_troopChoosing = false;
+	const int item = _world.searchedEquipment(_troopId);
+	_log.line(Common::String::format("Troops: troop %u searches for equipment: item %d", _troopId, item));
+	if (item < 0) {
+		troopReaction(0x0f);
+		drawTroop();
+		dumpScreen(_system, "troop-search");
+		return;
+	}
+	const uint16 items = (uint16)(_panel.findCommand("a spice-harvester") + 1);
+	_state.setW(_state.nameTable + 24, (uint16)(items + (uint)item));
+	// CD 7789 -> 77d7 -> 7d81: the item free at the troop's own place is
+	// taken there, with MODIFY EQUIPMENT's answer (ds:23 = 0x0c). The floppy
+	// (84ed) goes straight to the search.
+	if (!_world.floppy() && _world.searchEquipmentHere(_troopId, (uint)item)) {
+		troopReaction(0x0c);
+		drawTroop();
+		dumpScreen(_system, "troop-search");
+		return;
+	}
+	// 7f90 (floppy 8ca1): the nearest known place with one free; none, the
+	// answer 0x0e "I don't think I can find ... available in all of the
+	// places around here."
+	uint distance = 0;
+	const int target = _world.equipmentSearchTarget(_troopId, (uint)item, &distance);
+	if (target < 0) {
+		_log.line(Common::String::format("Troops: troop %u finds no place with item %d within reach", _troopId, item));
+		troopReaction(0x0e);
+		drawTroop();
+		dumpScreen(_system, "troop-search");
+		return;
+	}
+	_log.line(Common::String::format("Troops: troop %u picks place %d for item %d (distance %u)", _troopId, target, item, distance));
+	// 6a33 -> troop_apply_occupation_choice (6a89): occupation (class) | 3
+	// and the answer 0x0a; an event there refuses and the job is taken back.
+	const byte before = _world.troop(_troopId).occupation;
+	byte record[World::kTroopSize];
+	_world.saveTroopRecord(_troopId, record);
+	const byte job = (byte)((before & 0x0c) | 3);
+	if ((before & 0x0f) != job) {
+		_world.setTroopOccupation(_troopId, job);
+		if (!troopReaction(0x0a)) {
+			_world.restoreTroopRecord(_troopId, record);
+			_log.line(Common::String::format("Troops: troop %u refuses the search", _troopId));
+			drawTroop();
+			dumpScreen(_system, "troop-search");
+			return;
+		}
+		// 6ab8-6abf: a troop leaving the spice class leaves its harvester.
+		if (job & 0x0c)
+			_state.vars[World::kTroopTable + (_troopId - 1) * World::kTroopSize + 0x19] &= 0x7f;
+	}
+	// 77b4-77c5: the march (84a6), then NO MORE ORDERS (8770): the map.
+	const int from = _world.troopPlace(_troopId);
+	_world.startEquipmentSearch(_troopId, (uint)item, (uint)target);
+	if (from >= 0) {
+		Common::Array<uint> left;
+		_world.troopsAt((uint)from, left);
+		_log.line(Common::String::format("Troops: %u troop(s) left at place %d, hired troop where Paul is: %s", left.size(), from,
+				hiredTroopAt(_world.currentLocation()) ? "yes" : "no"));
+	}
+	drawTroop();
+	dumpScreen(_system, "troop-search");
+	if (_troopFromMap) {
+		_mode = kMap;
+		drawMapScreen();
+	}
 }
 
 bool GameScreen::nextTroopLine() {
@@ -2709,13 +2890,22 @@ void GameScreen::drawTroop() {
 			// ECOLOGY needs bitfield_Paul_events bit 5, Kynes met (seg000:69b3).
 			add(kRowSetOccupation, Troop::kIrrigation, "SPECIALIZE IN ECOLOGY", !(_state.b(World::kPaulEvents) & 0x20));
 		} else {
+			// The class menus (seg000:69b3, floppy 774d): GO & SEARCH FOR
+			// EQUIPMENT heads all three and is greyed below phase 0x10
+			// (69f6-6a02); SPECIALIZE IN ECOLOGY (entry 0x77) is greyed until
+			// Kynes has been met, ds:0a bit 5 (6a07-6a23).
+			const bool noSearch = _state.b(GameState::kPhase) < 0x10;
+			const bool noEcology = !(_state.b(World::kPaulEvents) & 0x20);
 			switch (job & 0x0c) {
 			case 0:
-				add(kRowSetOccupation, Troop::kSpiceMining, "Spice Mining");
-				add(kRowSetOccupation, Troop::kProspecting, "Spice Prospecting");
+				// menu_map_troop_change_troop_occupation_for_spice_troop
+				// (ds:216e, floppy 27d4): the search (776d), army, ecology.
+				add(kRowSearchEquipment, 0, "GO & SEARCH FOR EQUIPMENT", noSearch);
+				add(kRowSetOccupation, Troop::kMilitaryTraining, "SPECIALIZE IN ARMY");
+				add(kRowSetOccupation, Troop::kIrrigation, "SPECIALIZE IN ECOLOGY", noEcology);
 				break;
 			case 4: {
-				// menu ds:2182 for an army troop (seg000:69b3); on espionage
+				// menu ds:2182 (floppy 27e8) for an army troop; on espionage
 				// the troop can attack instead (ds:219a).
 				if (job == Troop::kEspionage) {
 					add(kRowAttack, 0, "ATTACK");
@@ -2725,17 +2915,17 @@ void GameScreen::drawTroop() {
 				uint dist = 0xffff;
 				if (here >= 0)
 					_world.nearestHiddenHarkonnen((uint)here, dist);
-				add(kRowNone, 0, "GO & SEARCH FOR EQUIPMENT", false, true);
-				add(kRowEspionage, 0, "ESPIONAGE", false, dist >= 0x1e);
+				add(kRowSearchEquipment, 0, "GO & SEARCH FOR EQUIPMENT", noSearch); // 7734
+				add(kRowEspionage, 0, "ESPIONAGE", dist >= 0x1e); // ds:e2 < 0x1e (69db)
 				add(kRowSetOccupation, Troop::kSpiceMining, "SPECIALIZE IN SPICE");
-				add(kRowSetOccupation, Troop::kIrrigation, "SPECIALIZE IN ECOLOGY", false, !(_state.b(World::kPaulEvents) & 0x20));
+				add(kRowSetOccupation, Troop::kIrrigation, "SPECIALIZE IN ECOLOGY", noEcology);
 				break;
 			}
 			default:
 				// menu_map_troop_change_troop_occupation_for_ecology_troop
-				// (ds:21a6): GO & SEARCH FOR EQUIPMENT (a march; not built),
-				// ASSEMBLY WIND-TRAP (job | 1, seg000:6a2b), or another speciality.
-				add(kRowNone, 0, "GO & SEARCH FOR EQUIPMENT", true);
+				// (ds:21a6, floppy 280c): the search (775c), ASSEMBLY
+				// WIND-TRAP (job | 1, seg000:6a2b), or another speciality.
+				add(kRowSearchEquipment, 0, "GO & SEARCH FOR EQUIPMENT", noSearch);
 				add(kRowSetOccupation, (job & 0x0c) | 1, "ASSEMBLY WIND-TRAP");
 				add(kRowSetOccupation, Troop::kSpiceMining, "SPECIALIZE IN SPICE");
 				add(kRowSetOccupation, Troop::kMilitaryTraining, "SPECIALIZE IN ARMY");
@@ -2963,12 +3153,17 @@ bool GameScreen::loadSlot(uint slot) {
 		}
 	if (_conversation)
 		_conversation->stop();
+	_battle = _state.b(0x2b) != 0; // Paul in a battle (ds:2b) is saved with the data segment
 	_mode = kRoom;
 	leaveMap();
 	if (fromGlobe) {
+		// CD menu_callback_choice_globe_load_game (seg000:b3b0, loc_1B412;
+		// floppy CS:B2E2-B2EC): SEE RESULTS opens by
+		// itself, then the globe centres on Paul (ba9e), tilt within +-98.
 		openMenu(kMenuNone);
 		if (_mode == kMap && _map) {
 			_map->setResults(100);
+			_map->centreOnPlayer();
 			drawMapScreen();
 		}
 	}
@@ -3087,6 +3282,8 @@ void GameScreen::answerQuestion(byte choice) {
 	// spice bargaining with its offer ladder.
 	if (_conversation->bargainParty() == 0 && _talkWho == 3) {
 		_world.bargainChoice(choice);
+	} else if (_talkWho == World::kSmuggler) {
+		_world.smugglerChoice(choice); // 241a / 2432 / 2453 with speaker 13
 	} else {
 		_state.setB(World::kChoice, choice);
 		_state.setB(World::kArguing, (byte)(_state.b(World::kArguing) + 1));
@@ -3159,8 +3356,12 @@ void GameScreen::applyStory() {
 }
 
 void GameScreen::advanceConversation() {
-	if (_mode != kTalk || !_conversation)
+	if (_mode != kTalk || !_conversation || _talkBargain)
+		return; // with the bargaining menu up only its answer goes on (answerQuestion)
+	if (_pendingWakeUp) {
+		waterOfLifeWakeUp();
 		return;
+	}
 	applyStory();
 	if (!_talkEnded && _talkLine + bubbleLines() < _talkLines.size()) {
 		// The rest of a page that did not fit the balloon.
@@ -3168,7 +3369,16 @@ void GameScreen::advanceConversation() {
 	} else {
 		Common::String page;
 		bool newSentence = false;
-		if (_talkEnded || !_conversation->next(page, newSentence)) {
+		bool more = !_talkEnded && _conversation->next(page, newSentence);
+		if (!more && !_talkEnded && _wakeResume.valid && !_conversation->paused()) {
+			// The wake-up line said, the talk goes on where Stilgar's
+			// answer left it (the original's next line: "I don't know what
+			// the Water of Life has done to you...").
+			_conversation->resumeAt(_wakeResume);
+			_wakeResume.valid = false;
+			more = _conversation->next(page, newSentence);
+		}
+		if (!more) {
 			if (!_talkEnded && _conversation->paused()) {
 				// Events 4 / 5: the bargaining menu (ds:1ffe) under the room.
 				_talkBargain = true;
@@ -3206,9 +3416,55 @@ void GameScreen::advanceConversation() {
 		// The balloon's text width: the widest rect minus its paddings.
 		_panel.wrapText(page, 208 - 2 * 16, false, _talkLines);
 	}
+	// Actions 4 / 5 (seg000:a244 / a248) run when the line's last segment
+	// is drawn (sub_1A03F after sub_188D2) and open the bargaining menu
+	// (ds:1ffe, sub_1D323) at once: ARGUE / ACCEPT / REFUSE come up with
+	// the question, the line stays (Spice86: the smuggler's offer, Duncan's
+	// "the totality of our stocks", checked 2026-09-29).
+	if (_conversation->paused() && _talkLine + bubbleLines() >= _talkLines.size()) {
+		_talkBargain = true;
+		dumpScreen(_system, "bargain");
+	}
 	startTalkAnimation();
 	drawTalk();
 	dumpScreen(_system, Common::String::format("talk-%u", ++_talkPage).c_str());
+}
+
+void GameScreen::waterOfLifeWakeUp() {
+	// callback_event_dialogue_line_08_Stilgar_drink_Water_of_Life (CD
+	// seg000:2ccf, floppy 2f96), after Stilgar's "Drink it if that's your
+	// will." and its voice (1abcc/1abd5, else 600 ticks): transitions 0x38
+	// and 0x36 round a 1000-tick wait (Paul passes out; the engine draws no
+	// transitions, the room simply comes back), three periods pass (0fd9,
+	// done in World::stilgarWaterOfLife), then ds:23 = 0x11 and the room
+	// scan (jmp 35ad): Stilgar's topic-4 line of condition 344,
+	// "Ah, he is coming to. ... unconscious for three hours."
+	_pendingWakeUp = false;
+	if (_conversation) {
+		_wakeResume = _conversation->position();
+		_conversation->stop();
+	}
+	_talkLines.clear();
+	_talkEnded = false;
+	_talkBargain = false;
+	_talkKind = kTalkNormal;
+	_mode = kRoom;
+	_state.setW(GameState::kPersonsTalkingTo, 0);
+	// Transition 0x38, 1000 ticks (5 s), transition 0x36: the screen goes
+	// black while Paul is out (seen on Spice86, captures/endgame/water-of-life).
+	_surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
+	_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
+	_system->updateScreen();
+	dumpScreen(_system, "wol-unconscious");
+	if (!isFastCapture())
+		_system->delayMillis(5000);
+	_log.line(Common::String::format("Story: Paul comes to after the Water of Life (day %u, period %u)", _world.day(), _world.timeSlot()));
+	showRoom(_world.room());
+	_state.setB(0x23, 0x11);
+	if (_mode == kRoom && !roomEntryScan(true)) {
+		_log.line("Story: no one speaks as Paul comes to");
+		_wakeResume.valid = false;
+	}
 }
 
 uint GameScreen::bubbleLines() const {
@@ -3238,6 +3494,12 @@ void GameScreen::storyEvent(void *context, byte event, bool wasSaid, uint speake
 			const uint drink = screen->_world.stilgarWaterOfLife();
 			if (drink == 2)
 				screen->_pendingEnding = "Paul Atreides died as he tried";
+			else if (drink == 1) {
+				// After the line: 2d1e, ds:23 = 0x11, the room scan. The floppy
+				// waits 600 ticks (0x258 at 200 Hz, 2fa8), the CD its voice.
+				screen->_pendingWakeUp = true;
+				screen->_wakeUpAt = screen->_system->getMillis() + 3000;
+			}
 		} else if (speaker == 12) {
 			// Character 12 shows the hidden place whose pointer is at ds:11ce.
 			screen->_world.revealPointedPlace(0x11ce);
@@ -3245,18 +3507,21 @@ void GameScreen::storyEvent(void *context, byte event, bool wasSaid, uint speake
 			// callback_event_dialogue_line_08_Smugglers (seg000:2388): the
 			// village chapter (phase 0x3c), then the trade is set up: ds:9e a
 			// roll of 0-3, the smugglers' record (ds:10b4) + 3 today's date,
-			// no argument yet. The goods and prices (23a5-23d4) are not built.
+			// no argument yet; then the offer (23a5-23d4): the next item in
+			// stock and its price (ds:9d).
 			screen->setGamePhase(0x3c);
 			state.setB(0x9e, (byte)(screen->_world.lcgRandMasked(3)));
 			const uint16 smugglers = READ_LE_UINT16(&state.vars[screen->_world.ds(0x10b4)]);
 			if (smugglers >= World::kCharacterTable && smugglers + 3 < GameState::kSize)
 				state.vars[smugglers + 3] = (byte)(state.w(GameState::kGameTime) >> 4);
 			state.setB(World::kArguing, 0);
-			screen->_log.line("Story: the smugglers, phase 0x3c (their trade is not built yet)");
+			if (screen->_panel.findCommand("a spice-harvester") != 0xffff)
+				screen->_world.setItemWords((uint16)(screen->_panel.findCommand("a spice-harvester") + 1));
+			screen->_world.smugglerOffer();
 		} else {
-			// 3 Duncan: seg000:2239 (the spice shipment); 5 Stilgar: arms
-			// the Water of Life scene (ds:227e = 0x2ccf); 13 the smugglers
-			// (seg000:2388). Not built yet.
+			// Every speaker with an event 8 is handled above (1 Jessica,
+			// 3 Duncan seg000:2239, 5 Stilgar seg000:2ccf, 12 the captain,
+			// 13 the smugglers seg000:2388); anything else is logged.
 			screen->_log.line(Common::String::format("Story: event 8 of speaker %u not implemented", speaker));
 		}
 		break;
@@ -3272,7 +3537,8 @@ void GameScreen::storyEvent(void *context, byte event, bool wasSaid, uint speake
 			break;
 		}
 		if (event == 9 && speaker == 3) {
-			screen->_world.duncanAccept(); // seg000:24ee
+			// seg000:24ee; ds:476d: the menu was about a smuggler's bill (action 5).
+			screen->_world.duncanAccept(screen->_conversation && screen->_conversation->bargainParty() == 1);
 			break;
 		}
 		if (event == 15 && speaker == 3) {
@@ -3365,6 +3631,12 @@ void GameScreen::presentVerb(uint list) {
 }
 void GameScreen::endConversation() {
 	// STOP TALKING.
+	if (_pendingWakeUp) {
+		// Paul cannot walk away from the Water of Life: he passes out first.
+		waterOfLifeWakeUp();
+		return;
+	}
+	_wakeResume.valid = false;
 	delete _talkSheet;
 	_talkSheet = nullptr;
 	_talkLines.clear();
@@ -3386,6 +3658,9 @@ void GameScreen::endConversation() {
 		emperorEnding();
 		return;
 	}
+	// The room is drawn again, and init_room_persons stages a village's
+	// smugglers again: no offer, a new first item (seg000:3166, 2318).
+	stageVillageSmugglers();
 	showRoom(_world.room());
 }
 int GameScreen::personAt(int x, int y) const {
@@ -3431,6 +3706,8 @@ void GameScreen::update() {
 		else if (_mode == kMap)
 			drawMapScreen();
 	}
+	if (_pendingWakeUp && _mode == kTalk && (isFastCapture() || _system->getMillis() >= _wakeUpAt))
+		waterOfLifeWakeUp(); // Stilgar's line has had its time (seg000:2ccf)
 	if (!isFastCapture()) {
 		const uint32 now = _system->getMillis();
 		if (!_clockStart || (_mode != kRoom && _mode != kMap))
@@ -3439,6 +3716,13 @@ void GameScreen::update() {
 			passTime(1);
 		checkIdle(now);
 		updateCockpit(now);
+		// The globe's rotation task (CD seg000:b9ae) turns it one phase a
+		// pass while it is up, in both visions. Never in dump or harness
+		// runs (isFastCapture above; nor a real-time harness), whose
+		// pictures must not depend on time.
+		if (_mode == kMap && _map && _map->mode() == MapScreen::kGlobe && !_cockpit && !isDuneHarnessRun() &&
+				!isDumpRun() && _map->creep(now))
+			drawMapScreen();
 		// The DUNE MAP popup goes 1000 ticks after the view opened (seg000:5c03).
 		if (_mode == kMap && _map && _map->caption() && now - _map->captionStart() >= MapScreen::kCaptionMillis) {
 			_map->setCaption(false);
@@ -3764,12 +4048,17 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 			const int arrow = _map->hitArrow(event.mouse.x, event.mouse.y);
 			if (arrow >= 0) {
 				static const int dx[5] = { 0, 1, 0, -1, 0 }, dy[5] = { -1, 0, 1, 0, 0 };
-				if (arrow == 4)
+				if (arrow == 4 && _map->mode() == MapScreen::kGlobe)
+					_map->centreOnPlayer(); // sprite 53, CD seg000:ba9e
+				else if (arrow == 4)
 					_map->centreOn(_world.currentLocation());
 				else if (_map->mode() == MapScreen::kFlat)
 					_map->scroll(dx[arrow], dy[arrow]);
 				else
-					_map->rotate(dx[arrow] * 4096, dy[arrow] * 8);
+					// The right arrow adds 0x20 phases (CD b9d3), the left one
+					// takes them (b9cc); the up arrow adds 8 to the tilt (b9b9),
+					// the down one takes 8 (b9c0).
+					_map->rotate(dx[arrow] * 0x20, -dy[arrow] * 8);
 				drawMapScreen();
 				return false;
 			}
@@ -3807,15 +4096,18 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 					break;
 				case kRowResults: {
 					// The panels slide over the planet (0.8 s in swift-dune).
+					// The globe keeps its colours while they move: SEE RESULTS
+					// (CS:B86A) sets the flag after the slide, STANDARD VISION
+					// (CS:B860) clears it after the panels are shut.
 					const bool open = !_map->results();
 					const uint32 start = _system->getMillis();
 					for (uint pixels = 0; !isFastCapture() && pixels < 100;) {
 						pixels = MIN<uint>(100, (_system->getMillis() - start) * 100 / 800);
-						_map->setResults(open ? pixels : 100 - pixels);
+						_map->setResults(open ? pixels : 100 - pixels, !open);
 						drawMapScreen();
 						_system->delayMillis(15);
 					}
-					_map->setResults(open ? 100 : 0);
+					_map->setResults(open ? 100 : 0, open);
 					drawMapScreen();
 					if (open)
 						dumpScreen(_system, "results");
@@ -3931,8 +4223,9 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 					Common::Rect(22, 161, 68, 196).contains(event.mouse.x, event.mouse.y)) {
 				// The planet in the flat map's left panel (ICONES 0x0d, drawn by
 				// drawPanelExtras) opens the globe and its game menu; Paul's
-				// head does too.
-				openMap(MapScreen::kGlobe, false);
+				// head does too. The globe starts from the flat view's centre
+				// (ds:2144/2146), scrolled or not.
+				openMap(MapScreen::kGlobe, false, true);
 				return false;
 			}
 			if (action == Panel::kActionHead || action == Panel::kActionBook) {
@@ -4078,6 +4371,9 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 				dumpScreen(_system, "troop-attack");
 				return false;
 			}
+			case kRowSearchEquipment:
+				searchForEquipment();
+				return false;
 			case kRowSetOccupation: {
 				// troop_apply_occupation_choice (CD 6a89): the job (SPECIALIZE IN
 				// SPICE makes the prospectors prospect, CD 6a76), then the troop's
@@ -4095,7 +4391,7 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 				if (_troopFromMap) {
 					stageTroopForConditions(_troopId);
 					_state.setB(0x23, 0x0a);
-					_conversation->start(World::kFremenChief, 4, 0x80, true, true);
+					_conversation->start(World::kFremenChief, 4, 0x20, true, true); // 7bbe -> 96f1 -> 9f8b: sentence mask 0x20
 					_conversation->armGate();
 					Common::String page;
 					bool newSentence;
@@ -4191,6 +4487,17 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 		int row = -1, arrow = -1;
 		const Panel::Action action = event.type == Common::EVENT_LBUTTONDOWN ?
 				_panel.hitTest(event.mouse.x, event.mouse.y, row, arrow) : Panel::kActionNone;
+		if (action >= Panel::kActionUp && action <= Panel::kActionLeft && event.mouse.y >= 152 &&
+				!_talkBargain && _talkKind == kTalkNormal && !_visionDream) {
+			// A compass arrow ends the talk and walks on, even while a line
+			// is up (checked on Spice86: Carthag-Harg's chief, "My troop is
+			// settled...", then the down arrow leads to the exterior).
+			_log.line("Tap: compass during a talk: the talk ends");
+			endConversation();
+			if (_mode == kRoom)
+				panelAction(action, row, arrow);
+			return false;
+		}
 		if (action == Panel::kActionCommand && row >= 0 && row < (int)Panel::kCommandRows) {
 			_log.line(Common::String::format("Talk command: %s", _panel.commandText(row) ? _panel.commandText(row) : "(none)"));
 			switch (_rowActions[row]) {
@@ -4265,7 +4572,9 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 			// pages, a WORK FOR ME answer); the verbs are offered only while a
 			// line is up. The bargain menu, COMM messages and scenes keep theirs.
 			const bool closes = !_talkBargain && _talkKind == kTalkNormal && !_visionDream;
-			if (!_talkEnded)
+			if (_talkBargain)
+				; // the bargaining menu waits for its answer (a view click does nothing)
+			else if (!_talkEnded)
 				advanceConversation();
 			else if (closes)
 				endConversation();
