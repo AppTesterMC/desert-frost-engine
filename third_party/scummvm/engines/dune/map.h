@@ -238,6 +238,8 @@ public:
 	 */
 	void setFlight(bool active, uint16 longitude, int16 latitude, int destination);
 	bool loadFlatMap() { return loadFlat(); }
+	/** ONMAP.HSQ and the flat map: what a zoomed window needs outside the map screens. */
+	bool loadWindowData() { return loadGlobe() && loadFlat(); }
 	void addFlightTrail(uint16 longitude, int16 latitude);
 	/**
 	 * The flight's minimap (travel_minimap_redraw, seg000:49a0): the flat

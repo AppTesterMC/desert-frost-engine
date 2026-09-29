@@ -110,15 +110,13 @@ rows; the "narrow" sky) and 4-7 (30, 30, 30, 28 rows; the "large" sky), stacked
 and repeated across the view. They use colours 128-222. Offset table entries
 8-40 are not sprites but 33 **palette records** for that range: a zero word, a
 size word (287), first colour (128), count (95), then RGB triplets. `SUNRS.HSQ`
-carries six such records (128, 80 colours) after its eight sprites. swift-dune
-uses palette 1 for day, 3 for night, 6 for sunset and 16 for sunrise, and blends
-neighbours; the original's mapping from game time is in `sub_138B4`, not
-decoded.
+carries six such records (128, 80 colours) after its eight sprites. The
+record for a time is decoded (2026-09-29, see "The light of the hour" below):
+table[period] + 4 per day of the week, not swift-dune's fixed 1/3/6/16.
 
 Rooms with an outside view get the sky first and the room on top: PALACE.SAL
 room 10 (balcony; narrow sky, full width) and room 11 (palace front; large sky,
-200 pixels wide). **Decision:** the sky is fixed at midday until a game clock
-exists.
+200 pixels wide). The sky follows the game clock (below).
 
 The CD has a second file, `SKYDN.HSQ`, with the same 33 records but for
 colours 73-239 (167 entries; its eight "tiles" are 4x1 stubs). Its arrival
@@ -269,7 +267,7 @@ root). What the engine implements from them:
   new day. SEE RESULTS slides the house panels open over the original's stats
   layout and gauges.
 
-Not transcribed yet: harvester breakdowns and saboteurs, military training,
+Not transcribed yet: military training,
 espionage, attacks and battles, ecology jobs, troop movement, skill decay,
 the motivation boost of charisma steps, smugglers, the spice shipments, the
 Harkonnen raids and the story-phase callbacks.
@@ -1140,6 +1138,534 @@ The Dune wiki says tribes from both hemispheres in one sietch "quarrel and refus
   - A short shipment right after another short one sets the fulfilment to 0, and the Emperor strikes (floppy `sub_4748`; the engine matches it).
   - The demand grows by about 1500 kg each time; by demand 7 it is 13730 kg. The 8 miners' output falls as their fields thin, from about 90 kg a period to about 25.
   - Only 2 harvesters (×4 output, `seg000:708a`) were found lying free all game. Buying from the smugglers is built (see "The smugglers' trade"); the bot does not buy.
+
+## Harkonnen saboteurs and harvester worms (2026-09-29)
+
+The wiki says saboteurs stop production and the troop takes no orders "for a few days". The original has one daily event roll for every harvester, with saboteurs and worms, and the damage lasts one day. The CD and floppy code is the same; the floppy is the CD address + 0xd69 here.
+
+### Addresses
+
+| What | CD seg000 | Floppy |
+| --- | --- | --- |
+| Spice mining, one period | `6fe5` | `7d4e` |
+| Damaged harvester: wait for the slot, repair (`7068`) | `705c` | `7dc5` |
+| Harvest rate | `708a` | `7df3` |
+| The daily event roll (worms) | `714c` | `7eb5` |
+| Damage: bitfield_10 bit 9, the troop stops (`7085`) | `719c` | `7f05` |
+| Harvester swallowed | `71a4` | `7f0d` |
+| Message to the vision queue (ah = 0x0f) | `71b2` -> `29f0` | `7f1b` -> `2ce0` |
+| Saboteurs | `71bc` | `7f25` |
+| Army training | `71ef` | `7f58` |
+| Army troop hunting saboteurs | `725f` | `7fc3` |
+| Saboteurs found (callback `7289`) | `727d` | |
+| Troop menu greys (MODIFY EQUIPMENT: `7888`) | `7847` | |
+| Vision dream: stages the message's place and its names | `2bd2` (`2c1d`, `2c20` -> `2e98`) | |
+
+### When
+
+- **The roll.** It runs from the spice-mining period of a troop that can mine (`6b96`). It needs all of these:
+  - Paul's first vision (ds:0a bit 0);
+  - a harvester (troop byte 0x19 bit 7);
+  - the troop's daily slot: game time & 0x0f == troop id & 0x0f (`715c`).
+- **Saboteurs first** (`71bc`). They need all of these:
+  - phase 0x35 or later: the phase of Thufir's line "I am worried about these Harkonnens... they will surely try to infiltrate saboteurs" (character 2, list 1, condition 119);
+  - the troop's speech word bit 6. It comes from the initial data, for troops 1, 13, 14, 15, 19 and 20, and the game-start setup keeps it (`01e0` masks byte 0x12 with 0x70);
+  - the word at ds:0 rotated left three times having its low three bits clear. The main loop stores a fresh `rand` there every pass (`1d84e`), so the chance is $1/8$ a day.
+- **Nothing else counts.** No Harkonnen proximity, no espionage. An espionage troop (job 5) never touches speech bit 6 or the place's status bit 2. The only code that clears them is the hunt (`7289`).
+- **Then a worm** (`7168`). The high byte of `rand` (`e3cc`), $r$, is compared with the place's region chance $c$ = ds:1141 + the region (the place's first name, byte 0; the xlat). The event comes when $r \le c$, so $P = (c+1)/256$ a day.
+
+| Region | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| $c$ | 0x0d | 0x0f | 0x32 | 0x64 | 0x80 | 0x28 | 0x14 | 0x28 | 0x23 | 0x32 | 0x46 | 0x80 |
+
+  The condition staging (`331e`) reads the same table by the place's second name byte into ds:50 ("Worms aren't rare in this area", condition 638).
+
+### What it does
+
+- **Saboteurs.**
+  - bitfield_10 (troop word 0x10) gets 0x200 (damaged) and 0x8000 (on purpose);
+  - the occupation gets its stopped bit 0x10;
+  - the place's status gets bit 2 (saboteurs here);
+  - message 3 is queued with the place.
+  - The troop still mines that period: the call returns to `6ffa`.
+- **A worm.** bitfield_10 gets 0x4000. An ornithopter (equipment bit 6) sees the worm sign in time, and nothing more happens. Otherwise, by $r \mathbin{\&} 3$:
+  - 0: nothing;
+  - 1: men lost (0x2000), population byte − 2 (20 men), unless that would leave none;
+  - 2: the harvester is damaged (0x200 and the stopped bit), as with the saboteurs;
+  - 3: the harvester is swallowed (0x1000). Equipment bit 7 goes, the place's harvester count (byte 0x14) drops by one, and message 6 is queued.
+- **How long.**
+  - A damaged harvester mines nothing. Word 0x0c is 0 and the troop stays stopped, until the troop's slot comes round the next day, 16 periods later (`705c`).
+  - It is then repaired and mines at once (`7068`), without that day's roll.
+  - "A few days" only comes from new strikes: while the troop keeps speech bit 6, the saboteurs can strike again any day.
+- **Orders while damaged.**
+  - A new occupation is refused: list 4 with ds:23 = 0x0a, condition 633 (w[0x32] & 0x200), action 2: "We have to repair our equipment before doing anything else!"
+  - MODIFY EQUIPMENT stays greyed (`7888`).
+  - MOVE TROOP is taken: its answer has ds:23 = 0x0b.
+  - The map's troop info popup would say "Repairing" (COMMAND 0x3F, `178e9`). The engine does not build that popup.
+- **The event bits stay.** 0x8000, 0x4000, 0x2000 and 0x1000 are never cleared, so the troop keeps talking about them. The CD's army training clears bit 9 (`71f2`); the floppy's does not (`7f58`).
+- **The hunt** (`725f`).
+  - An army troop (job 4) at a place with status bit 2 does not train. It counts word 0x0e down instead: high byte 0xff, low byte from $\mathtt{0x40} - 	ext{army skill}$, one a period.
+  - When the count goes negative (`727d`):
+    - the place's bit 2 goes;
+    - every troop there with speech bit 6 loses it (`7289`), so the saboteurs are gone for good;
+    - if any did, the hunter gets speech bit 8.
+
+### How Paul learns
+
+- **Messages** (DIALOGUE character 16, list 4, from the troop chief, sender 0x0f):
+  - 3 (condition 689): "There are saboteurs here in \x81-\x82!";
+  - 6 (692): "A worm has swallowed our harvester here in \x81-\x82!".
+
+  In person they come only at that place. Elsewhere they come as the dream, which stages the message's place and its names (`2bd2`: `331e`, `2e98`). It shows "... in Carthag-Tuek!", not the current place.
+- **The troop's contact lines** (character 15, list 2):
+
+  | Condition | Line |
+  | --- | --- |
+  | 516 (w[0x32] & 0x8200, action 6: the list ends there) | "We're repairing... Damn these saboters... Please, Muad'Dib, do something!" |
+  | 517 | "We're repairing our equipment. It's going to take us the whole day!" |
+  | 519 | "All our equipment has been mysteriously damaged..." |
+  | 575 (after the repair) | "Our equipment has been damaged, intentionally. We've repaired it, but what a waste of time!" |
+  | 549-555 | The worm lines: "A worm has come...", "The worm attacked the harvester... We're making repairs now.", "This gigantic worm... swallowed the harvester.", "All of this could have been avoided with an orni...". |
+  | 577 (the hunter; job 4, the place's bit 2 clear, speech 0x100) | "Saboteurs have been discovered. You'll have no problems here now!" |
+
+- **Gurney** (character 5, list 2, condition 330): "I just had a look at the damaged equipment. No doubt, it was done intentionally..."
+
+### Built
+
+- **`World::mineSpice`, `harvesterEvents`, `sabotage` (world.cpp); `huntSaboteurs` (battle.cpp).**
+  - They log "World: saboteurs damage troop ...", "World: a worm comes near / attacks / swallows ...", "World: harvester breaks down (a worm attack) ...", "World: troop N has repaired its harvester ...", and "World: troop N hunts / found the saboteurs ...".
+  - The saboteurs' ds:0 roll uses the engine's rolling word (`rollRandom`). The rotation is not written back: the original's value is replaced at once, and writing it back makes the LFSR cycle, so the saboteurs never came.
+- **The troop menu.** MODIFY EQUIPMENT is greyed while bitfield_10 bit 9 is set. The menu's other greys (`7847`–`78b8`) are still not transcribed.
+- **Vision messages.**
+  - The dream stages the message's place and names it. In person the staged place is put back (`2b25`).
+  - A harness run shows idle messages when it plays in real time (dune_real_time). The fast harness keeps them off.
+- **Checks.**
+  - `scripts/check_saboteurs.sh` (`dune_story_setup=saboteurs`, seed 7) covers, on both releases: the strike, message 0x0f03, the lines, the greyed row, the refused order, the repair a day later, the hunt, and the four worm outcomes and the orni.
+  - Fidelity scenarios:
+    - `saboteurs-contact`: the chief's lines, the greyed row and the refusal, on a patched chapter 20 save;
+    - `saboteurs-message`: the dream, on the same save with the queue patched.
+  - The original is captured in `captures/saboteurs/`.
+- **The speedrun bot.**
+  - It does not ask a repairing troop for a new job or equipment; it asks again after the repair.
+  - Short of 10 000 men with atomics, it sends its biggest troop without atomics to fetch those lying free elsewhere.
+- **Not built.**
+  - The map's troop info popup ("Repairing", "Inactive").
+  - The dream's screen: the chief's portrait over the VIS clouds; the engine draws its text box over black, with " Continue...".
+  - The prospectors' "prospection is finished" message (0x0f0e, `7144`).
+  - The fifth contact row: the original's CUT CONTACT against the engine's NO MORE ORDERS.
+
+## The Fremen epidemic (2026-09-29)
+
+The 1992 demo only announces an "epidemic among the Fremens" (its script ends at phase 0x54; its PHRASES.DAT has no line about it). The release plays it on both the floppy and the CD, between Liet Kynes's bulb (phase 0x5c) and Chani's kidnapping (0x60, 0x64). The illness strikes the sietches with the most working troops, one a day, until Chani starts curing. Chani is the only cure: nothing else clears the illness, and no item or time limit ends it. The Water of Life plays no part.
+
+Phase 0x64 is not the illness itself. Its callback runs after the epidemic, when a cured troop tells Paul that Chani has vanished. The engine had it as "the illness (not yet)".
+
+### Addresses
+
+The floppy addresses in this section were found by their bytes; the CD + 0xd69 rule of the troop code does not hold this early in the code.
+
+| What | CD seg000 | Floppy |
+| --- | --- | --- |
+| Phase 0x5c callback: ds:1156 = day + 3 (`sub_111B3`) | `11b3` | `157c` |
+| New-day hook -> the illness picker | `1c5f` -> `1e43` | `1fa2` -> `2180` |
+| Picker: count the working troops (`cmp [si+3], 8; adc dx, 0`) | `1ea1` | `21d8` |
+| Picker: a troop falls ill (0x400) and stops (`7085`) | `1ea9` | `21e0` |
+| Message 8 (sender 0x0f) | `1e9c` -> `71b2` | `21d3` -> `7f1b` |
+| Period step: Chani not in Paul's room | `1d9f` | `20e2` |
+| Chani at an ill place in phase 0x5d? (room 2) | `1e01` | `2146` |
+| Does a place house an ill troop? | `1e24` (every troop) | `2169` (the first troop only) |
+| The cure step, + 8 | `1eda` | `21f5` |
+| A troop cured: 0x400 -> 0x800 | `1eb1` | `21e8` |
+| Chani's message 0x709 | `1eec` -> `29f0` | `2207` -> `2ce0` |
+| No ill place left: phase 0x60 (`sub_111CB`, called directly) | `1f0d` -> `11cb` | `2228` -> `1594` |
+| STAY HERE to Chani: the cure + 0x10 | `9548` | `a00c` |
+| A cured troop met at phase 0x60-0x63: phase 0x64 | `1ebe` (from `7b79`, `93a2`) | none (dialogue action 12) |
+| Contact close: event bits cleared, among them "cured" | `7b7c` | `889a` |
+| Phase 0x64 entry: a `jmp` in the callback table | `11e6` -> `1f13` | `15af` -> `222e` |
+| Speaker < 9 before phase 0x64: the ill place named | `9519` | `9fdd` |
+| Troop menu: an ill troop's rows greyed | `7857` | `857d` |
+| Period loop: an ill troop does nothing | `6c92`, `6ce4` | `7a00`, `7a4c` |
+| Motivation − 40 in phases 0x64-0x67 | `6f31` | `7c99` |
+| Harkonnen raids skip ill sietches | `2034` | `234c` |
+
+Data: ds:f8 counts the ill places, ds:f9 is Chani's cure progress (a byte), ds:11db is the latest ill place (floppy ds:11e8), ds:1156 is the picker's first day, and ds:f2 holds Chani's prison names. In troop speech word 0x12, bit 0x400 is "ill" and bit 0x800 "cured by Chani".
+
+### How it starts
+
+- **Phase 0x5c.** Liet Kynes's bulb line (character 6, condition 351, in room 2, action 12) moves the story from 0x58 to 0x5c. The 0x5c callback stamps ds:1156 = today + 3.
+- **The picker** (`1e43`) runs at every new day. It needs all of these:
+  - today ≥ ds:1156;
+  - the phase is exactly 0x5c;
+  - Paul is not at place 62 (Sihaya-Tuek, ds:114e ≠ 0x7c8).
+- **The place.** Of the places of type below 0x28 (sietches, the palace, villages) that are not hidden, it takes the one with the most hired troops at work. A troop counts when its occupation byte is below 8: not moving, stopped or captured. The first place wins a tie. The CD leaves out place 16 (Tuono-Timin, ds:2c0); the floppy does not. With no working troop anywhere, nothing happens.
+- **What it does.** ds:11db = the place, ds:f8 + 1. Every hired troop there gets speech bit 0x400 and the stopped bit, and message 0x0f08 is queued with the place.
+- **It spreads.** The phase stays 0x5c, and the ill troops (stopped, so above 8) no longer count. So the next day the picker strikes the next busiest place, and so on each day, until Chani's STAY HERE line moves the phase to 0x5d.
+
+### What the illness does
+
+- **No work.** The period loop skips a troop with speech bits 0x430 (`6c92`). ds:fa clears only 0x30, and an ill troop is skipped again (`6ce4`). So it mines, trains, spies and irrigates nothing, and the palace's production drops.
+- **No orders.** Over the map, CHANGE TROOP OCCUPATION, MODIFY EQUIPMENT and MOVE TROOP are greyed (`7857`). A click on a greyed row closes the contact, as CUT CONTACT does (a Spice86 capture of the original). The refusal "We are too sick to do anything." (list 4, condition 629) answers an order given some other way.
+- **Nothing else.** Motivation, population and equipment are left alone: no one dies and no one leaves. The line "I am sad to report F deaths among our people." belongs to battles (word 0x10 bit 0x400).
+- **Harkonnen raids** pick no sietch with an ill troop (`2034`). The engine does not build the raids yet.
+
+### Who says what
+
+| Speaker | Condition (CD / floppy) | Line |
+| --- | --- | --- |
+| Troop chief, message 8 | 694 / 688 | "There is a strange disease here in \x81-\x82. We're all ill... very ill." (CD action 13) |
+| Troop chief, contact | 514 / 512 (w[0x34] & 0x400, action 6) | "Everybody is ill here. We need help." |
+| Stilgar, Chani (list 0) | 293 / 292: b[0xf9] == 0, b[0xf8] > 0, not at an ill place | "We have to go to \x81-\x82 to stem the epidemic." (CD action 13) |
+| Stilgar | 297 / 296 (at an ill place) | "In the matter of diseases, Chani is far more qualified than I am." |
+| Chani (list 1) | 365 / 362 (at an ill place, not room 2; action 6) | "Let's go and see these Fremen!" |
+| Chani | 366 / 363 (room 2 of an ill place) | "Strange disease we have here, very strange. I wouldn't be surprised if the Harkonnens were behind all this. But I'm sure I can cure this disease. All I need is time." |
+| Chani | 367 / 364 (travelling with Paul) | "Strange indeed." |
+| Chani | 297 / 296 | "I'm working on it now. But, please Paul, don't stay here or I won't get anywhere." |
+| Chani, STAY HERE (list 6) | 366 / 363 (action 11: phase + 1) | "OK Paul! I'm staying here to cure the Fremen. I guess that it will take me at least a couple of days." |
+| Chani, COME WITH ME (list 5) | 394 / 391 (ill place, b[0xf9] > 0; action 2) | "No Paul! I have to stay here to cure these Fremen." |
+| Chani, message 9 | 695 / 689 | "Paul, I'm so happy! I've managed to cure everybody, here in \x81-\x82." |
+| Troop chief | 507 / 510 (0x800; the CD also phase 0x60-0x64) | "Chani has cured all of us, \x93" |
+
+The \x81-\x82 names are staged at every line of a speaker below 9 before phase 0x64 (`9519`): they name ds:11db, the latest ill place. Chani's message 9 in a dream therefore names the next ill place when one is left, not the cured one. Action 13 (`a28e`) zooms the globe on a place elsewhere; the engine logs it and does not build it.
+
+### Chani's cure
+
+- **What she needs.**
+  - Phase 0x5d, set only by her STAY HERE answer in room 2 of an ill place (condition 366, action 11, the first time only).
+  - Her record at a place (byte 2 = 0x80) that has an ill troop (`1e24`).
+  - Paul not in her room. Each period `1d9f` skips the step while persons_in_room has her bit (7). Her line says it too: "don't stay here or I won't get anywhere".
+- **How long.**
+  - ds:f9 grows by 8 a period (`1eda`), and STAY HERE adds 0x10 (`9548`). From 0 that is $(\mathtt{0x100} - \mathtt{0x10}) / 8 = 30$ periods, nearly two days.
+  - Each period she is moved to room 2 of her place (`1e01`).
+  - While ds:f9 > 0 she refuses to come along.
+- **The recovery** (ds:f9 wraps to 0).
+  - Every troop at her place loses 0x400 and gets 0x800.
+  - Her message 0x709 is queued, and ds:f8 − 1.
+  - ds:11db = the first place with an ill troop left. Paul must bring her there and tell her to stay. The phase is already 0x5d, so her STAY HERE adds 0x10 again.
+  - The stopped bit stays. A spice troop's viability check clears it the next period; an army troop trains with it.
+- **The end.** With no ill place left, `11cb` is called directly: phase 0x60 and ds:ff = 0, with no phase triggers. Chani goes to room 2 of the Harkonnen palace (place 1). Stilgar: "Let's go and see Chani." / "I don't remember where we left her. Maybe you can try to contact Fremen." (condition 320).
+
+### Phase 0x64: Chani has vanished
+
+- **How it comes.**
+  - **CD:** `1ebe` runs when a map contact closes (`7b79`) and before an in-person troop chief's lines (`93a2`). With the troop's 0x800 and phase 0x60-0x63, it calls `121f` with 0x64: the phase triggers, then the callback.
+  - **Floppy:** no such code. The contact line "Oh! Chani isn't with you... She vanished! Nobody has seen her." (condition 504) carries action 12, the next chapter. On the CD the same line (507) has no action.
+  - **Both:** closing the contact clears the troop's 0x800, along with word 0x12's 0x1200 and word 0x10's bits outside 0x3f0 (`7b7c` / `889a`). The engine clears only 0x800.
+- **The callback** (the table's entry for 0x64 is the byte 0xe9 at `11e6`: with the next word, the first entry, it forms `jmp 1f13`).
+  - It takes the Harkonnen fortress with the largest latitude word above −100 (type ≥ 0x28 without status bit 3, `5d36`) where no Fremen troop is attacking (occupation exactly 6, `5098`).
+  - The scan goes on while the next record's first name is below 8.
+  - Chani goes to its room 3 (her record = 03, type, 80, place + 1), and ds:f2 = (first name << 8) | last name.
+  - Feyd-Rautha's COMM message 0x2b0a follows ("Ahh, your little darling is in my hands. I don't think you will see her again soon, little pup!"), with "A message has arrived in the palace" (0x201).
+  - **CD:** the scan starts at place 2. With no candidate, Chani goes to place 0, the Atreides palace.
+  - **Floppy:** the scan starts at place 0. With no candidate, she stays where she is (still the COMM message).
+- **The original, captured.** Spice86, floppy, the patched chapter 20 save. Right after "Oh! Chani isn't with you...":
+  - ds:2a = 0x64;
+  - Chani's record 03 2d 80 06 (place 5, Arrakeen-Harg, room 3);
+  - ds:f2 = 0x0106 (Arrakeen-Harg);
+  - the COMM list gains 0x2b0a;
+  - vision 0x201 is queued;
+  - the contact's close clears 0x800.
+
+  The engine gives the same place and values.
+- **For the next queue item (Chani's kidnapping, not built here).**
+  - In phases 0x64-0x67 every troop's motivation counts 40 less, at least 10 (`6f31`). Stilgar: "We all like Chani a lot. I'm sure her disappearance will have a bad effect on the motivation of the Fremen troops."
+  - Thufir (condition 126) suggests espionage. A spy at her fortress says "One of my men told me that he was sure they had a prisoner." (condition 588, w[0x4e] == w[0xf2]).
+  - Found in her room, Chani's "Oh Paul! I was so scared!..." (condition 360) has action 12, which brings phase 0x68.
+  - The dialogue data also lets Gurney's STAY HERE answer at a sietch with army troops ("Good! I'm going to try to teach these Fremen...", condition 288, action 12, once) move any phase to the next chapter. The first time at 0x5c or 0x5d, it would skip the rest of the epidemic.
+
+### Built
+
+- **World** (story.cpp):
+  - `illnessNewDay` (the picker, in `runPeriod` at slot 0, before the stage-7 gate);
+  - `chaniCurePeriod` and `chaniCureStep`: the period step, the cure, phase 0x60 through `phaseCallback(0x60)`;
+  - `chaniStaysHere` (STAY HERE);
+  - `illTroopAt` (the CD's chain or the floppy's first troop);
+  - `curedTroopMet` (CD only) and `clearCuredBit`;
+  - `chaniPrisoner`, the 0x64 callback, in both release variants.
+- **GameScreen:**
+  - the contact's close runs `curedTroopMet` and `clearCuredBit`, then the story;
+  - a contact line's action 12 applies at once (`nextTroopLine`);
+  - `startConversation` runs `curedTroopMet` for a troop chief;
+  - `stageIllnessNames` runs in `startConversation`, `presentVerb` and `presentLine`, and the current place's names come back when the talk ends;
+  - the troop menu greys the three rows of an ill troop;
+  - a click on a greyed contact row closes the contact.
+- **Log lines:**
+  - "World: epidemic at place ...";
+  - "World: Chani stays at place ... (cure ...)";
+  - "World: Chani has cured the troops at place ...";
+  - "World: the epidemic is over; Chani is taken to the Harkonnen palace (phase 0x60)";
+  - "World: troop N, cured by Chani, is met at phase ...: phase 0x64";
+  - "World: Chani is held at place N, room 3";
+  - "Talk: speaker N, the ill place N named (9519)";
+  - "Troop command: ... is greyed: the contact closes".
+- **Checks:**
+  - `scripts/check_epidemic.sh` (`dune_story_setup=epidemic`, both releases). It covers two sietches falling ill on two days, the message, the contact lines, the three greyed rows, Stilgar's line, Chani's talk and STAY HERE (phase 0x5d), the 30-period cure, message 0x709, the second sietch, phase 0x60, the cured troop's contact (CD `1ebe`, floppy action 12), Chani's prison, Feyd-Rautha's message and the motivation − 40.
+  - Fidelity scenarios `epidemic-contact` and `epidemic-cured` use patched chapter 20 saves. The original is in `captures/epidemic/`.
+- **Not built:**
+  - action 13's globe zoom;
+  - the Harkonnen raids;
+  - the other bits the contact's close clears;
+  - the troop menu's other greys (the original's cured troop also has MODIFY EQUIPMENT greyed).
+
+## Chani's kidnapping and rescue (2026-09-29)
+
+Queue item 7, traced in the CD 3.7 executable (OpenRakis' asm/cd/DNCDPRG_RECENT.ASM, capstone on `DNCDPRG.EXE`) and in the floppy image (`DUNEPRG.unpacked.bin`, addresses found by their bytes), with the dialogue data. Checked on Spice86 with a patched save (`scripts/dune_save_patch.py`). The demo's "Chani gonna be kidnapped by Feyd-Rautha" is phases 0x60 and 0x64 (see "The Fremen epidemic"); this section follows her from there.
+
+### Addresses
+
+| What | CD seg000 | Floppy |
+| --- | --- | --- |
+| Phase 0x64: her prison (room 3 of a fortress, ds:f2, COMM 0x2b0a) | `1f13` | `222e` |
+| Motivation − 40 in phases 0x64-0x67, at least 10 | `6f31` (in `6efd`) | `7c99` |
+| Dialogue action 12: (phase & 0xfc) + 4, once | `a235` -> `121f` | `aa1e` |
+| Phase 0x68 and 0x6c callbacks: nullsubs | table `11e7` | |
+| The speaker's flags into ds:18, the time since its stamp into ds:16 | `94f3` (from `9f9e`) | `9fb7` |
+| COME WITH ME: flag 0x40, stamp word 8, ds:10 bit | `9603`-`9616` | |
+| STAY HERE: flag 0x40 cleared, stamp word 0x0a, ds:10 bit cleared | `9556` | |
+| The talk's close: flags + 0x20, − 0x04; the HUD follows flag 0x40 | `2997` -> `97cf`, `9825` | |
+| Gurney, Stilgar and Chani staying at a staged place (ds:f7) | `3385` | |
+| A sietch lost: the first nine characters there held in room 3 | `74d3`-`74e8` | `821a`, `823a` |
+| Charisma with the motivation spill | `6f78` | `7ce0` |
+
+### How she is held
+
+- `1f13` puts her record at (room 3, the fortress's type, 0x80, place + 1) and ds:f2 = the fortress's names; Feyd-Rautha's COMM message 0x2b0a follows. The fortress is the one with the largest latitude word over −100 that is not Atreides and has no attacking troop (see "The Fremen epidemic").
+- Nothing else moves her. The only code that reads her record directly is the cure step (`1d9f`), ds:f7 (`3385`) and `1f13`. The character-table loops (`1d66` daily, `2170` the room changes, `6dbb` a fortress turned sietch, `74b6` a sietch lost) treat her like the others: a fortress that becomes a sietch two days after its capture moves her to room 2 of the new sietch (`6dbb`).
+- The fortress's room table (`cs:1d35`, three rooms for types 0x28-0x2f) keeps room 3.
+
+### What Paul learns, and from whom
+
+| Speaker | Condition (CD / floppy) | Line |
+| --- | --- | --- |
+| Feyd-Rautha, COMM | message 0x2b0a | "Ahh, your little darling is in my hands. I don't think you will see her again soon, little pup!" |
+| Thufir | 126 / 126 (phase 0x64) | "Chani kidnapped by Feyd-Rautha Harkonnen. That's not good. I wonder where Chani is now, probably not in the Harkonnen palace. My guess is that she is in one of these Harkonnen fortresses. Why don't you use espionage troops to try to locate her?" |
+| Stilgar | 126 / 126 | "We all like Chani a lot. I'm sure her disappearance will have a bad effect on the motivation of the Fremen troops." |
+| Any troop chief | 625 / 623 (phase 0x64, a roll of 1 in 8) | "We're all sad about Chani. Where can she be now?" |
+| A troop at her fortress | 512 / 510 (ds:f7 bit 7) | "Chani is here." |
+| A spy at her fortress | 588 / 586 (occupation exactly 5, w[0x4e] == w[0xf2]) | "One of my men told me that he was sure they had a prisoner." |
+
+- The spy's line comes after its count ("We've seen N Harkonnen troops.", 587): before that, lines 583 and 585 end the list. ESPIONAGE (`6a45`) marches to the nearest hidden fortress within 30 cells (ds:e2/e4), so a spy reaches her fortress only while it is hidden and near one of Paul's sietches.
+- "Chani is here." needs no spy: any troop at her fortress says it, from `3385`'s ds:f7, when the contact is not at Paul's place.
+- Paul still cannot land there while Harkonnens hold it (`503c`: he is shot).
+
+### How she is freed
+
+- **Taking the fortress** (`7443`, by battle or by the vegetation) does not touch her record or the phase. It makes the landing safe (`503c`), nothing more. The motivation stays − 40.
+- **Meeting her.** In room 3, TALK walks her list 0 first. Its condition 360 (CD; floppy 357) is phase 0x64-0x68: "Oh Paul! I was so scared! I'm so glad you're able to deliver me from these Harkonnen thugs." (floppy "Oh Paul! I was scared to death... I'm so happy you've been able to deliver me from these Harkonnens."). The line is said once; its action 12 moves the phase to (phase & 0xfc) + 4 = 0x68, and `121f` runs the phase triggers and the 0x68 callback, a nullsub.
+- **The morale.** `6efd` subtracts 40 only in phases 0x64-0x67, so 0x68 ends it: every troop's motivation counts in full again. No charisma comes with it. Stilgar at phase 0x68 (321 / 319): "Good to see you with Chani again. The Fremen have recovered their motivation!"
+- **The motivation rule.** With $m$ the troop's motivation (+ 20 with ds:fa; + 30, at most 100, for an attacking troop at Paul's place; 100 for the ecology jobs 8 and 9; else at most 100), phases 0x64-0x67 give $\max(m-40,10)$ (a signed compare after the subtraction). An attacking troop elsewhere keeps its unclamped $m$. It weighs in battles (`342d`), the chiefs' consent (`95c1`), and the contact lines (ds:36).
+- **The original, captured** (Spice86, floppy, `captures/chani/rescue`, the patched chapter 20 save): ds:2a 0x64 -> 0x68 at her line; ds:18 = 0x30 (her flags) through the talk; COME WITH ME sets her flag 0x40 and ds:10 bit 7 (0x20 -> 0xa0); the talk's close puts her on the HUD (ds:1153 = 7).
+
+### Gurney's skip (condition 288)
+
+Gurney's STAY HERE answer at a place with a training troop (CD 288 / floppy 287, `b[0x66]`: ds:66 counts military training) is "Good! I'm going to try to teach these Fremen the handling of arms." with action 12, once. It moves any phase to the next chapter the first time it is said:
+- at 0x64-0x67 it ends the kidnapping without Chani: phase 0x68, the motivation back, Stilgar's "Good to see you with Chani again" while she is still in room 3. Her line then still comes when she is met (360 accepts 0x68) and brings 0x6c (a nullsub);
+- at 0x5c-0x5f it would skip the rest of the epidemic; at 0x60-0x63 it would bring the kidnapping itself (`1f13`).
+
+Most players say it early (the first time Gurney stays at a sietch with an army troop), so it rarely lands in these chapters. The engine follows the data.
+
+### Her other roles
+
+- **The love scene** (phase 0x48, `11139`, floppy `1502`). Her night line in the desert (condition 372, action 12) brings phase 0x48: charisma + 10 through `6f78` (so every troop's motivation + 2 or + 3), the scene 0x1313, her flags + 0x10 ("follows Paul now and always") and − 0x02, ds:1178 = the Fremen troops + 2 (two more rallies bring Leto's death, phase 0x4c), four places revealed.
+- **Following Paul.** Her COME WITH ME answers read her flags through ds:18: before the love scene "Follow you? Okay but I don't want to travel far from this place." (368), after it "Yes Paul, I want to follow you, now and always." (395); STAY HERE likewise (368 / 395). The epidemic's refusals come first (394).
+- **Her lines by phase** (CD numbers): 373 (0x48, at the place where they met, names 0x0503), 374 (0x4e "Ask Stilgar!"), 375 (0x4f the worm), 318 (0x50 Thufir and the worm), 376-380 (0x54-0x57 her father), 349 (0x58 meeting Kynes), 293 and 365-367 (the epidemic), 360 (0x64-0x68 the rescue), 241, 134 and 135 (the final attack), 104 (0xc8 the end).
+- **Healing the sick:** "The Fremen epidemic".
+
+### Found on the way
+
+- **ds:18 and ds:16 were never staged.** `94f3` stages the speaker's record flags (byte 15) into ds:18 and the time since its stamp into ds:16 before every line search; 53 conditions read b[0x18], among them Gurney's introduction (231, flag 0x20: not yet talked), the companions' lines (0x40: with Paul), Chani's before and after the love scene (0x10), and Gurney's espionage hint (266, w[0x16] > 0x10). The engine left ds:18 at its initial 0, so after the love scene Chani still answered COME WITH ME with "Follow you? Okay but I don't want to travel far..." and could say her first-meeting line (368, action 11: phase + 1) again.
+- **Flag 0x40 was never kept.** COME WITH ME and STAY HERE changed only ds:10; the original's talk menu (`9825`), the HUD and ds:18 read the record's flag 0x40. The talk's close (`97cf`) also sets flag 0x20 and clears 0x04.
+- **The floppy's "Muad'Dib".** Phase 0x2c wrote the CD's COMMAND id 0x109 into ds:1201; the floppy (`14a9`, ds:120e) writes 0xfd, so a floppy game from a new start said "Oh, GAME  PAUSED!" for "Muad'Dib".
+- **A sietch lost** (`74b6`, floppy `821a`): the first nine characters staying there go to room 3 of the new fortress, as Chani does in `1f13`. The engine left them in their room of the old type, so they were absent.
+
+### Not built / seen on the way
+
+- `2170` / `221d`: characters left in the desert walk to the nearest place and set flag 0x04 when it is Paul's ("If this was a race, I won!", conditions 37-40). The engine does not move them.
+- `1d66` (daily): a character whose place changed type, or whose room is past the type's room count, goes to room 1.
+- The Harkonnen raids (`1f64`/`2017`, `1fcb`): a sietch taken by a raid also holds its characters.
+
+### Built
+
+- `World::changeCharisma` returns the spill; the phase callbacks 0x2c, 0x48 and 0x50 use it and log "Story: phase N: charisma A -> B, every troop's motivation +S (6f78)".
+- The daily Harkonnen production (`1cda`, floppy `201d`) counts the places that are not Atreides (`friendlyPlace`, `5d36`): no hidden sietch, no held fortress.
+- `Conversation::findEntry` stages ds:18 and ds:16 (`94f3`); `World::setTravelling` (COME WITH ME / STAY HERE, the companion sent home) and `World::talkEnded` (`97cf`).
+- Phase 0x2c's "Muad'Dib" id follows the release; `battleLost` holds the characters in room 3 ("Battle: character N is held in room 3 of place P").
+- The 0x68 callback logs "Story: phase 0x68: the kidnapping is over; ...".
+- **The speedrun bot** (the fixes above changed its runs from Stilgar's spill on). Two bot bugs came up and are fixed: after its last known fort fell with only hidden ones left, the bot kept the last attack group "busy" for good, so no troop was free and no spy went out (the CD full run stalled on day 46 and the Emperor ended it on day 97); and it held the war council at place 2 while that was still a fort (no troop training there to convert it), where Jessica refuses to stay ("Oh no Paul! I don't like this place"), when place 4 was already a sietch. It also logs "war: N known fort(s), M hidden, ..." every 16 rounds.
+- **Checks.** `scripts/check_chani.sh` (`dune_story_setup=chani` and `chani-gurney`, both releases): the spill at 0x2c, 0x48 and 0x50; the prison and ds:f2; − 40 with the floor of 10; Thufir, Stilgar, the spy's "Chani is here." and "prisoner"; the fortress taken (still 0x64, still − 40); Chani in room 3; her line and phase 0x68; COME WITH ME "now and always"; Stilgar at 0x68; Gurney's skip; Stilgar held in a lost sietch. The fidelity scenario `chani-rescue` plays the rescue on the patched chapter 20 save, with the original in `captures/chani/rescue`.
+
+## SKIP TO DESTINATION on the CD: no approach clip (2026-09-29)
+
+Queue item F1. The diagnosis, with the Spice86 memory dumps, is in notes/f1-cd-speedrun-desync.md.
+
+| What | CD seg000 |
+| --- | --- |
+| The approach clip, the CD's landing (SIET, PALACE, FORT) | `travel_arrival_landing_sequence`, `488a` |
+| Called by the scene reload only when ds:4732 bit 0 is set | `2dfb` in `2db1` |
+| The pump's normal arrival arms it: ds:4732 = ds:11C9 & 1 | `loc_4fb0` in `travel_pump` (`4f0c`) |
+| SKIP TO DESTINATION: closes the flight video, fast-forwards, jumps to `loc_4fc3` | `4ffb` |
+
+- A flight that runs to its end lands with the clip. A skipped one jumps past the ds:4732 store, so the room is drawn at once, with no clip and no landing animation. Measured on Spice86: ds:11C9 = 5 before the skip, ds:4732 stays 0, and the exterior is on screen 250 ms after the click.
+- **Built.** `GameScreen::flyToward` records `_flightSkipped`: false at the top, `skipping` after `stopCdFlightView()`. The hostile-zone warning clears `skipping`, as the original hands the flight back to the pump, whose arrival arms the clip. `travelTo`'s CD branch plays `playArrivalVideo` only after a flight that was not skipped, and never falls through to the floppy's `animateOrni(-1)`, so capture runs no longer dump a CD "orni-landing" frame. The log says "Travel: skipped to the destination, no approach clip".
+- **Checks.** `scripts/check_cd_flight_skip.sh` runs two real-time CD flights (the first hop of `cd-speedrun-day1`). Skipped: no clip, and the next click is the exterior's up arrow into the sietch. Left to finish: "SIET.HNM approach clip (result 0)". Fidelity `cd-speedrun-day1` rose from 25.0 to 65.3 %: sp-05 0.8 to 94.3, sp-19 6.9 to 96.3. The rest of the gap is the CD talk layout (F1b), the exterior panel colours (F1c) and the sky (F3).
+
+## Paul's head on the panel (2026-09-29)
+
+Queue item F8. The head above the command box is ICONES 0x10 + ds:E8 at 150,137, drawn over the hinge (ICONES 15 at 126,148). E8 runs from 0 to 10, and 10 (frame 26) faces the player. The routines are the same on both releases; their callers differ.
+
+| Routine | CD seg000 | Floppy |
+| --- | --- | --- |
+| Draw the hinge and the head | `1797` | `1b2c` |
+| Redraw: the rect ds:1E6E (150,137 to 170,160) restored, then `1797` | `17be` | `1b53` |
+| Up: one frame every 8 ticks to 10, nothing while travelling | `17e6` (ds:11C9) | `1b64` (ds:11D6) |
+| Down: one frame every 8 ticks to 0 | `181e` | `1b82` |
+| Fold: 9, a wait, 8 (only when not 0) | `1843` | `1b98` |
+| The line wrapper: skipped when ds:28E7 != 0; sets ds:CE66 while it runs | `1803` | none |
+
+| Event | CD | Floppy |
+| --- | --- | --- |
+| LOOK AT MIRROR (down) | `0eac` | `1279` |
+| RESTART GAME from the game-over menu (ds:46D9 set: DEAD2.HNM, down as its first frame shows); from the mirror the head is already down | `0e47` -> `0e6c` | `1197`: the mirror's zoom out (`11a7` -> `1239`), then `124a` |
+| Game over (DEAD.HNM, down as its first frame shows) | `0dc2` -> `0e66` | none |
+| Paul collapses in the desert (DEAD3.HNM, five frames with the head redrawn, then down; not built in the engine) | `3757` -> `0e77` -> `0ea3` | |
+| THE BOOK (down) | `aee1` (ui element 03) | `ae77` |
+| Travel confirmed (down) | `4745`, only when (ds:11C9 & 3) == 1: the ornithopter | `4f55`, every travel |
+| The departure transition | `47ad`: ds:E8 = 0 at once when not leaving from the cockpit (the worm); `47db`: down for the cockpit's take-off | `4fc7`, `5019`: down in both cases |
+| A character's line (lip-sync id < 0x10, ds:46EB == 0) | `9fec` -> `1803` (down) | none |
+| ui_enter_room_view at the start (fold) | `1868` | `1bbc` |
+| Up | ui_present_room_screen `18b7`, draw_room_game_screen `2df8`, `2e7a`, the globe/map view `5a3a`, menu_npc_actions_cleanup `9895`, the globe element `b8e7` | `1c05`, `30ae`, `3126`, `67e0`, `b7e6` |
+| The dream | `2c9a`: ds:E8 = 0 with the backdrop; `2c7f`: ds:E8 = 10 before the room | nothing: the head stays up |
+
+- **The voice mode.** `cfa0` sets ds:28E8 (the default) to 2 when DNCDPRG finds digital voices and the language is 0 or 3; otherwise it stays 0 (text). The room view copies it into ds:28E7 (`1877`); the globe/map view forces 1 (`5a1a`). So the CD lowers the head for a character's line in text mode, and not with voices or over the map.
+- **The originals, captured.** Floppy, captures/explore (ds:E8 in the memory dumps): 10 in the rooms, the talks, the map and the globe; 0 in the book, the mirror and its menus, the take-off and the flight (ds:11D6 = 5); 10 again at the exterior. CD, captures/cd-speedrun-day1: every character's line shows the head turned away, and it faces the player again after the talk. The floppy's dream (captures/saboteurs/message-memdump) keeps ds:E8 = 10.
+- **Built.** `Panel` draws ICONES 0x10 + its head index last and keeps what lies under it; `Panel::redrawHead` steps it in place. `GameScreen::headUp`, `headDown`, `headFold` and `setHead` keep ds:E8 (`GameState::kHeadIndex`, so it is saved) and step 40 ms a frame; capture runs set the last frame at once, so a harness run always ends on it. `headForDeparture` follows the release; `_headTravel` keeps the head from coming up between the departure and the arrival; `lineHeadDown` is the CD's `1803`; the CD's game over lowers it. RESTART needs no call of its own: the mirror has lowered the head, and the new game's first room raises it from 0. `_voiceMode` models ds:28E7: the engine plays no CD voices, so its default is 0, and the dev key `dune_cd_voice_mode` (0 to 2) models the voiced modes. The take-off animation draws the head over the view.
+- **Check.** `scripts/check_head.sh`: real-time runs on both releases, and on the CD with `dune_cd_voice_mode=2` (the mirror, the room after it, the palace front, the cockpit, the take-off, the flight, the exterior, Gurney's first line), the head read from the pictures; capture runs of the same script must end on the same frames.
+- **Goldens.** `cd/cd-leto-1..3` were replaced (the head turned away while Leto speaks, as the CD capture sp-20 to sp-22 shows). The other checkpoints whose head changed (`story-scene/scene-*`, `story-stillsuit/*`) stay within the tolerance and keep their goldens: no capture of those moments exists.
+
+## The vision dream (2026-09-29)
+
+Queue item F5. When Paul idles in a room with a message queued (0x1c2 ticks, CD `2b8a`, floppy `2e75`) and the sender is not there, the message comes as a dream. The two releases share the idea, not the code: the floppy's routine is not the CD's shifted by a constant.
+
+| Step | CD seg000 (`present_vision_dream`, `2bd2`) | Floppy (`2eba`) |
+| --- | --- | --- |
+| Stage the place for the conditions and the names 0x81/0x82 | `2bf1`, `2c1d` -> `331e`, `2e98` | `2ec8`, `2ee7` -> `35ca`, `3144` |
+| A Fremen report goes to the place's troop (byte 9 of the place record; troop 3 for message 0x0e), lip-sync 0x0e | `2c23`-`2c43` | `2eed`-`2f0d` |
+| Transition 6 into the backdrop | `2c92` -> `2c9a` | `2f4c` -> `2f54` |
+| The backdrop | `2c9a`: ds:E8 = 0, VIS.HSQ sprite 0 | `2f54`: VIS.HSQ sprites 0-4 (five layers); the head untouched |
+| The line (DIALOGUE character 16, list 4) | `96d8` | `a195` |
+| The voice | `2c4a` -> `9ef1`: the line's voc with lip-sync when a voice file exists (`a6cc`, `a75c`) | none |
+| Dequeue | `2a34` | `2d24` |
+| Blank verbs | `2c52`-`2c5a` | `2f17`-`2f1f` |
+| The shimmer: a frame task every 6 ticks, effect 0x0a | `2cc7` | `2f8e` |
+| The wait (a click or a key ends it) | 0xbb8 ticks (`ddb0`) | 0x7d0 ticks (`d779`) |
+| Back: ds:EA = 0xff, the room presented (al = 6) | `2c7a`-`2c8c`, ds:E8 = 10 first | `2f3f`-`2f46` |
+
+- **The shimmer** is a palette rotation: colour 128 + i shows VIS's colour 128 + ((i + step) mod 64), one step every 6 ticks. Measured from the DAC dumps on both releases.
+- **The floppy's line** is in the talk balloon (ICONES 0x1c tiles, blue under VIS's palette) at 152,17 to 316,101, in colour 240, which VIS's palette makes light.
+- **The CD's line.** In text mode (ds:28E7 = 0) it sits at the foot of the view: the 9-row font, white with a dark one-pixel outline, from x 15, the last line's top at y 136.
+- **The CD's map window.** The line carries dialogue action 13 (`callback_event_dialogue_line_0d`, `a28e`). Unless the voices speak alone (ds:28E7 == 1) or the place is Paul's own, it draws PALPLAN.HSQ sprite 7 at 168,23, the map window 176,32 to 288,88 centred on the place (`5b55`, `map_draw_zoomed_globe`), the markers (`5dce`) and ICONES 0x36 over the place (`62fe`). The floppy's capture has no window.
+- **Evidence.** The floppy dream is built to match its capture (captures/saboteurs/message; message-memdump adds the memory: ds:E8 = 10, speaker 0x0e). The CD dream is built from the code above (and madmoose's annotations and ports), not from a capture, as the user asked. A CD capture had been taken before that change of plan (captures/cd-dream: a patched day-1 CD save, tests/fidelity/saves/cd-dream; series/ holds one frame a second). It shows the same screen: the dream about 3 s after the load, for 16 s, ds:E8 = 0, ds:47C4 = 0x0e, ds:28E7 = 0, then the palace front with ds:E8 = 10.
+- **What was wrong.** The engine drew VIS sprite 0 alone (on the floppy a sparse layer, so the clouds came out mostly black), deleted the portrait, showed " Continue..." and waited for a click. It also spoke the report through the troop at Paul's place, not the one at the message's place.
+- **Built.** `presentVision` keeps the portrait (`_dreamTroop` from the place record), sets the CD's ds:E8 = 0 and times the dream. `drawTalk` draws the release's backdrop, the floppy's balloon or the CD's subtitle, and the CD's map window (`drawPlaceInset`, only for the dream so far). The verbs are blank. `update` rotates the palette and ends the dream; a click or a key ends it early (`endDream`). Not built: transition 6 (the engine has no transitions yet) and the CD voice (the engine plays no CD voices).
+- **Checks.** `scripts/check_dream.sh` (both releases, real time: the troop, the portrait, clouds not black, blank verbs, the head, the end by itself). Fidelity `saboteurs-message` (floppy) and the new `cd-dream`. `scripts/dune_fidelity.py` now also copies a scenario's CD saves (DUNE37Sn.SAV).
+
+## The light of the hour and WAIT FOR EVENING (2026-09-29)
+
+Queue items F2 (the evening fade), F3 (the exterior colours by time of day)
+and F1c (the CD exterior's panel colours). One cause for F3 and F1c, and the
+fade for F2.
+
+### Addresses
+
+| What | CD (seg000) | Floppy |
+| --- | --- | --- |
+| sky_palette_id_for_time | 395c / 395f, table ds:2280 | 3bea, table ds:28d6 |
+| open_sky_or_skydn_palette | 3971 (resource 0x28 + ds:22e3) | 3bff (0x28) |
+| write live / fade target | 398c / 39b9 | 3c16 / 3c36 |
+| set_sky_palette | 388d | 3b13 |
+| the periods' sky refresh | 38e1 (from 1b43) | 3b7b |
+| the blend's step task | 3916, every 0x10 ticks | 3bb1 |
+| drain a running blend | 390a | (the same loop) |
+| WAIT FOR EVENING / MORNING | 0f48 / 0f67, preset 0fb2 | the same code |
+| present with transition 0x2a | 189a (al = 0x2a), c108 | the same |
+| draw_outdoor_backdrop (CD only) | 380c, bases ds:1972 | none |
+| draw_SAL skips sheet 0 (CD only) | 3b68 | 3dde opens every sheet |
+
+### The record
+
+`sky_palette_id_for_time` puts the period of the day (time & 15) through the
+table 8, 8, 9 x 9, 10, 10, 11 x 3 and adds (time >> 2) & 0x1c, four records
+per day of the week: sunrise, day, sunset and night of days 0-7, the offset
+table's entries 8-39. With $t$ the game time:
+
+$$
+\mathit{record} = T[t \bmod 16] + 4 \left( \left\lfloor t / 16 \right\rfloor \bmod 8 \right)
+$$
+
+Checked against the DAC of the captures: floppy evening/desert (time 3: 9),
+evening/e39 (0x0c: 10), go-search se-02/se-03 (0x24, 0x25: 17); CD cd-dream
+cdd-3 (8: 9). The engine used swift-dune's fixed 1, 3, 6, 16 (records 9,
+11, 14, 24): right only for the day of day 0. SwiftDune's "min(day, 5)"
+does not appear in the code.
+
+### The ranges
+
+The floppy writes SKY.HSQ's first 80 colours at 128 and the next 15 at 240
+(the panel). The CD reads SKYDN.HSQ when ds:22e3 = 1 (every room but 0x1005:
+loc_139EC sets it, 13A18 clears it) and writes 151 colours at 73 and the next
+16 at 240; with ds:22e3 = 0, 80 at 128 and 16 at 240.
+
+### The CD's exteriors
+
+A place's first room on the CD is not the arrival video's last picture:
+`draw_outdoor_backdrop` (380c) sets ds:22e3 = 1, calls set_sky_palette and
+draws sprite 0 of resource room1_backdrop_base[kind] (ds:1972: 0x3c DS0
+sietch, 0x72 DP1 palace, 0x7f village, 0x76 DF1 fortress, 0x84 DH0 Harkonnen
+palace; a village's 0x7f becomes 0x7a + first name / 2, VIL1-VIL6). The
+stills carry no palette. Then `draw_SAL` does not open sheet 0 (GENERIC, 3b68),
+so the sky record's tail stays on the panel: blue by day. The engine drew the
+PALACE.HNM picture (its sky a flat violet) and re-applied GENERIC's colours
+(the yellow panel of F1c). DP1.HSQ under record 9 matches cd-speedrun-day1
+sp-03 pixel for pixel.
+
+### The blend
+
+`set_sky_palette` (388d) sets ds:46df (an outdoor view is up) and, unless a
+blend runs toward the same record, writes the record. Each period passed
+(1b23 -> 38e1) while ds:46df is set, when the record changes: the record
+becomes the target (ds:46d6), ds:46d7 = 0x40 and the step task every 0x10
+ticks, each step moving the live colours by (target - live) / steps left,
+truncated. A room draw clears ds:46df (2e05, 08f0, ui_teardown_room_view
+18de), so the blend stops when the view is left.
+
+WAIT FOR EVENING (0f48) goes to period 12 of today, WAIT FOR MORNING (0f67)
+to period 0 of the next day (only from period 11). Before dawn (EVENING from
+periods 0-1, MORNING from 11-12) the record of time + 2 is set first (0fb2).
+A running blend is drained (390a), the periods pass (each arming the blend),
+and the view comes back through transition 0x2a (the spiral, segvga 2eea):
+one pixel of each 8x8 block per step goes black through a 65-entry spiral
+walked backwards, the new palette is set, and the new picture comes back
+through the spiral forwards. The palette is still the old light (the blend
+is armed, not stepped); the frame tasks do not run during the transition,
+so the blend's 64 steps start after it. With the truncated step the first
+visible change comes some 17 steps in. Measured (captures/evening, one
+checkpoint every 500 ms): the spiral by 1.5 s, the first change at 3.0 s,
+the evening reached at about 6.75 s.
+
+### Built
+
+- `GameScreen::skyPaletteFor` (the record), `loadSkyRecord` (the ranges),
+  `setSkyPalette` (388d), `skyPeriodChanged` (38e1, at once in capture runs
+  except for the WAIT verbs), `updateSkyBlend` (3916), `spiralPresent`
+  (transition 0x2a, paced at 11 ms a step, fitted to the capture), the WAIT
+  verbs as 0f48/0f67; `drawBackdropStill` (380c) for the CD's first rooms;
+  the CD's draw_SAL leaves sheet 0's palette alone.
+- The Amiga keeps its own table (`amigaSkyRecord`, the same rule).
+- Checks: `scripts/check_sky_light.sh` (floppy blend and pixels at e05/e39,
+  CD palace front pixels and the still); fidelity scenario `evening`
+  (captures/evening, real time).
+- Not built: the CD's desert stills (380c's DN20-DN38 / VG01-VG10 terrain
+  tiles); the engine's desert and cockpit on the CD still draw the floppy's
+  landscape under SKY.HSQ.
 
 ## A fort turned sietch moves its people (2026-09-28)
 

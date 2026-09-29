@@ -60,7 +60,7 @@ for f in LICENSE NOTICE CONTRIBUTING.md Makefile; do put "$f"; done
 for f in \
 	scummvm_source.sh \
 	test_dune_scummvm_sdl.sh test_dune_scummvm_native.sh test_dune_scummvm_runtime.sh \
-	check_dune_build.sh check_speedrun.sh watch_speedrun.sh check_flight_landscape.sh check_leto_loop.sh check_celimyn_tuek.sh check_hemispheres.sh check_search_equipment.sh check_water_of_life.sh check_ecology_win.sh check_endless_play.sh check_smugglers.sh check_other_releases.sh build_dune_scummvm_ios.sh install_dune_scummvm_ios_devicectl.sh \
+	check_dune_build.sh check_speedrun.sh watch_speedrun.sh check_flight_landscape.sh check_leto_loop.sh check_celimyn_tuek.sh check_hemispheres.sh check_search_equipment.sh check_water_of_life.sh check_ecology_win.sh check_endless_play.sh check_smugglers.sh check_chani.sh check_epidemic.sh check_head.sh check_all.sh check_saboteurs.sh check_other_releases.sh build_dune_scummvm_ios.sh install_dune_scummvm_ios_devicectl.sh \
 	ScummVM-iOS.xcscheme PREFLIGHT.md README-local-builds.md \
 	dune_regress.py dune_accept_golden.py dune_audio_level.py \
 	dune_sprite_sheet.py dune_hnm_frames.py dune_room.py dune_dat.py dune_unlzexe.py chani_grep.py dune_disasm.py asm_range.py dune_dialogue_dump.py dune_script_trace.py dune_save_patch.py globe_ref.py dune_amiga_extract.py segacd_iso.py segacd_img.py segacd_bitmaps.py segacd_sprites.py segacd_ds_align.py segacd_ds_convert.py segacd_portrait_match.py segacd_portrait_pose.py \

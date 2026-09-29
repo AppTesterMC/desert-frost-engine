@@ -50,6 +50,7 @@ class Music;
 class Resource;
 class SaveGame;
 class SentenceBank;
+class NightAttack;
 class Sprite;
 class StartupLog;
 
@@ -198,7 +199,8 @@ private:
 	};
 
 	enum {
-		kParagraphWidth = 126 ///< Text width inside the command box.
+		kParagraphWidth = 126, ///< Text width inside the command box.
+		kHeadStepMillis = 40   ///< the head's frame step: wait_a_bit(8), 8 ticks of 5 ms
 	};
 
 	/** What a command row does in the current screen. */
@@ -240,6 +242,7 @@ private:
 		kRowAskMore,    ///< ASK FOR MORE INFORMATION (troop contact)
 		kRowMirror,     ///< LOOK AT MIRROR (palace bedroom)
 		kRowMixer,      ///< Mixer Panel (CD rooms; the panel is not built)
+		kRowOthers,     ///< "  Others...": the next page of rows, or the first (CD d45d)
 		kRowMirrorAway, ///< Look away from the mirror
 		kRowBargain,    ///< ARGUE / ACCEPT / REFUSE (rowArgument = the ds:9f value)
 		kRowWhat,       ///< " WHAT ? ": the line again
@@ -273,6 +276,8 @@ private:
 
 	void composeView();
 	bool drawVideoBackdrop(byte placeType);
+	bool drawBackdropStill(byte placeType);
+	Common::String _lastBackdrop; ///< logged when it changes
 	void drawRoom(int pressedRow = -1, int pressedArrow = -1);
 	/** The navigation panel's layout and lit exits for the room (floppy seg000:329F). */
 	void roomNav(bool exits[4], bool &canLeave);
@@ -381,6 +386,8 @@ private:
 	void ecologyWinSetup();
 	void firstVisionForSetup();
 	void endlessPlaySetup(bool withPaul);
+	void epidemicSetup();  ///< dune_story_setup=epidemic (scripts/check_epidemic.sh)
+	void chaniSetup(bool gurney); ///< dune_story_setup=chani / chani-gurney (scripts/check_chani.sh)
 	/** Story setups that check a death or the ending keep those rules in a capture run. */
 	static void forceRules(bool on);
 	void drawEnding();
@@ -398,6 +405,9 @@ private:
 	HnmPlayer *_flightVideo = nullptr;
 	Common::Array<byte> _mntData[4];
 	int _mntClip = -1;
+	/** The last flight ended by SKIP TO DESTINATION (CD 4ffb jumps to loc_4fc3, past
+	 *  "ds:4732 = ds:11C9 & 1" at loc_4fb0): the scene reload (2dfb) then skips 488a. */
+	bool _flightSkipped = false;
 	Common::String _pendingFlightDump; ///< dump runs: a flight frame to write once on screen
 	uint32 _mntNextFrame = 0;
 	bool startCdFlightView();
@@ -478,6 +488,25 @@ private:
 	int _commList = -1;             ///< the COMM list on the panel: 0 new, 1 seen, -1 none
 	bool _desert = false;           ///< Paul stands in the open desert (current_scene 0xff)
 	bool _visionDream = false;
+	/**
+	 * The dream (present_vision_dream, CD seg000:2bd2 / floppy 2eba): the
+	 * troop whose chief speaks a report (2c23-2c43: the place record's byte 9,
+	 * troop 3 for message 0x0e; lip-sync 0x0e), the place (ds:47E6), when it
+	 * began and when it ends by itself (wait_interruptable: CD 0xbb8 ticks,
+	 * floppy 0x7d0), and the shimmer: VIS's colours 128-191 rotated one step
+	 * every 6 ticks (frame task CD 2cc7 / floppy 2f8e, effect 0x0a).
+	 */
+	uint _dreamTroop = 0;
+	int _dreamPlace = -1;
+	uint32 _dreamStart = 0;
+	uint32 _dreamUntil = 0;
+	byte _dreamPalette[64 * 3];
+	bool _dreamPaletteValid = false;
+	uint _dreamStep = 0xffff;
+	void endDream();
+	void applyDreamPalette(uint32 now, bool force);
+	void drawDreamSubtitle(const Common::Array<Common::String> &lines);
+	void drawPlaceInset(uint place);
 	bool _ending = false;           ///< an ending text is up
 	Common::String _endingText = "As Paul Atreides failed"; ///< the ending's COMMAND, found by its start
 	const char *_pendingEnding = nullptr; ///< an ending waiting for the talk to close
@@ -501,13 +530,87 @@ private:
 	void drawParkedOrnis(Graphics::Surface &target, uint skip);
 	/** orni_anim_loop (seg000:47fb): take-off (+1) or landing (-1) over the current room. */
 	void animateOrni(int step);
+	/**
+	 * Paul's head on the panel (ds:E8, GameState::kHeadIndex: ICONES 0x10 +
+	 * index, 10 faces the player), one frame every 8 ticks (40 ms):
+	 * ui_hud_head_animate_up (CD seg000:17e6, floppy 1b64), blocked while
+	 * travelling (CD ds:11C9, floppy ds:11D6); animate_down (CD 181e, floppy
+	 * 1b82); the fold to 9 then 8 (CD 1843, floppy 1b98). Capture runs set
+	 * the last frame at once, so a harness run always ends on it.
+	 */
+	void headUp(const char *why);
+	void headDown(const char *why);
+	void headFold(const char *why);
+	void setHead(uint index, bool step);
+	/** The head at a departure (CD 4745 / 47ad, floppy 4f55 / 4fc7 / 5019). */
+	void headForDeparture();
+	/** CD only: a character's line lowers the head in text mode (9fec -> 11803). */
+	void lineHeadDown();
+	bool _headTravel = false; ///< ds:11C9 (CD) / ds:11D6 (floppy) set: the head cannot come up
+	/**
+	 * The CD's voice_subtitle_mode (ds:28E7): the default (ds:28E8) is 2 when
+	 * DNCDPRG finds digital voices and the language is 0 or 3 (cfa0), else 0
+	 * (text). The engine plays no CD voices, so its default is 0; the dev key
+	 * dune_cd_voice_mode models the voiced modes. The globe/map view forces 1
+	 * (5a1a); the room view restores the default (1877).
+	 */
+	byte _voiceMode = 0;
+	byte defaultVoiceMode() const;
 	void openMirror();
 	void drawMirror();
 	void drawResults();
 	void openTroop(uint troopId, bool fromMap);
 	void drawTroop();
 	void drawInfoBox(const Common::Array<Common::String> &lines);
+	/** The sky record for a time (sky_palette_id_for_time: CD 395f, floppy 3bed), minus the table's 8. */
+	static uint skyPaletteFor(uint16 gameTime);
 	uint skyPalette() const;
+	/**
+	 * The time-of-day light (the sky's 80 colours and the panel's tail, CD
+	 * 388d-39e1, floppy 3b13-3c55): set_sky_palette writes the record of the
+	 * hour, or leaves a running blend alone; each period that changes the
+	 * record while an outdoor view is up arms the blend (38e1 / 3b7b): 0x40
+	 * steps, one every 0x10 ticks, each moving the live colours by
+	 * (target - live) / steps left. The CD's rooms read SKYDN.HSQ (151
+	 * colours at 73, 16 at 240) unless ds:22e3 = 0 (room 0x1005 only); the
+	 * floppy SKY.HSQ (80 at 128, 15 at 240).
+	 */
+	struct SkyLight {
+		int record = -1;       ///< current_sky_palette (CD ds:46d6, floppy 4232), minus 8
+		bool active = false;   ///< ds:46df / floppy 423b: an outdoor view is up
+		bool skyDn = false;    ///< ds:22e3: the record comes from SKYDN.HSQ
+		uint steps = 0;        ///< ds:46d7 / floppy 4233: blend steps left
+		uint32 next = 0;       ///< when the next step is due
+		byte live[256 * 3];    ///< 6-bit DAC values of the sky's ranges
+		byte target[256 * 3];
+	};
+	SkyLight _sky;
+	bool loadSkyRecord(uint record, bool skyDn, byte *rgb6);
+	void writeSkyLight();
+	void setSkyPalette(bool skyDn);
+	void skyPeriodChanged(bool blend);
+	void updateSkyBlend(uint32 now);
+	void spiralPresent();
+	bool _waitingBlend = false; ///< the WAIT verbs blend even in a capture run
+	bool _holdPresent = false;  ///< drawRoom composes without showing
+	bool _holdRedraw = false;   ///< passTime leaves the view to its caller
+	enum { kMaxRoomRows = 32 };
+	/** F4, the night battle view: built last (the user's order, 2026-09-29); off until then. */
+	static const bool kNightBattleView = false;
+	uint _roomRowSkip = 0;      ///< the room menu's skip (records), paged by " Others..."
+	bool _keepRowSkip = false;  ///< the next drawRoom keeps the page
+	/** The night battle (CD 0acd / floppy 0c51, drawn for every room while ds:2b is set, CD 2dd3). */
+	NightAttack *_nightAttack = nullptr;
+	Sprite *_attackSheet = nullptr;
+	Common::Array<byte> _attackData;
+	uint32 _attackLast = 0;
+	void drawNightBattle();
+	void endNightBattle();
+	void updateNightBattle(uint32 now);
+	enum {
+		kSkyStepMillis = 80,   ///< 0x10 ticks of the 200.3 Hz timer (CD 3901, floppy 3b9e)
+		kSpiralStepMillis = 11 ///< transition 0x2a's step (segvga 2572: 3 counts after the previous stamp, 2-3 ticks; fitted to captures/evening)
+	};
 	void passTime(uint slots);
 	bool ensureSaves();
 	void setSaveMenuRows();
@@ -521,10 +624,19 @@ private:
 	void startTalkAnimation();
 	void drawTalk();
 	void setTalkRows();
-	void drawBubble(const Common::Array<Common::String> &lines, uint first, uint count, const Common::Rect &box, byte ink);
+	void drawBubble(const Common::Array<Common::String> &lines, uint first, uint count, const Common::Rect &box, byte ink, int pad = 12);
 	uint bubbleLines() const;
 
 	void presentVerb(uint list);
+	/**
+	 * present_first_matching_dialogue_line's seeds (CD 94f3 -> 9519, floppy
+	 * 9fdd): before phase 0x64, a speaker below 9 has the latest ill place
+	 * (ds:11db) named for the text codes 0x81/0x82 ("We have to go to ... to
+	 * stem the epidemic."). The room menu names the current place again
+	 * (2ecd), which endConversation stands for.
+	 */
+	void stageIllnessNames(uint speaker);
+	bool _illnessNamesStaged = false;
 	/** set_game_phase_and_trigger_callbacks (seg000:121f). */
 	void setGamePhase(byte phase);
 	void applyStory();

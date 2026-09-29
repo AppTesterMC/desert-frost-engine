@@ -113,7 +113,7 @@ void GameScreen::speedrunCampaignSetup() {
 		++rallied;
 	}
 	// Stilgar travels with Paul from day 3 (route item 18).
-	_state.setW(GameState::kPersonsWith, (uint16)(_state.w(GameState::kPersonsWith) | (1 << 5)));
+	_world.setTravelling(5, true);
 	_world.addCompanion(5);
 	_state.setB(World::kCharisma, 29);
 	// The chapters' data effects (character moves, doors, places) the story
@@ -308,6 +308,12 @@ void GameScreen::speedrunCampaign() {
 			for (uint i = 0; i < _world.locationCount(); ++i)
 				if (!_world.location(i).hidden() && _world.friendlyPlace(i))
 					speedrunEquip(i);
+		// With no target and no known fort left, the last attack's group is
+		// free again: no new target would clear it, and its troops (the
+		// whole army) would stay "busy" for good, with no spy sent (the CD
+		// full run stalled so after its eighth fort, 2026-09-29).
+		if (target < 0 && forts.empty())
+			group.clear();
 		// Army troops free for orders.
 		Common::Array<uint> army;
 		for (uint id = 1; id <= World::kTroops; ++id) {
@@ -440,6 +446,9 @@ void GameScreen::speedrunCampaign() {
 				}
 			}
 		}
+		if (round % 16 == 0)
+			speedrunLog(Common::String::format("war: %u known fort(s), %u hidden, %u army troop(s) free, %u spy, best spy %u, target %d",
+					forts.size(), hidden.size(), army.size(), spies, bestSpy, target));
 		if (bestSpy && _world.startEspionage(bestSpy)) {
 			speedrunLog(Common::String::format("troop %u (army %u) goes spying from place %d", bestSpy,
 					_world.troop(bestSpy).armySkill, _world.troopPlace(bestSpy)));
@@ -1262,9 +1271,20 @@ void GameScreen::speedrunOrders(uint id, int job, bool harvester, int moveTo, co
 	const int at = _world.troopPlace(id);
 	if (at >= 0)
 		_world.placeFreeEquipment((uint)at, counts);
-	const bool takeHarvester = harvester && at >= 0 && counts[0] && !(_world.troop(id).equipment & 0x80) &&
+	bool takeHarvester = harvester && at >= 0 && counts[0] && !(_world.troop(id).equipment & 0x80) &&
 			!(_world.troop(id).occupation & 0x40);
-	const bool change = wanted >= 0 && current() != wanted;
+	bool change = wanted >= 0 && current() != wanted;
+	if ((change || takeHarvester) &&
+			(READ_LE_UINT16(_state.vars + World::kTroopTable + (id - 1) * World::kTroopSize + 0x10) & 0x200)) {
+		// A troop repairing a damaged harvester (saboteurs or a worm,
+		// World::harvesterEvents) refuses a new occupation ("We have to
+		// repair our equipment before doing anything else!") and MODIFY
+		// EQUIPMENT is greyed, until its slot the next day: as a player
+		// would, the bot waits and orders it again after the repair. A move
+		// is still taken.
+		speedrunLog(Common::String::format("troop %u is repairing its harvester: the occupation and equipment orders wait", id));
+		change = takeHarvester = false;
+	}
 	if (!change && !takeHarvester && moveTo < -1)
 		return;
 	const bool open = speedrunOpenOrders(id);
@@ -1625,7 +1645,12 @@ void GameScreen::speedrunFinalAttack() {
 	};
 	const uint kThufir = 2, kJessica = 1, kGurney = 4, kStilgar = 5, kChani = 7;
 	// A sietch by the palace (locations 2-4, taken and converted).
+	// One already converted to a sietch first: a fort that is still one
+	// (no troop training there on a new day, 6e20) keeps Jessica out.
 	int council = -1;
+	for (uint index = 2; index <= 4 && council < 0; ++index)
+		if (_world.friendlyPlace(index) && _world.location(index).type < Location::kFortressMin)
+			council = (int)index;
 	for (uint index = 2; index <= 4 && council < 0; ++index)
 		if (_world.friendlyPlace(index))
 			council = (int)index;
@@ -1655,7 +1680,7 @@ void GameScreen::speedrunFinalAttack() {
 		return;
 	showRoom(1);
 	if (!((_state.w(GameState::kPersonsWith) >> kThufir) & 1)) {
-		_state.setW(GameState::kPersonsWith, (uint16)(_state.w(GameState::kPersonsWith) | (1 << kThufir)));
+		_world.setTravelling(kThufir, true);
 		_world.addCompanion(kThufir);
 	}
 	speedrunCompanion(kThufir, false);
@@ -1709,15 +1734,61 @@ void GameScreen::speedrunFinalAttack() {
 		if (here < 2 || here > 4)
 			_world.issueMoveOrder(id, 2 + id % 3);
 	}
+	// Atomics lying free away from the palace (a won fort's stock, or a
+	// swallowed harvester's troop left them): as a player short of men would,
+	// the biggest troop without atomics marches there, takes them (MODIFY
+	// EQUIPMENT) and comes back.
+	Common::HashMap<uint, uint> fetch; // troop -> the place of the atomics
+	for (uint i = 0; i < _world.locationCount(); ++i) {
+		if ((i >= 2 && i <= 4) || !_world.friendlyPlace(i) || _world.placeInBattle(i))
+			continue;
+		byte c[7];
+		_world.placeFreeEquipment(i, c);
+		for (uint n = 0; n < c[5]; ++n) {
+			uint best = 0;
+			for (uint id = 1; id <= World::kTroops; ++id) {
+				const Troop t = _world.troop(id);
+				if (!t.id || t.harkonnen() || !t.hired() || (t.occupation & 0x60) || (t.equipment & 0x04) ||
+						_world.troopPlace(id) < 0 || fetch.contains(id) || id == World::kProspectorTroop)
+					continue;
+				if (!best || t.population > _world.troop(best).population)
+					best = id;
+			}
+			if (!best)
+				break;
+			fetch[best] = i;
+			if (_world.troopPlace(best) != (int)i)
+				_world.issueMoveOrder(best, i);
+			speedrunLog(Common::String::format("troop %u (%u men) goes to fetch the atomics lying at place %u", best,
+					_world.troop(best).population, i));
+		}
+	}
 	for (uint p = 0; p < 96 && !_world.finalAttackReady() && speedrunAlive(); ++p) {
 		passTime(1);
+		for (Common::HashMap<uint, uint>::iterator it = fetch.begin(); it != fetch.end(); ++it) {
+			const Troop t = _world.troop(it->_key);
+			if (it->_value == 0xffff || (t.occupation & 0x40) || _world.troopPlace(it->_key) != (int)it->_value)
+				continue;
+			// MODIFY EQUIPMENT for the fetcher itself (the others there would
+			// take them first in speedrunEquip's order).
+			if (_world.takeEquipment(it->_key, kAtomics))
+				speedrunLog(Common::String::format("troop %u takes equipment %u at place %u", it->_key, (uint)kAtomics, it->_value));
+			if (_world.troop(it->_key).equipment & 0x04) {
+				_world.issueMoveOrder(it->_key, 2 + it->_key % 3);
+				speedrunLog(Common::String::format("troop %u has the atomics and marches back to place %u", it->_key, 2 + it->_key % 3));
+			}
+			it->_value = 0xffff;
+		}
 		for (uint index = 2; index <= 4; ++index) {
 			speedrunEquip(index);
 			Common::Array<uint> ids;
 			_world.troopsAt(index, ids);
 			for (uint i = 0; i < ids.size(); ++i) {
 				const Troop t = _world.troop(ids[i]);
-				if (t.hired() && !t.harkonnen() && !(t.occupation & 0x60) && (t.occupation & 0x0f) != kJobTraining)
+				// A troop repairing its harvester refuses the new job until the
+				// repair (World::mineSpice, 705c); the bot asks again later.
+				const bool repairing = (READ_LE_UINT16(_state.vars + World::kTroopTable + (ids[i] - 1) * World::kTroopSize + 0x10) & 0x200) != 0;
+				if (t.hired() && !t.harkonnen() && !(t.occupation & 0x60) && (t.occupation & 0x0f) != kJobTraining && !repairing)
 					_world.setTroopOccupation(ids[i], kJobTraining);
 			}
 		}

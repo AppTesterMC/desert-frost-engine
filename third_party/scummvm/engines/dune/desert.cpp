@@ -361,6 +361,7 @@ void GameScreen::drawWalkView() {
 		amigaDesertView(_system, _resources, view, _state.w(GameState::kGameTime));
 	} else {
 		drawSky(_system, _resources, view, tall ? kSkyLarge : kSkyNarrow, 320, skyPalette(), true);
+		setSkyPalette(false); // the hour's light, or the running blend (floppy 3b13)
 		_surface.fillRect(Common::Rect(0, kHorizon, 320, 152), kGroundColour);
 		drawLandscape(view, _walkLng, _walkLat, _walkFine, _walkLng, false);
 	}

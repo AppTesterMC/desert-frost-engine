@@ -301,6 +301,18 @@ bool Conversation::hasLine(uint character, uint list, byte mask) const {
 }
 
 bool Conversation::findEntry() {
+	// CD seg000:94f3 (floppy 9fb7), from the line search (9f9e): for a
+	// speaker below 16, ds:18 is its record's flags (byte 15: 0x10 "follows
+	// Paul now and always", 0x40 ...) and ds:16 the time since its record's
+	// stamp (word 8 with flag 0x40, else word 0x0a). 53 conditions read
+	// b[0x18], among them Chani's answers before and after the love scene.
+	if (_character < 16) {
+		const uint record = 0xfd8 + 16 * _character;
+		const byte flags = _state.b(record + 15);
+		_state.setB(0x18, flags);
+		const uint16 stamp = _state.w(record + ((flags & 0x40) ? 8 : 0x0a));
+		_state.setW(0x16, (uint16)(_state.w(2) - stamp));
+	}
 	bool wrapped = false;
 	for (;;) {
 		uint offset = _searchOffset ? _searchOffset : _dialogue.listOffset(_character, _list);

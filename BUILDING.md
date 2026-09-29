@@ -163,6 +163,16 @@ off and on, on both releases) and the north/south quarrel. They read
 missing; like the DOS references, seed them from your own data with
 `python3 scripts/dune_regress.py add-missing --manifest tests/regression/other-releases.json`.
 
+`scripts/check_all.sh` builds the engine once and runs `make verify`, every
+`check_*.sh`, the other releases and the speedrun bot in parallel, headless (about
+six minutes without the full speedrun; `--no-speedrun` or `--no-full` shorten it).
+Each check's log goes to `$DUNE_LOCAL_BUILD_ROOT/check-all/`. Like `make verify`,
+it needs your own references in `golden/` (see above).
+
+`scripts/check_saboteurs.sh`, `check_epidemic.sh`, `check_chani.sh` and
+`check_head.sh` check the Harkonnen saboteurs and worm attacks on harvesters, the
+Fremen epidemic, Chani's kidnapping and Paul's panel head.
+
 `scripts/check_search_equipment.sh`, `check_water_of_life.sh`,
 `check_ecology_win.sh`, `check_endless_play.sh` and `check_smugglers.sh` check
 GO & SEARCH FOR EQUIPMENT, the Water of Life, the ecology win, playing on after
@@ -220,6 +230,7 @@ are documented in `engines/dune/debug.h`:
 | `dune_record=<dir>` | save every shown frame as a BMP with its duration, to make a video of a run |
 | `dune_speedrun_watch=1` | show the speedrun bot's run on screen and leave the game playable afterwards |
 | `dune_test_cockpit=<n>` | open the ornithopter cockpit for a scripted real-time test |
+| `dune_cd_voice_mode=<0\|1\|2>` | CD: the voice mode the original keeps in ds:28E8 (0 text, 2 digital voices); in text mode Paul's head turns away during a character's line |
 | `dune_room_rotations=<n,n,...>` | replay given room-rotation bytes, one per landing, instead of random ones (for comparing with a run of the original) |
 | `dune_setup_save=1` | with a story setup, save that state as Log 1 so it can be loaded in the original |
 | `dune_globe_dump=<dir>` | write every globe frame's palette indices, live map and tilt to `<dir>` (read by `scripts/globe_ref.py`) |

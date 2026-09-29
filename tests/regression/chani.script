@@ -1,0 +1,13 @@
+# Chani's story (scripts/check_chani.sh): the setup (dune_story_setup=chani
+# or chani-gurney) runs the phase callbacks' charisma and its motivation
+# spill, the kidnapping (phase 0x64: Chani held in room 3 of a fortress,
+# motivation - 40), Thufir's and Stilgar's lines, a spy at her fortress, the
+# fortress taken, Paul in room 3 and her line (phase 0x68), COME WITH ME and
+# Stilgar's line; or Gurney's STAY HERE skip and a sietch lost. Everything
+# happens during the setup.
+#
+# Comments after '#' on a command line say what a click hits and what a
+# wait lets finish; scripts/dune_script_trace.py prints what each line did.
+wait 15000              # the story setup runs (the phases, the talks, the spy's march, the flight)
+checkpoint chani-end
+quit

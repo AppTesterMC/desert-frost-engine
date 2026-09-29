@@ -118,6 +118,7 @@ void GameScreen::drawCockpit() {
 		amigaDesertView(_system, _resources, view, _state.w(GameState::kGameTime));
 	else
 		drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
+		setSkyPalette(false); // the hour's light, or the running blend (floppy 3b13)
 	Common::Array<byte> ornypanData;
 	Sprite *ornypan = nullptr;
 	if (_resources.load("ORNYPAN.HSQ", ornypanData)) {
@@ -274,6 +275,7 @@ void GameScreen::drawCabin() {
 		amigaDesertView(_system, _resources, view, _state.w(GameState::kGameTime));
 	else
 		drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
+		setSkyPalette(false); // the hour's light, or the running blend (floppy 3b13)
 	Common::Array<byte> data;
 	if (_resources.load("ORNYCAB.HSQ", data)) {
 		Sprite cabin(_system, data);
@@ -356,7 +358,7 @@ void GameScreen::testCockpit(int mode) {
 		return;
 	}
 	_world.addCompanion(4); // Gurney, travelling with Paul (ds:10), as COME WITH ME does
-	_state.setW(GameState::kPersonsWith, _state.w(GameState::kPersonsWith) | (1 << 4));
+	_world.setTravelling(4, true);
 	const Location home = _world.location(_world.currentLocation());
 	int best = -1;
 	uint bestDistance = 0xffff;

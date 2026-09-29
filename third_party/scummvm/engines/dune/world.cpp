@@ -661,10 +661,6 @@ void World::prepareCaptain() {
 			(known - Location::kTableOffset) / Location::kRecordSize));
 }
 
-void World::addCharisma(uint amount) {
-	_state.setB(kCharisma, (byte)MIN<uint>(200, _state.b(kCharisma) + amount));
-}
-
 uint World::contactRange() const {
 	const uint o = ds(0x1176);
 	return READ_LE_UINT16(&_state.vars[o]);
@@ -702,6 +698,14 @@ void World::phaseCallback(byte phase, uint16 &cutscene, uint16 &vision) {
 	auto reveal = [&](std::initializer_list<uint> places) {
 		for (uint p : places)
 			markDiscovered(p);
+	};
+	// Stilgar (110be), Chani (11139) and the first worm ride (1117b) raise
+	// charisma through 6f78, so the troops' motivation moves with it.
+	auto charismaStep = [&](byte at, int amount) {
+		const uint before = _state.b(kCharisma);
+		const int spill = changeCharisma(amount);
+		_log.line(Common::String::format("Story: phase %#x: charisma %u -> %u, every troop's motivation %+d (6f78)", at,
+				before, _state.b(kCharisma), spill));
 	};
 	enum { Leto, Jessica, Thufir, Duncan, Gurney, Stilgar, Kynes, Chani, Harah };
 	switch (phase) {
@@ -746,10 +750,11 @@ void World::phaseCallback(byte phase, uint16 &cutscene, uint16 &vision) {
 		WRITE_LE_UINT16(character(Thufir) + 2, 0x0180);
 		character(Jessica)[0] = 0x0a;
 		WRITE_LE_UINT16(character(Jessica) + 2, 0x0180);
-		// "Muad'Dib" (COMMAND id + 1): CD 0x108; the Amiga numbers its
-		// commands as the DOS floppy does, 0xfc.
-		WRITE_LE_UINT16(&var(0x1201), _amiga ? 0x00fd : 0x0109);
-		addCharisma(0x14);
+		// "Muad'Dib" (COMMAND id + 1): CD 0x108; the DOS floppy (14a9: ds:120e,
+		// 0xfd) and the Amiga number their commands alike, 0xfc. With the
+		// CD's id the floppy said "Oh, GAME  PAUSED!".
+		WRITE_LE_UINT16(&var(0x1201), floppy() ? 0x00fd : 0x0109);
+		charismaStep(0x2c, 0x14); // seg000:6f78 (floppy 7ce0 from 14af), with the motivation spill
 		var(0x0a) |= 0x10;
 		reveal({ 45, 44, 46, 48, 49 });
 		break;
@@ -773,7 +778,7 @@ void World::phaseCallback(byte phase, uint16 &cutscene, uint16 &vision) {
 		reveal({ 26 });
 		break;
 	case 0x48: // sub_11139: Chani met
-		addCharisma(0x0a);
+		charismaStep(0x48, 0x0a); // seg000:6f78 (floppy 7ce0 from 1502), with the motivation spill
 		cutscene = 0x1313;
 		character(Chani)[15] = (byte)((character(Chani)[15] | 0x10) & ~2);
 		var(0x1178) = (byte)(_state.b(GameState::kFremenTroops) + 2);
@@ -787,7 +792,7 @@ void World::phaseCallback(byte phase, uint16 &cutscene, uint16 &vision) {
 		break;
 	case 0x50: // sub_1117b: after riding a worm
 		var(0x0a) |= 0x40;
-		addCharisma(0x28);
+		charismaStep(0x50, 0x28); // seg000:6f78 (floppy 7ce0 from 1549), with the motivation spill
 		character(Jessica)[0] = 9;
 		break;
 	case 0x54: // sub_11188: the greenhouse door
@@ -805,14 +810,21 @@ void World::phaseCallback(byte phase, uint16 &cutscene, uint16 &vision) {
 		WRITE_LE_UINT16(&var(0x1156), (uint16)((_state.w(GameState::kGameTime) >> 4) + 3));
 		++var(0x1141);
 		break;
-	case 0x60: // sub_111cb: Chani is taken to the Harkonnen palace
+	case 0x60: // sub_111cb: Chani is taken to the Harkonnen palace (called directly when the epidemic ends, 1f0d)
 		_state.setB(0xff, 0);
 		character(Chani)[0] = 2;
 		character(Chani)[1] = location(1).type;
 		character(Chani)[2] = 0x80;
 		character(Chani)[3] = 2;
 		break;
-	default: // 0x18, 0x24, 0x3c, 0x68, 0x6c: nothing; 0x64: the illness (not yet)
+	case 0x64: // CD 11e6: a jmp into 1f13 (floppy 15af -> 222e): Chani held in a Harkonnen fortress
+		chaniPrisoner();
+		break;
+	case 0x68: // a nullsub: Chani's "Oh Paul! I was so scared!" (condition 360, action 12) or any other chapter step
+		_log.line(Common::String::format("Story: phase 0x68: the kidnapping is over; the troops' motivation counts in full again (6efd); Chani's record %02x %02x %02x %02x",
+				character(Chani)[0], character(Chani)[1], character(Chani)[2], character(Chani)[3]));
+		break;
+	default: // 0x18, 0x24, 0x3c, 0x6c: nothing
 		break;
 	}
 	_log.line(Common::String::format("Story: phase %#x callback (cutscene %#x, vision %#x)", phase, cutscene, vision));
@@ -1016,20 +1028,138 @@ void World::raiseSpiceSkill(uint id, byte amount) {
 	troopByte(id, 0x16) = (byte)MIN<uint>(0x5f, troopByte(id, 0x16) + amount);
 }
 
-void World::mineSpice(uint id, uint index) {
-	// seg000:6fe5. Harvester breakdowns and saboteurs (seg000:714c) are not
-	// transcribed.
-	const Troop t = troop(id);
+bool World::spiceMiningViable(uint id, uint index) {
+	// troop_location_test_spice_mining_viable (CD seg000:6b96, floppy 7930):
+	// not with a damaged harvester (bitfield_10 bit 9), a sulking troop
+	// (speech bits 4-5), no density, or a place not prospected-and-unexhausted.
+	// The tail (6bb6) makes the stopped bit follow the answer.
 	const Location l = location(index);
 	const bool viable = !(READ_LE_UINT16(&troopByte(id, 0x10)) & 0x200) && !(READ_LE_UINT16(&troopByte(id, 0x12)) & 0x30) &&
 						l.spiceDensity >= 1 && ((l.status ^ 0x40) & 0x41) == 0;
-	if (!viable) {
-		WRITE_LE_UINT16(&troopByte(id, 0x0c), 0);
-		WRITE_LE_UINT16(&troopByte(id, 0x0e), 0);
+	if (viable)
+		troopByte(id, 3) &= ~Troop::kStopped;
+	else
 		troopByte(id, 3) |= Troop::kStopped;
+	return viable;
+}
+
+bool World::troopRepairSlot(uint id) const {
+	// CD 705c / 715c (floppy 7dc5 / 7ec2): the period whose low nibble is the
+	// troop id's, once a day.
+	return (_state.w(GameState::kGameTime) & 0x0f) == (_state.vars[kTroopTable + (id - 1) * kTroopSize] & 0x0f);
+}
+
+void World::sabotage(uint id, uint index) {
+	// CD seg000:71bc (floppy 7f25). From phase 0x35 on (Thufir: "they will
+	// surely try to infiltrate saboteurs"), a troop whose speech word has
+	// bit 6 - set in the initial data for troops 1, 13, 14, 15, 19 and 20,
+	// and cleared only when an army troop finds the saboteurs (7289) - is
+	// hit when the rolling word at ds:0, rotated left three times, has its
+	// low three bits clear (1 in 8, once a day).
+	if (_state.b(GameState::kPhase) < 0x35 || !(READ_LE_UINT16(&troopByte(id, 0x12)) & 0x40))
+		return;
+	// The main loop stores a fresh rand in ds:0 every pass (CD 1d84e), so
+	// the rotated value is gone at once; the engine's rolling word stands in
+	// for the fresh value and is not written back (its LFSR would cycle).
+	uint16 r = (uint16)rollRandom(0);
+	r = (uint16)((r << 3) | (r >> 13));
+	if (r & 7)
+		return;
+	// 71de -> 719c: the harvester is damaged (bitfield_10 bit 9) and the troop
+	// stops (sub_17085); 71e1: bit 15 remembers it was done on purpose;
+	// 71e6: the place has saboteurs (status bit 2); 71ea: message 3, "There
+	// are saboteurs here in -!", from a troop chief (ah = 0x0f).
+	WRITE_LE_UINT16(&troopByte(id, 0x10), READ_LE_UINT16(&troopByte(id, 0x10)) | 0x8200);
+	troopByte(id, 3) |= Troop::kStopped;
+	locationByte(index, 10) |= 0x04;
+	queueVision(0x0f03, placeOffset(index));
+	_log.line(Common::String::format("World: saboteurs damage troop %u's harvester at place %u (day %u); it stops until repaired",
+			id, index, day()));
+}
+
+void World::harvesterEvents(uint id, uint index) {
+	// troop_location_events_for_spice_mining_troops_with_harvesters, CD
+	// seg000:714c (floppy 7eb5): after Paul's first vision (ds:0a bit 0), for
+	// a troop with a harvester, once a day at its slot.
+	if (!(_state.b(kPaulEvents) & 1) || !(troopByte(id, 0x19) & 0x80) || !troopRepairSlot(id))
+		return;
+	sabotage(id, index);
+	// 7168: rand (e3cc); the chance is the place's region (its first name,
+	// byte 0) looked up in ds:1142 + region - 1 (the xlat at ds:1141):
+	// 0x0d, 0x0f, 0x32, 0x64, 0x80, 0x28, 0x14, 0x28, 0x23, 0x32, 0x46, 0x80
+	// for regions 1-12, so (chance + 1) / 256 a day.
+	const byte roll = (byte)(lcgRand() >> 8);
+	const byte chance = wormChance(index);
+	if (chance < roll)
+		return;
+	uint16 bits = READ_LE_UINT16(&troopByte(id, 0x10)) | 0x4000; // 7175: a worm came
+	WRITE_LE_UINT16(&troopByte(id, 0x10), bits);
+	if (troopByte(id, 0x19) & 0x40) {
+		// 717a: an orni watching for the worm sign saves men and harvester.
+		_log.line(Common::String::format("World: a worm comes near troop %u at place %u; its orni saw the worm sign in time", id, index));
 		return;
 	}
-	troopByte(id, 3) &= ~Troop::kStopped;
+	switch (roll & 3) {
+	case 0:
+		_log.line(Common::String::format("World: a worm comes near troop %u at place %u and leaves", id, index));
+		break;
+	case 1:
+		// 718c: men lost (bit 13): 20 fewer, never down to none.
+		WRITE_LE_UINT16(&troopByte(id, 0x10), bits | 0x2000);
+		if (troopByte(id, 0x1a) > 2)
+			troopByte(id, 0x1a) -= 2;
+		_log.line(Common::String::format("World: a worm attacks troop %u at place %u: men lost (%u left)", id, index,
+				troopByte(id, 0x1a) * 10u));
+		break;
+	case 2:
+		// 719c: the harvester is damaged and the troop stops until repaired.
+		WRITE_LE_UINT16(&troopByte(id, 0x10), bits | 0x200);
+		troopByte(id, 3) |= Troop::kStopped;
+		_log.line(Common::String::format("World: harvester breaks down (a worm attack) for troop %u at place %u (day %u); it stops until repaired",
+				id, index, day()));
+		break;
+	default:
+		// 71a4: the worm swallows the harvester (bit 12): the troop loses it,
+		// the place counts one fewer; message 6, "A worm has swallowed our
+		// harvester here in -!".
+		WRITE_LE_UINT16(&troopByte(id, 0x10), bits | 0x1000);
+		troopByte(id, 0x19) &= 0x7f;
+		--locationByte(index, 20);
+		queueVision(0x0f06, placeOffset(index));
+		_log.line(Common::String::format("World: a worm swallows troop %u's harvester at place %u", id, index));
+		break;
+	}
+}
+
+void World::mineSpice(uint id, uint index) {
+	// callback_troop_location_for_troop_occupation_spice_mining, CD
+	// seg000:6fe5 (floppy 7d4e).
+	if (READ_LE_UINT16(&troopByte(id, 0x10)) & 0x200) {
+		// 705c: a damaged harvester mines nothing until the troop's daily
+		// slot comes round; then it is repaired (7068) and mines at once,
+		// without the day's event roll.
+		if (!troopRepairSlot(id)) {
+			WRITE_LE_UINT16(&troopByte(id, 0x0c), 0);
+			troopByte(id, 3) |= Troop::kStopped; // 7074 -> 7085
+			return;
+		}
+		WRITE_LE_UINT16(&troopByte(id, 0x10), READ_LE_UINT16(&troopByte(id, 0x10)) & ~0x200);
+		_log.line(Common::String::format("World: troop %u has repaired its harvester at place %u (day %u)", id, index, day()));
+		if (!spiceMiningViable(id, index))
+			return;
+	} else {
+		if (!spiceMiningViable(id, index)) {
+			// 707b: both accumulators cleared, the troop stops.
+			WRITE_LE_UINT16(&troopByte(id, 0x0c), 0);
+			WRITE_LE_UINT16(&troopByte(id, 0x0e), 0);
+			troopByte(id, 3) |= Troop::kStopped;
+			return;
+		}
+		// 6ff7: the worm and saboteur events (714c). A damaged harvester
+		// still mines this period (the call returns to 6ffa).
+		harvesterEvents(id, index);
+	}
+	const Location l = location(index);
 	WRITE_LE_UINT16(&troopByte(id, 0x10), READ_LE_UINT16(&troopByte(id, 0x10)) | 0x100); // working
 	const uint kg = harvestRate(id);
 	WRITE_LE_UINT16(&troopByte(id, 0x0c), (uint16)kg);
@@ -1090,6 +1220,12 @@ void World::runPeriod() {
 	// Once the Harkonnen palace has fallen (ds:c2 >= 7) no troop or
 	// time-of-day event runs any more (seg000:1b5e).
 	const bool troopEvents = _state.b(kShipmentPaused) < 7;
+	// The new-day hook's illness picker (1c5f -> 1e43) runs before the
+	// stage-7 gate; Chani's cure (1d9f) after it, before the troops.
+	if (timeSlot() == 0)
+		illnessNewDay();
+	if (troopEvents)
+		chaniCurePeriod();
 	for (uint id = 1; troopEvents && id < kTroops; ++id) {
 		const Troop t = troop(id);
 		if (!t.id)
@@ -1184,12 +1320,13 @@ void World::runPeriod() {
 		if (d5 >= 2)
 			_state.setB(0xd5, d5);
 		// New day (seg000:1c46): the Harkonnen production, sum of density / 8
-		// over the places they still work, plus some chance (seg000:1cda).
+		// over the places that are not Atreides, plus some chance (seg000:1cda,
+		// floppy 201d): 5d36 (floppy 6ad6) passes type >= 0x28 without status
+		// bit 3, so hidden sietches and held forts do not count.
 		uint sum = 0;
 		for (uint i = 0; i < locationCount(); ++i) {
-			const Location l = location(i);
-			if (l.isFortress() || l.type == Location::kHarkonnenPalace || l.hidden())
-				sum += l.spiceDensity / 8;
+			if (!friendlyPlace(i))
+				sum += location(i).spiceDensity / 8;
 		}
 		_state.setW(0xa8, (uint16)(sum + rollRandom(sum / 16 + 1)));
 		// Today's production (ds:a6, seg000:1c6e): the stock gained since

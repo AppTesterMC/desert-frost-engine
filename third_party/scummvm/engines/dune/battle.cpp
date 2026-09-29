@@ -64,7 +64,7 @@ byte *World::troopRecord(uint id) {
 	return _state.vars + kTroopTable + (id - 1) * kTroopSize;
 }
 
-void World::changeCharisma(int delta) {
+int World::changeCharisma(int delta) {
 	// seg000:6f78 / 6fb0: charisma (0..200); crossing a multiple of 4 moves
 	// every active troop's motivation by the change of charisma / 4.
 	const int before = _state.b(kCharisma);
@@ -72,12 +72,13 @@ void World::changeCharisma(int delta) {
 	_state.setB(kCharisma, (byte)after);
 	const int spill = after / 4 - before / 4;
 	if (!spill)
-		return;
+		return 0;
 	for (uint id = 1; id <= kTroops; ++id) {
 		byte *t = troopRecord(id);
 		if (t[0] && !(t[kOcc] & 0xa0))
 			t[kMotivation] = (byte)CLIP((int)t[kMotivation] + spill, 0, 100);
 	}
+	return spill;
 }
 
 uint World::troopStrength(uint id, bool withPaul) {
@@ -421,6 +422,18 @@ void World::battleLost(uint index) {
 	if (l.type < Location::kFortressMin) {
 		locationByte(index, 8) = (byte)((l.type & 7) + Location::kFortressMin);
 		_state.setB(GameState::kSietchesAvailable, (byte)(_state.b(GameState::kSietchesAvailable) - 1));
+		// 74d3-74e8 (floppy 821a, the loop at 823a): the first nine
+		// characters staying here (record word 2 = 0x80, place + 1, from
+		// 40ae) are held in room 3 of the new fortress, as Chani is by 1f13.
+		const byte key = (byte)(index + 1);
+		for (uint c = 0; c < 9; ++c) {
+			byte *r = _state.vars + kCharacterTable + c * kCharacterSize;
+			if (r[2] == 0x80 && r[3] == key) {
+				r[0] = 3;
+				r[1] = locationByte(index, 8);
+				_log.line(Common::String::format("Battle: character %u is held in room 3 of place %u", c, index));
+			}
+		}
 	}
 	Common::Array<uint> ids;
 	troopsAt(index, ids);
@@ -484,9 +497,14 @@ void World::militaryTraining(uint id, uint index) {
 			_log.line(Common::String::format("Battle: fortress %u becomes a sietch", index));
 		}
 	}
-	t[kBits + 1] &= ~0x02;
-	if (l[10] & 0x04)
-		return; // saboteurs (725f, not built)
+	// CD 71f2 clears bitfield_10 bit 9 (a damaged harvester); the floppy's
+	// 7f58 does not.
+	if (!floppy())
+		t[kBits + 1] &= ~0x02;
+	if (l[10] & 0x04) {
+		huntSaboteurs(id, index); // 71f7 -> 725f: no training while saboteurs are here
+		return;
+	}
 	int16 countdown = (int16)(READ_LE_UINT16(t + kDepC) - 1);
 	WRITE_LE_UINT16(t + kDepC, (uint16)countdown);
 	if (countdown >= 0)
@@ -511,6 +529,42 @@ void World::militaryTraining(uint id, uint index) {
 	const uint gap = mean > t[kArmy] ? mean - t[kArmy] : 0;
 	WRITE_LE_UINT16(t + kDepC, (uint16)(k / (2 * gap + MAX<uint>(motivationModifier(id), 30))));
 	t[kArmy] = (byte)MIN<uint>(t[kArmy] + 1, 95);
+}
+
+void World::huntSaboteurs(uint id, uint index) {
+	// CD seg000:725f (floppy 7fc3). Word 0x0e counts the hunt down: its high
+	// byte 0xff marks it running, the low byte starts at 0x40 - army skill
+	// and loses one a period; when it goes negative the saboteurs are found
+	// (727d): the place's status bit 2 goes, and every troop there that
+	// harboured them (speech bit 6) is freed of them (7289), which gives the
+	// hunter speech bit 8: "Saboteurs have been discovered. You'll have no
+	// problems here now!" (condition 577).
+	byte *t = troopRecord(id);
+	uint16 ax = READ_LE_UINT16(t + kDepE);
+	if ((ax >> 8) != 0xff) {
+		ax = (uint16)(0xff00 | (byte)(0x40 - t[kArmy]));
+		_log.line(Common::String::format("World: troop %u hunts the saboteurs at place %u (skill %u)", id, index, t[kArmy]));
+	}
+	const byte count = (byte)((ax & 0xff) - 1);
+	if (!(count & 0x80)) {
+		WRITE_LE_UINT16(t + kDepE, (uint16)((ax & 0xff00) | count));
+		return;
+	}
+	locationByte(index, 10) &= ~0x04;
+	uint16 found = 0;
+	Common::Array<uint> ids;
+	troopsAt(index, ids);
+	for (uint i = 0; i < ids.size(); ++i) {
+		byte *o = troopRecord(ids[i]);
+		if (READ_LE_UINT16(o + kSpeech) & 0x40) {
+			WRITE_LE_UINT16(o + kSpeech, READ_LE_UINT16(o + kSpeech) & ~0x40);
+			found = 0x100;
+		}
+	}
+	WRITE_LE_UINT16(t + kSpeech, READ_LE_UINT16(t + kSpeech) | found);
+	WRITE_LE_UINT16(t + kDepE, 0);
+	_log.line(Common::String::format("World: troop %u found the saboteurs at place %u (day %u)%s", id, index, day(),
+			found ? "; the troops there are rid of them" : ""));
 }
 
 uint World::placeDistance(uint a, uint b) const {

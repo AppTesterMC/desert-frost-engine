@@ -331,7 +331,7 @@ void NightAttack::draw(Graphics::Surface &view) {
 		_sheet.drawFrame(2, &view, x, 0);
 		_sheet.drawFrame(3, &view, x, 81);
 	}
-	_sheet.drawFrame(49, &view, 0, 76);
+	_sheet.drawFrame(_backdrop, &view, 0, 76);
 	_sheet.drawFrame(1, &view, 0, 134);
 	for (uint i = 0; i < _particleCount; ++i) {
 		const Particle &p = _particles[i];

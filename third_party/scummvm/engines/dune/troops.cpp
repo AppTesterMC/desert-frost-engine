@@ -229,6 +229,53 @@ bool World::prepareQuarrelTest(uint &north, uint &south, uint &place) {
 	return true;
 }
 
+void World::placeTroopForTest(uint id, uint place, byte job, byte equipment) {
+	if (troopPlace(id) != (int)place) {
+		unlinkTroop(id);
+		WRITE_LE_UINT16(&troopByte(id, kTroopLocation), placeOffset(place));
+		linkTroop(id, place);
+	}
+	applyJob(id, job);
+	// The place's stock (bytes 0x14..0x1a) counts what its troops hold.
+	const byte added = (byte)(equipment & ~troopByte(id, kTroopEquipment));
+	for (uint k = 0; k < 7; ++k)
+		if (added & (0x80 >> k))
+			++locationByte(place, 0x14 + k);
+	troopByte(id, kTroopEquipment) |= equipment;
+	WRITE_LE_UINT16(&troopByte(id, kTroopBits), READ_LE_UINT16(&troopByte(id, kTroopBits)) & 0x00ff);
+}
+
+bool World::prepareSaboteurTest(uint &miner, uint &place) {
+	// The first Fremen troop the saboteurs can reach (speech bit 6, from the
+	// initial data) standing somewhere away from Paul.
+	miner = 0;
+	for (uint id = 1; id <= kTroops && !miner; ++id) {
+		const Troop t = troop(id);
+		const int at = troopPlace(id);
+		if (t.id && !t.harkonnen() && at >= 0 && (uint)at != currentLocation() && (troopByte(id, kTroopSpeech) & 0x40))
+			miner = id;
+	}
+	if (!miner)
+		return false;
+	place = (uint)troopPlace(miner);
+	prepareFieldForTest(place);
+	placeTroopForTest(miner, place, Troop::kSpiceMining, 0x80);
+	return true;
+}
+
+void World::prepareFieldForTest(uint place) {
+	// A prospected, unexhausted field with spice to mine.
+	locationByte(place, 10) = (byte)((locationByte(place, 10) | 0x40) & ~0x05);
+	if (!locationByte(place, 17))
+		locationByte(place, 17) = 0x80;
+	if (locationByte(place, 18) < 0x40)
+		locationByte(place, 18) = 0x80;
+}
+
+byte World::wormChance(uint place) {
+	return var(0x1141 + locationByte(place, 0));
+}
+
 uint World::takeFortsForTest(int keep) {
 	for (uint i = 2; i < locationCount(); ++i) {
 		const Location l = location(i);

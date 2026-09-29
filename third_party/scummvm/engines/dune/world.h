@@ -246,7 +246,6 @@ public:
 	 */
 	void phaseCallback(byte phase, uint16 &cutscene, uint16 &vision);
 	/** Raise charisma by @p amount (seg000:6f78, capped at 200). */
-	void addCharisma(uint amount);
 	/**
 	 * location_visibility_distance (ds:1176, init 1): how many map cells
 	 * away Paul can reach troops. Below 2 the map offers GIVE ORDERS TO
@@ -464,6 +463,30 @@ public:
 	byte viewSighting(uint index, byte &variant);
 	void dropOldestSighting();
 
+	/**
+	 * The Fremen epidemic (FINDINGS.md "The Fremen epidemic"). The new day's
+	 * illness picker (CD seg000:1e43, floppy 2180): at phase 0x5c, from the
+	 * day ds:1156 (phase 0x5c's day + 3), the sietch or village with the most
+	 * working hired troops falls ill; message 0x0f08.
+	 */
+	void illnessNewDay();
+	/** Chani's cure, once a period (CD 1d9f -> 1e01 -> 1eda, floppy 20e2 -> 2146 -> 21f5). */
+	void chaniCurePeriod();
+	/** STAY HERE to Chani (CD 9548, floppy a00c): at a place with ill troops the cure moves on by 0x10. */
+	void chaniStaysHere(uint character);
+	/** location_does_location_house_an_ill_troop (CD 1e24; the floppy's 2169 tests the first troop only). */
+	bool illTroopAt(uint index) const;
+	/** ds:11db: the latest place with an illness, -1 none. */
+	int illnessPlace() const;
+	/**
+	 * CD seg000:1ebe: a troop Chani cured (speech 0x800), met while the phase
+	 * is 0x60-0x63, brings phase 0x64. The floppy has no such code: its
+	 * contact line "Oh! Chani isn't with you..." carries action 12.
+	 */
+	void curedTroopMet(uint id);
+	/** A map contact closes (CD 7b81, floppy 889f): the troop's cured bit (speech 0x800) goes. */
+	void clearCuredBit(uint id);
+
 	/** queue_vision_message (seg000:29ee/29f0): (sender << 8) | type, with an optional place pointer. */
 	void queueVision(uint16 id, uint16 location = 0);
 	uint visionCount() const;
@@ -514,6 +537,10 @@ public:
 	 * slot; with both taken the first companion is sent home (returned) and
 	 * the second moves up. Leaving (seg000:9655) closes the gap.
 	 */
+	/** COME WITH ME / STAY HERE's record changes (flag 0x40, the stamps) and the ds:10 bit. */
+	void setTravelling(uint character, bool with);
+	/** 97cf: the talk with @p character closes (flags 0x20 set, 0x04 cleared). */
+	void talkEnded(uint character);
 	int addCompanion(uint character);
 	void removeCompanion(uint character);
 	byte companion(uint slot) const { return _state.vars[ds(0x1152 + slot)]; }
@@ -607,6 +634,23 @@ public:
 	 */
 	bool prepareQuarrelTest(uint &north, uint &south, uint &place);
 	/**
+	 * Test setup (dune_story_setup=saboteurs): troop @p miner (the first one
+	 * the saboteurs can reach, speech bit 6) hired as a spice miner with a
+	 * harvester at its prospected place, which gets spice if it has none.
+	 * Returns false when no such troop exists.
+	 */
+	bool prepareSaboteurTest(uint &miner, uint &place);
+	/** Test setup: make @p place a prospected, unexhausted spice field. */
+	void prepareFieldForTest(uint place);
+	/**
+	 * The daily worm chance of a harvester at @p place, out of 256 (CD
+	 * seg000:716b: ds:1141 + the region, the place's first name): 0x0d near
+	 * Arrakeen up to 0x80 in the regions 5 and 12.
+	 */
+	byte wormChance(uint place);
+	/** Test setup: put troop @p id at @p place with @p job and @p equipment (hired, away from any march). */
+	void placeTroopForTest(uint id, uint place, byte job, byte equipment);
+	/**
 	 * End-game test setups (dune_story_setup=ecology-win / endless-play /
 	 * final-battle): every Harkonnen fortress but @p keep (-1 none) becomes
 	 * a sietch with its Harkonnens gone, as if taken two days ago. Returns
@@ -645,8 +689,16 @@ public:
 		_paulFate = 0;
 		return f;
 	}
-	/** seg000:6f78 / 6fb0: charisma with the motivation spill. */
-	void changeCharisma(int delta);
+	/**
+	 * seg000:6f78 / 6fb0: charisma with the motivation spill. Returns the
+	 * spill, the change of charisma / 4 added to every troop's motivation.
+	 */
+	int changeCharisma(int delta);
+	/** Test setups (dune_story_setup=chani): a fort won (7443) / a sietch lost (74b6). */
+	void winFortForTest(uint index) { fortressWon(index); }
+	void loseSietchForTest(uint index) { battleLost(index); }
+	/** Test setups: a troop byte (motivation 0x15, army skill 0x17, ...). */
+	void setTroopByteForTest(uint id, uint offset, byte value) { troopRecord(id)[offset] = value; }
 
 private:
 	bool findTables();
@@ -670,6 +722,10 @@ private:
 	byte _requestedPhase = 0;
 
 	void runPeriod();
+	/** The phase 0x64 callback (CD seg000:1f13, floppy 222e): Chani to a Harkonnen fortress, Feyd-Rautha's COMM message. */
+	void chaniPrisoner();
+	/** The cure step (CD 1eda, floppy 21f5) for Chani at @p index. */
+	void chaniCureStep(uint index);
 	void rollDemand(uint16 &sighting);
 	void findSceneScripts(const Common::Array<byte> &image);
 	Common::Array<byte> _code;  ///< the executable's image, for the scripted scenes
@@ -716,6 +772,16 @@ private:
 	template<typename F> void forDisc(uint16 longitude, int16 latitude, uint radius, int limit, F cell);
 	bool loadTablat();
 	void mineSpice(uint id, uint locationIndex);
+	/** seg000:6b96: can the troop mine here; the stopped bit follows the answer. */
+	bool spiceMiningViable(uint id, uint locationIndex);
+	/** The troop's daily slot: the period whose low nibble is the troop id's (seg000:705c, 715c). */
+	bool troopRepairSlot(uint id) const;
+	/** seg000:714c: the day's worm roll for a troop with a harvester (and the saboteurs first). */
+	void harvesterEvents(uint id, uint locationIndex);
+	/** seg000:71bc: the Harkonnen saboteurs' daily roll. */
+	void sabotage(uint id, uint locationIndex);
+	/** seg000:725f: an army troop at a place with saboteurs hunts them instead of training. */
+	void huntSaboteurs(uint id, uint locationIndex);
 	void prospect(uint id, uint locationIndex);
 	void raiseSpiceSkill(uint id, byte amount);
 	uint rollRandom(uint range); ///< the executable's rolling random word at ds:0 (a 16-bit LFSR here)

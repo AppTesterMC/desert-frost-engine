@@ -1,0 +1,14 @@
+# The Fremen epidemic (scripts/check_epidemic.sh): the setup
+# (dune_story_setup=epidemic) sets phase 0x5c and lets the days pass until
+# the illness strikes a sietch and then a second one, shows the chief's
+# message, contacts an ill troop over the map (its lines and greyed rows),
+# hears Stilgar, brings Chani to each sietch and tells her to stay, passes
+# the periods of her cures to phase 0x60, then contacts a cured troop: phase
+# 0x64, Chani held in a Harkonnen fortress; everything happens during the
+# setup.
+#
+# Comments after '#' on a command line say what a click hits and what a
+# wait lets finish; scripts/dune_script_trace.py prints what each line did.
+wait 15000              # the story setup runs (the days, the contacts, the talks, the cures)
+checkpoint epidemic-end
+quit

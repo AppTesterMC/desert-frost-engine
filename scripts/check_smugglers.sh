@@ -22,7 +22,7 @@ repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 local_root="${DUNE_LOCAL_BUILD_ROOT:-/private/tmp/dune-scummvm-native-build}"
 status=0
 
-SDL_AUDIODRIVER=dummy DUNE_DATA="${DUNE_DATA_FLOPPY:-$repo_root/data/floppy}" "$script_dir/test_dune_scummvm_sdl.sh" dump >/dev/null 2>&1 || {
+SDL_AUDIODRIVER=dummy DUNE_DATA="${DUNE_DATA_FLOPPY:-$repo_root/data/floppy}" "$script_dir/test_dune_scummvm_sdl.sh" build >/dev/null 2>&1 || {
 	echo "FAIL smugglers: build failed; run scripts/test_dune_scummvm_sdl.sh dump to see why"
 	exit 1
 }

@@ -44,7 +44,9 @@ class Resource;
  * The control panel under the 320x152 game view, drawn as the original
  * draws it (swift-dune UI.swift, checked against the recording):
  *
- *   ICONES 15 at 126,148 and 26 at 150,137   the hinge above the command box
+ *   ICONES 15 at 126,148                      the hinge above the command box
+ *   ICONES 0x10 + ds:E8 at 150,137            Paul's head (E8 = 0..10; 10, frame 26,
+ *                                             faces the player, 0 is turned away)
  *   ICONES 12 at 2,154 and 317,154            side pins
  *   ICONES 0 at 0,152                         book block (closed book)
  *     ICONES 74 at 6,184 + the day number     sun icon and day counter
@@ -168,6 +170,28 @@ public:
 	 * compass. row/arrow receive the control to flash, or -1.
 	 */
 	Action hitTest(int x, int y, int &row, int &arrow) const;
+	/** The command row under (x, y) that shows a greyed entry, -1 none. */
+	int greyedRowAt(int x, int y) const;
+
+	/**
+	 * Paul's head above the command box (ds:E8): ICONES 0x10 + index at
+	 * 150,137, index 0..10, 10 (frame 26) facing the player. draw() puts it
+	 * on top of everything else and keeps what lies under it, so redrawHead()
+	 * can step it the way ui_hud_head_redraw does (CD seg000:17be, floppy
+	 * 1b53: the rect ds:1E6E, 150,137 to 170,160, restored, then the frame).
+	 */
+	void setHeadIndex(uint index) { _headIndex = index > kHeadFacing ? (uint)kHeadFacing : index; }
+	uint headIndex() const { return _headIndex; }
+	void redrawHead(Graphics::ManagedSurface &surface);
+	/** The head's frame alone, over whatever is there (a view redrawn under it). */
+	void drawHead(Graphics::ManagedSurface &surface) const;
+	enum {
+		kHeadFacing = 10,
+		kHeadX = 150,
+		kHeadY = 137,
+		kHeadWidth = 20,
+		kHeadHeight = 23
+	};
 
 	/** Sprite sheet with the standing characters (shares the panel palette). */
 	const Common::Array<byte> &characterSheet() const { return _characters; }
@@ -196,6 +220,9 @@ private:
 	Common::String _rowText[kCommandRows];
 	bool _rowDisabled[kCommandRows];
 	uint _period = 2;
+	uint _headIndex = kHeadFacing;
+	byte _headBackdrop[kHeadWidth * kHeadHeight];
+	bool _headBackdropValid = false;
 };
 
 } // namespace Dune

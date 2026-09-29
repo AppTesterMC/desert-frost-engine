@@ -61,6 +61,13 @@ public:
 	void draw(Graphics::Surface &view);
 	/** Write the current sky colours (128-155) into the screen palette. */
 	void applySkyPalette();
+	/**
+	 * The backdrop between the sky and the ground (the icon list at CD
+	 * ds:11dd, patched by location_arrival_hostility_check 505f-5075): 0x31
+	 * in the intro; in the game 0x2f for a sietch, 0x30 for the palace, a
+	 * village or the Harkonnen palace, 0x33 for a fortress.
+	 */
+	void setBackdrop(uint16 sprite) { _backdrop = sprite; }
 
 private:
 	enum {
@@ -106,6 +113,7 @@ private:
 	Sprite &_sheet;
 	uint16 _frameCount;
 	bool _massive;
+	uint16 _backdrop = 49;
 
 	uint32 _rngSeed, _maskedRngSeed;
 	uint16 _randomBits;

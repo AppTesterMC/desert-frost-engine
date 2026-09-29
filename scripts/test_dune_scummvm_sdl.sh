@@ -3,6 +3,7 @@
 # Desktop (SDL) build of ScummVM with the Dune engine, for checking rendering
 # on the Mac instead of on a device. With "dump" as the first argument the
 # engine writes title/menu/scene1 BMPs into the evidence folder and exits by itself.
+# With "build" it only builds (and relinks SDL2 when needed), then exits.
 # With "harness SCRIPT OUTPUT" it runs the headless scripted-input regression
 # target; the engine writes named PNG checkpoints into OUTPUT.
 
@@ -15,7 +16,9 @@ local_root="${DUNE_LOCAL_BUILD_ROOT:-/private/tmp/dune-scummvm-native-build}"
 . "$script_dir/scummvm_source.sh"
 source_root="$local_root/scummvm"
 build_root="$local_root/build-sdl-dune"
-run_root="$local_root/sdl-run"
+# DUNE_RUN_ROOT: a private run folder (saves, dune-ios.log), so check_all.sh
+# can run the checks that use the shared one in parallel.
+run_root="${DUNE_RUN_ROOT:-$local_root/sdl-run}"
 evidence_root="$repo_root/notes/temp/dune_scummvm_engine_20260916"
 
 mkdir -p "$source_root"
@@ -23,11 +26,20 @@ if [ ! -f "$source_root/.dune-local-source-ready" ]; then
 	stage_scummvm_source "$source_root"
 	touch "$source_root/.dune-local-source-ready"
 fi
-rsync -a "$repo_source_root/engines/dune/" "$source_root/engines/dune/"
 mkdir -p "$build_root" "$run_root/saves"
+# DUNE_SKIP_BUILD=1 (set by check_all.sh after its one build): use the built
+# binary as it is, so checks running in parallel never run make together.
+skip_build=0
+if [ "${DUNE_SKIP_BUILD:-0}" = 1 ] && [ -x "$build_root/scummvm" ]; then
+	skip_build=1
+else
+	rsync -a "$repo_source_root/engines/dune/" "$source_root/engines/dune/"
+fi
 cd "$build_root"
 
-if [ ! -f Makefile ]; then
+if [ "$skip_build" = 1 ]; then
+	:
+elif [ ! -f Makefile ]; then
 	"$source_root/configure" \
 		--backend=sdl \
 		--disable-all-engines \
@@ -35,7 +47,9 @@ if [ ! -f Makefile ]; then
 		--enable-debug
 fi
 
-make -j"$(sysctl -n hw.ncpu)"
+if [ "$skip_build" = 0 ]; then
+	make -j"$(sysctl -n hw.ncpu)"
+fi
 
 # Homebrew can replace sdl2 with sdl2-compat (SDL 3 underneath; it happened on
 # 2026-09-26). With it the dummy video driver cannot make a renderer and every
@@ -50,7 +64,11 @@ if [ -n "$sdl2_real" ] && [ -n "$sdl2_linked" ] && [ "$sdl2_linked" != "$sdl2_re
 fi
 
 config="$run_root/scummvm.ini"
-if [ "${1:-}" = "dump" ]; then
+if [ "${1:-}" = "build" ]; then
+	# Build only (the checks' first step): no dump tour, which took up to 3 min
+	# per check. check_dune_build.sh still uses "dump" for the screen tour.
+	exit 0
+elif [ "${1:-}" = "dump" ]; then
 	dump_root="$evidence_root/results/sdl-dump"
 	mkdir -p "$dump_root" "$evidence_root/logs"
 	printf '[scummvm]\nsavepath=%s\ndune_dump=%s\n' "$run_root/saves" "$dump_root" > "$config"

@@ -67,6 +67,7 @@ void GameScreen::presentLine(uint speaker, uint character, uint list, byte mask,
 		return;
 	openTalk(speaker);
 	_talkKind = kind;
+	stageIllnessNames(speaker);
 	_conversation->start(character, list, mask, true, true);
 	advanceConversation();
 }
@@ -444,6 +445,7 @@ void GameScreen::drawDesert() {
 	} else {
 		Graphics::Surface view = _surface.surfacePtr()->getSubArea(Common::Rect(0, 0, 320, 152));
 		drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
+		setSkyPalette(false); // the hour's light, or the running blend (floppy 3b13)
 		_surface.fillRect(Common::Rect(0, 77, 320, 152), 0xbf); // floppy 3AF8: the sand from y 77
 		drawLandscape(view, _walkLng, _walkLat, 0, _walkLng, false);
 	}
@@ -455,8 +457,10 @@ void GameScreen::drawDesert() {
 // ---- Vision messages ---------------------------------------------------------------
 
 void GameScreen::checkIdle(uint32 now) {
-	// idle_room_message_check (seg000:2b2a), run while the room waits.
-	if (fastCapture() || _mode != kRoom || _sceneActive || _commList >= 0 || _ending || _menu != kMenuNone) {
+	// idle_room_message_check (seg000:2b2a), run while the room waits. A
+	// harness run keeps its clock (and so the messages) stopped unless it
+	// plays in real time (dune_real_time).
+	if ((isDumpRun() && !dumpEveryMillis()) || isDuneFastHarness() || _mode != kRoom || _sceneActive || _commList >= 0 || _ending || _menu != kMenuNone) {
 		_idleStart = now;
 		return;
 	}
@@ -505,13 +509,49 @@ void GameScreen::presentVision(bool dream) {
 	_state.setB(World::kVisionType, (byte)id);
 	_log.line(Common::String::format("Vision: message %#x (%s)", id, dream ? "dream" : "in person"));
 	_visionDream = dream;
-	presentLine(MIN<uint>(sender, World::kFremenChief), 16, 4, 0, kTalkVision);
-	if (dream) {
-		delete _talkSheet;
-		_talkSheet = nullptr;
-		if (_mode == kTalk)
-			drawTalk();
+	_dreamTroop = 0;
+	_dreamPlace = -1;
+	// The message's place is staged for the conditions (331e: 2b09 in
+	// person, 2c1d in the dream); the dream also names it for the text codes
+	// 0x81/0x82 (2c20 -> 2e98: "There are saboteurs here in \x81-\x82!") and
+	// leaves the names so. In person the staged place is put back (2b25).
+	const int where = _world.placeIndex(location);
+	if (where >= 0) {
+		_world.stageLocationForConditions((uint)where);
+		if (dream) {
+			const Location l = _world.location((uint)where);
+			_state.setW(_state.nameTable + 2, l.firstName);
+			_state.setW(_state.nameTable + 4, (uint16)(12 + l.lastName));
+			_dreamPlace = where;
+		}
 	}
+	if (dream) {
+		// 2c23-2c43 (floppy 2eed-2f0d): a report from a Fremen (sender 0x0e
+		// or 0x0f) comes from the troop at the message's place, the place
+		// record's byte 9 (troop 3 for message 0x0e), whose chief's head
+		// speaks it (lip-sync 0x0e, fremen1_troop_ptr).
+		if (sender >= World::kFremen && where >= 0) {
+			const uint troop = (byte)id == 0x0e ? (uint)World::kProspectorTroop : _world.location((uint)where).troop;
+			if (troop)
+				_dreamTroop = troop;
+		}
+		// vision_dream_backdrop (CD 2c9a) sets ds:E8 = 0 and draws it with the
+		// clouds; the floppy's (2f54) leaves the head as it is.
+		if (!_world.floppy()) {
+			_state.setB(GameState::kHeadIndex, 0);
+			_panel.setHeadIndex(0);
+		}
+		_dreamStart = _system->getMillis();
+		// wait_interruptable (CD 2c60: 0xbb8 ticks; floppy 2f25: 0x7d0), 200.3 Hz.
+		_dreamUntil = _dreamStart + (_world.floppy() ? 0x7d0u : 0xbb8u) * 4993u / 1000u;
+		_dreamPaletteValid = false;
+		_dreamStep = 0xffff;
+		_log.line(Common::String::format("Vision: the dream, troop %u, place %d, %u ms", _dreamTroop, _dreamPlace,
+				_dreamUntil - _dreamStart));
+	}
+	presentLine(MIN<uint>(sender, World::kFremenChief), 16, 4, 0, kTalkVision);
+	if (where >= 0 && !dream)
+		_world.stageLocationForConditions(_world.currentLocation());
 	_state.setB(World::kVisionType, 0xff);
 	_idleStart = _system->getMillis();
 }
@@ -523,6 +563,11 @@ void GameScreen::emperorEnding() {
 	// failed to respond to my spice demands..." and the game is over.
 	_ending = true;
 	_log.line(Common::String::format("Story: the ending \"%s...\"", _endingText.c_str()));
+	// The CD's game over plays DEAD.HNM with the head going down as its
+	// first frame shows (0dc2 -> 0e66 -> 0e6c, bp = 181e); the floppy's has
+	// no such call.
+	if (!_world.floppy())
+		headDown("game over");
 	drawEnding();
 	dumpScreen(_system, "emperor-ending");
 }
@@ -619,6 +664,168 @@ void GameScreen::storySetup(const Common::String &what) {
 	}
 	if (what == "ecology") {
 		prepareEcologyTest(true);
+		return;
+	}
+	if (what == "saboteurs") {
+		// Harkonnen saboteurs and harvester worms (World::harvesterEvents,
+		// CD seg000:714c / 71bc, floppy 7eb5 / 7f25; the hunt 725f / 7fc3):
+		// scripts/check_saboteurs.sh. Phase 0x35, Paul at the palace, no
+		// Emperor's demands (ds:bf cleared) so the days can pass.
+		auto clickRow = [&](RowAction action) -> bool {
+			for (uint i = 0; i < Panel::kCommandRows; ++i) {
+				if (_rowActions[i] != action)
+					continue;
+				_log.line(Common::String::format("Story setup: row %u (%s)%s", i, _panel.commandText(i) ? _panel.commandText(i) : "",
+						_panel.rowDisabled(i) ? " is greyed" : ""));
+				if (_panel.rowDisabled(i))
+					return false;
+				Common::Event event;
+				event.type = Common::EVENT_LBUTTONDOWN;
+				event.mouse = Common::Point(160, 163 + 8 * (int)i);
+				handleEvent(event);
+				return true;
+			}
+			_log.line("Story setup: no such row");
+			return false;
+		};
+		auto contact = [&](uint id, const char *when) {
+			openTroop(id, true);
+			_log.line(Common::String::format("Story setup: %s, troop %u says \"%s\"", when, id, _troopLine.c_str()));
+			for (uint g = 0; g < 5 && nextTroopLine(); ++g)
+				_log.line(Common::String::format("Story setup: %s, troop %u says \"%s\"", when, id, _troopLine.c_str()));
+		};
+		auto bits = [&](uint id) {
+			return READ_LE_UINT16(_state.vars + World::kTroopTable + (id - 1) * World::kTroopSize + 0x10);
+		};
+		auto speech = [&](uint id) {
+			return READ_LE_UINT16(_state.vars + World::kTroopTable + (id - 1) * World::kTroopSize + 0x12);
+		};
+		_world.firstVision(); // the events and their messages need ds:0a bit 0 (it sets phase 0x15)
+		setGamePhase(0x35);
+		while (_world.visionCount())
+			_world.dequeueVision();
+		_state.setB(World::kShipmentFlags, 0);
+		_world.setPosition(0, 10);
+		uint miner, place;
+		if (!_world.prepareSaboteurTest(miner, place)) {
+			_log.line("Story setup: no troop the saboteurs can reach");
+			return;
+		}
+		// An orni keeps the worms from the harvester in this part (717a).
+		_world.placeTroopForTest(miner, place, Troop::kSpiceMining, 0xc0);
+		_log.line(Common::String::format("Story setup: troop %u mines at place %u (region %u), speech %#x", miner, place,
+				_world.location(place).firstName, speech(miner)));
+		// 1. Periods pass until the saboteurs strike (1 in 8 a day at the troop's slot).
+		uint periods = 0;
+		for (; periods < 60 * World::kSlotsPerDay && !(bits(miner) & 0x8000); ++periods)
+			_world.advanceTime(1);
+		_log.line(Common::String::format("Story setup: sabotaged after %u period(s): troop %u occupation %#x bits %#x, place status %#x, %u vision(s)",
+				periods, miner, _world.troop(miner).occupation, bits(miner), _world.location(place).status, _world.visionCount()));
+		// 2. Paul learns of it: the troop chief's message (vision 0x0f03).
+		if (_world.visionCount())
+			presentVision(true);
+		// 3. Over the map: the troop's lines, then an order it refuses and the greyed MODIFY EQUIPMENT.
+		loadDialogue();
+		openMap(MapScreen::kFlat, false);
+		contact(miner, "sabotaged");
+		clickRow(kRowEquipment);
+		clickRow(kRowTroopOccupation);
+		clickRow(kRowSetOccupation);
+		_log.line(Common::String::format("Story setup: after the order, troop %u occupation %#x, answer \"%s\"", miner,
+				_world.troop(miner).occupation, _troopLine.c_str()));
+		_mode = kMap;
+		// 4. The repair: the troop's slot the next day.
+		const uint16 stock = _state.w(World::kSpiceStock);
+		periods = 0;
+		for (; periods < 2 * World::kSlotsPerDay && (bits(miner) & 0x200); ++periods)
+			_world.advanceTime(1);
+		_log.line(Common::String::format("Story setup: repaired after %u period(s): troop %u occupation %#x bits %#x, stock %u -> %u",
+				periods, miner, _world.troop(miner).occupation, bits(miner), stock * 10u, _state.w(World::kSpiceStock) * 10u));
+		contact(miner, "repaired");
+		_mode = kMap;
+		// 5. An army troop at the place hunts the saboteurs down.
+		uint hunter = 0;
+		for (uint id = 1; id <= World::kTroops && !hunter; ++id) {
+			const Troop t = _world.troop(id);
+			if (t.id && id != miner && !t.harkonnen() && _world.troopPlace(id) >= 0 && !(speech(id) & 0x40) &&
+					(uint)_world.troopPlace(id) != _world.currentLocation())
+				hunter = id;
+		}
+		if (!hunter) {
+			_log.line("Story setup: no troop to hunt the saboteurs");
+			return;
+		}
+		_world.placeTroopForTest(hunter, place, Troop::kMilitaryTraining, 0);
+		_log.line(Common::String::format("Story setup: troop %u (army %u) trains at place %u", hunter,
+				_world.troop(hunter).armySkill, place));
+		periods = 0;
+		for (; periods < 0x50 && (_world.location(place).status & 0x04); ++periods)
+			_world.advanceTime(1);
+		_log.line(Common::String::format("Story setup: saboteurs found after %u period(s): place status %#x, troop %u speech %#x, troop %u speech %#x",
+				periods, _world.location(place).status, hunter, speech(hunter), miner, speech(miner)));
+		contact(hunter, "the hunt");
+		_mode = kMap;
+		// 6. Rid of them: no more sabotage for 20 days.
+		uint struck = 0;
+		for (uint p = 0; p < 20 * World::kSlotsPerDay; ++p) {
+			const uint16 before = bits(miner);
+			WRITE_LE_UINT16(_state.vars + World::kTroopTable + (miner - 1) * World::kTroopSize + 0x10, before & 0x7fff);
+			_world.advanceTime(1);
+			if (bits(miner) & 0x8000)
+				++struck;
+		}
+		_log.line(Common::String::format("Story setup: after the hunt, %u sabotage(s) in 20 days", struck));
+		// 7. Worms: a harvester without an orni and one with, 40 days at the
+		// first sietch of the wormiest region (chance 0x80: 5 or 12).
+		uint field = place;
+		for (uint i = 0; i < _world.locationCount(); ++i)
+			if (_world.location(i).isSietch() && i != _world.currentLocation() && _world.wormChance(i) > _world.wormChance(field))
+				field = i;
+		_world.prepareFieldForTest(field);
+		_state.vars[World::kTroopTable + (miner - 1) * World::kTroopSize + 0x19] &= 0x80; // the orni stays behind
+		_world.placeTroopForTest(miner, field, Troop::kSpiceMining, 0x80);
+		_world.placeTroopForTest(hunter, field, Troop::kSpiceMining, 0xc0);
+		_log.line(Common::String::format("Story setup: worms at place %u (region %u, chance %#x a day)", field,
+				_world.location(field).firstName, _world.wormChance(field)));
+		uint outcomes[5] = { 0, 0, 0, 0, 0 };
+		for (uint p = 0; p < 40 * World::kSlotsPerDay; ++p) {
+			const uint16 a = bits(miner), b = bits(hunter);
+			const byte pop = _state.vars[World::kTroopTable + (miner - 1) * World::kTroopSize + 0x1a];
+			const byte kit = _world.troop(miner).equipment;
+			_world.advanceTime(1);
+			if ((bits(hunter) & 0x4000) && !(b & 0x4000))
+				++outcomes[4];
+			if (!(bits(miner) & 0x4000) || (a & 0x4000))
+				continue;
+			if (!(_world.troop(miner).equipment & 0x80) && (kit & 0x80))
+				++outcomes[3];
+			else if ((bits(miner) & 0x200) && !(a & 0x200))
+				++outcomes[2];
+			else if (_state.vars[World::kTroopTable + (miner - 1) * World::kTroopSize + 0x1a] < pop)
+				++outcomes[1];
+			else
+				++outcomes[0];
+			if (outcomes[3] && outcomes[2] && outcomes[1] && outcomes[0])
+				break;
+			// The next day's worm is a new one; the harvester comes back.
+			contact(miner, "after the worm");
+			_mode = kMap;
+			WRITE_LE_UINT16(_state.vars + World::kTroopTable + (miner - 1) * World::kTroopSize + 0x10, bits(miner) & 0x0fff);
+			WRITE_LE_UINT16(_state.vars + World::kTroopTable + (hunter - 1) * World::kTroopSize + 0x10, bits(hunter) & 0x0fff);
+			_state.vars[World::kTroopTable + (miner - 1) * World::kTroopSize + 0x19] |= 0x80;
+			_state.vars[World::kTroopTable + (miner - 1) * World::kTroopSize + 0x1a] = MAX<byte>(pop, 20);
+		}
+		_log.line(Common::String::format("Story setup: worms: %u passed by, %u took men, %u damaged the harvester, %u swallowed it; %u seen by the orni troop",
+				outcomes[0], outcomes[1], outcomes[2], outcomes[3], outcomes[4]));
+		leaveMap();
+		return;
+	}
+	if (what == "chani" || what == "chani-gurney") {
+		chaniSetup(what == "chani-gurney");
+		return;
+	}
+	if (what == "epidemic") {
+		epidemicSetup();
 		return;
 	}
 	if (what == "hemispheres") {
@@ -1110,6 +1317,430 @@ void GameScreen::ecologyWinSetup() {
 	showRoom(1);
 	showRoom(2);
 	_log.line(Common::String::format("Story setup: in room 2 of the palace, phase %#x", _state.b(GameState::kPhase)));
+}
+
+void GameScreen::epidemicSetup() {
+	// The Fremen epidemic (FINDINGS.md "The Fremen epidemic";
+	// scripts/check_epidemic.sh): phase 0x5c with three hired troops at two
+	// sietches (two at the first), Paul at the palace. The days pass until
+	// the picker strikes the first sietch, then the second; the chief's
+	// message, the contact lines and greyed rows, Stilgar's line; Chani is
+	// brought to each sietch and told to stay; the cures, phase 0x60; a
+	// cured troop's contact brings phase 0x64: Chani held in a fortress.
+	enum { Stilgar = 5, Chani = 7 };
+	auto speech = [&](uint id) {
+		return READ_LE_UINT16(_state.vars + World::kTroopTable + (id - 1) * World::kTroopSize + 0x12);
+	};
+	auto state = [&](const char *when, uint a, uint b, uint c) {
+		_log.line(Common::String::format("Story setup: %s: day %u slot %u, phase %#x, ds:f8 %u, ds:f9 %#x, ill place %d; troop %u occ %#x speech %#x, troop %u occ %#x speech %#x, troop %u occ %#x speech %#x",
+				when, _world.day(), _world.timeSlot(), _state.b(GameState::kPhase), _state.b(0xf8), _state.b(0xf9), _world.illnessPlace(),
+				a, _world.troop(a).occupation, speech(a), b, _world.troop(b).occupation, speech(b), c, _world.troop(c).occupation, speech(c)));
+	};
+	auto clickRow = [&](RowAction action) -> bool {
+		for (uint i = 0; i < Panel::kCommandRows; ++i) {
+			if (_rowActions[i] != action)
+				continue;
+			_log.line(Common::String::format("Story setup: row %u (%s)%s", i, _panel.commandText(i) ? _panel.commandText(i) : "",
+					_panel.rowDisabled(i) ? " is greyed" : ""));
+			if (_panel.rowDisabled(i))
+				return false;
+			Common::Event event;
+			event.type = Common::EVENT_LBUTTONDOWN;
+			event.mouse = Common::Point(160, 163 + 8 * (int)i);
+			handleEvent(event);
+			return true;
+		}
+		return false;
+	};
+	auto contact = [&](uint id, const char *when) {
+		openTroop(id, true);
+		_log.line(Common::String::format("Story setup: %s, troop %u says \"%s\"", when, id, _troopLine.c_str()));
+		for (uint g = 0; g < 6 && nextTroopLine(); ++g)
+			_log.line(Common::String::format("Story setup: %s, troop %u says \"%s\"", when, id, _troopLine.c_str()));
+	};
+	auto closeContact = [&]() {
+		Common::Event event;
+		event.type = Common::EVENT_KEYDOWN;
+		event.kbd.keycode = Common::KEYCODE_ESCAPE;
+		handleEvent(event);
+		_mode = kRoom;
+	};
+	auto talkTo = [&](uint who) {
+		startConversation(who);
+		for (uint guard = 0; talking() && guard < 40; ++guard)
+			advanceConversation();
+	};
+	auto verb = [&](uint who) {
+		_talkWho = who;
+		_mode = kTalk;
+		companionVerb();
+		for (uint guard = 0; talking() && guard < 40; ++guard)
+			advanceConversation();
+		endConversation();
+	};
+	// Periods pass until: 1 one ill place, 2 two, 3 troop a cured, 4 phase 0x60.
+	uint a = 0;
+	auto done = [&](uint until) -> bool {
+		switch (until) {
+		case 1: return _state.b(0xf8) >= 1;
+		case 2: return _state.b(0xf8) >= 2;
+		case 3: return (speech(a) & 0x800) != 0;
+		default: return _state.b(GameState::kPhase) >= 0x60;
+		}
+	};
+	auto passUntil = [&](uint maxPeriods, uint until) -> uint {
+		uint periods = 0;
+		for (; periods < maxPeriods && !done(until); ++periods)
+			_world.advanceTime(1);
+		applyStory();
+		return periods;
+	};
+
+	_world.firstVision();
+	setGamePhase(0x5c);
+	while (_world.visionCount())
+		_world.dequeueVision();
+	_state.setB(World::kShipmentFlags, 0);
+	_world.setPosition(0, 10);
+	// Three Fremen troops at two sietches away from the palace, not Tuono-Timin
+	// (place 16, which the CD's picker leaves out).
+	uint ids[3] = { 0, 0, 0 };
+	uint places[2] = { 0, 0 };
+	uint found = 0;
+	for (uint id = 1; id <= World::kTroops && found < 2; ++id) {
+		const Troop t = _world.troop(id);
+		const int at = _world.troopPlace(id);
+		if (!t.id || t.harkonnen() || at <= 0 || at == 16 || !_world.location((uint)at).isSietch())
+			continue;
+		if (found == 1 && (uint)at == places[0])
+			continue;
+		ids[found] = id;
+		places[found++] = (uint)at;
+	}
+	for (uint id = 1; id <= World::kTroops && found == 2 && !ids[2]; ++id) {
+		const Troop t = _world.troop(id);
+		if (t.id && !t.harkonnen() && id != ids[0] && id != ids[1] && _world.troopPlace(id) >= 0)
+			ids[2] = id;
+	}
+	if (!ids[2]) {
+		_log.line("Story setup: no troops for the epidemic");
+		return;
+	}
+	a = ids[0];
+	const uint b = ids[2], c = ids[1];
+	const uint p = places[0], q = places[1];
+	for (uint k = 0; k < 3; ++k)
+		if (!_world.troop(ids[k]).hired())
+			_world.rallyTroop(ids[k]);
+	_world.placeTroopForTest(a, p, Troop::kSpiceMining, 0);
+	_world.placeTroopForTest(b, p, Troop::kMilitaryTraining, 0);
+	_world.placeTroopForTest(c, q, Troop::kSpiceMining, 0);
+	_world.markDiscovered(p);
+	_world.markDiscovered(q);
+	_world.setLocationStatus(p, _world.location(p).status & 0x7f);
+	_world.setLocationStatus(q, _world.location(q).status & 0x7f);
+	_log.line(Common::String::format("Story setup: troops %u and %u at place %u, troop %u at place %u; illness from day %u",
+			a, b, p, c, q, (uint)_state.w(0x1156) + 1));
+	state("start", a, b, c);
+
+	// 1. The first sietch falls ill (1e43): the one with the most working troops.
+	uint periods = passUntil(6 * World::kSlotsPerDay, 1);
+	state(Common::String::format("first illness after %u period(s)", periods).c_str(), a, b, c);
+	_log.line(Common::String::format("Story setup: motivation modifier of troop %u at phase %#x: %u (motivation %u)", a,
+			_state.b(GameState::kPhase), _world.motivationModifier(a), _world.troop(a).motivation));
+	if (_world.visionCount())
+		presentVision(true); // "There is a strange disease here in ..."
+	endConversation();
+	// 2. A day later it spreads to the next sietch (the phase is still 0x5c).
+	periods = passUntil(2 * World::kSlotsPerDay, 2);
+	state(Common::String::format("second illness after %u period(s)", periods).c_str(), a, b, c);
+	while (_world.visionCount())
+		_world.dequeueVision();
+	// 3. Over the map: the ill troop's lines, its greyed rows.
+	openMap(MapScreen::kFlat, false);
+	contact(a, "ill");
+	clickRow(kRowTroopOccupation);
+	clickRow(kRowEquipment);
+	clickRow(kRowMoveTroop);
+	closeContact();
+	leaveMap();
+	// 4. Stilgar names the latest place (94f3 -> 9519): "We have to go to ... to stem the epidemic."
+	talkTo(Stilgar);
+	endConversation();
+	// 5. Chani is brought to the first sietch's room 2 and told to stay.
+	_state.setW(GameState::kPersonsWith, _state.w(GameState::kPersonsWith) | (1 << Chani));
+	_world.addCompanion(Chani);
+	travelTo(p);
+	showRoom(2);
+	talkTo(Chani);
+	verb(Chani); // STAY HERE: "OK Paul! I'm staying here to cure the Fremen..." (action 11: phase 0x5d)
+	state("Chani stays", a, b, c);
+	showRoom(1); // away from her room, or the cure stands still (ds:12 bit 7)
+	updateRoomVars();
+	periods = passUntil(3 * World::kSlotsPerDay, 3);
+	state(Common::String::format("first cure after %u period(s)", periods).c_str(), a, b, c);
+	if (_world.visionCount())
+		presentVision(true); // "Paul, I'm so happy! I've managed to cure everybody, here in ..."
+	endConversation();
+	// 6. The second sietch: COME WITH ME at the first (her first-meeting
+	// lines, with their phase action, are left alone: a real game has said
+	// them), STAY HERE at the second.
+	showRoom(2);
+	verb(Chani);
+	travelTo(q);
+	showRoom(2);
+	talkTo(Chani);
+	verb(Chani);
+	showRoom(1);
+	updateRoomVars();
+	periods = passUntil(3 * World::kSlotsPerDay, 4);
+	state(Common::String::format("second cure after %u period(s)", periods).c_str(), a, b, c);
+	while (_world.visionCount())
+		_world.dequeueVision();
+	const byte *r = _state.vars + World::kCharacterTable + Chani * World::kCharacterSize;
+	_log.line(Common::String::format("Story setup: Chani's record %02x %02x %02x %02x", r[0], r[1], r[2], r[3]));
+	// 7. A cured troop's contact: phase 0x64, Chani held in a fortress, Feyd-Rautha's message.
+	travelTo(0);
+	showRoom(1);
+	openMap(MapScreen::kFlat, false);
+	contact(c, "cured");
+	closeContact();
+	leaveMap();
+	_log.line(Common::String::format("Story setup: after the contact, phase %#x, Chani's record %02x %02x %02x %02x, ds:f2 %#x, troop %u speech %#x",
+			_state.b(GameState::kPhase), r[0], r[1], r[2], r[3], _state.w(0xf2), c, speech(c)));
+	_log.line(Common::String::format("Story setup: motivation modifier of troop %u at phase %#x: %u (motivation %u)", c,
+			_state.b(GameState::kPhase), _world.motivationModifier(c), _world.troop(c).motivation));
+	talkTo(Stilgar); // "We all like Chani a lot..."
+	endConversation();
+}
+
+void GameScreen::chaniSetup(bool gurney) {
+	// Chani's story (queue item 7; FINDINGS.md "Chani's kidnapping";
+	// scripts/check_chani.sh). The phase callbacks' charisma with its
+	// motivation spill (Stilgar 0x2c, Chani 0x48, the worm 0x50: 6f78);
+	// phase 0x60 then 0x64 (1f13): Chani held in room 3 of a fortress,
+	// Feyd-Rautha's message, every troop's motivation - 40 (at least 10,
+	// 6efd); Thufir's and Stilgar's lines; a spy at her fortress ("they had a
+	// prisoner", condition 588); the fortress taken (7443): Paul lands, the
+	// phase stays; Chani met in room 3: "Oh Paul! I was so scared!"
+	// (condition 360, action 12: phase 0x68), COME WITH ME, Stilgar's line.
+	// chani-gurney: Gurney's STAY HERE at a sietch with an army troop
+	// (condition 288, action 12, once) ends the kidnapping without her; and
+	// a sietch lost with Stilgar in it (74b6) holds him in room 3.
+	enum { Thufir = 2, Gurney = 4, Stilgar = 5, Chani = 7 };
+	const byte *cr = _state.vars + World::kCharacterTable + Chani * World::kCharacterSize;
+	auto troopWord = [&](uint id, uint offset) {
+		return READ_LE_UINT16(_state.vars + World::kTroopTable + (id - 1) * World::kTroopSize + offset);
+	};
+	auto motivation = [&](const char *when, uint a, uint b) {
+		_log.line(Common::String::format("Story setup: %s: phase %#x, charisma %u; troop %u motivation %u modifier %u; troop %u motivation %u modifier %u",
+				when, _state.b(GameState::kPhase), _state.b(World::kCharisma), a, _world.troop(a).motivation,
+				_world.motivationModifier(a), b, _world.troop(b).motivation, _world.motivationModifier(b)));
+	};
+	auto chani = [&](const char *when) {
+		_log.line(Common::String::format("Story setup: %s: phase %#x, Chani's record %02x %02x %02x %02x, ds:f2 %#x, with Paul %d",
+				when, _state.b(GameState::kPhase), cr[0], cr[1], cr[2], cr[3], _state.w(0xf2),
+				(_state.w(GameState::kPersonsWith) >> Chani) & 1));
+	};
+	auto talkTo = [&](uint who) {
+		startConversation(who);
+		for (uint guard = 0; talking() && guard < 40; ++guard)
+			advanceConversation();
+		endConversation();
+		applyStory();
+	};
+	auto verb = [&](uint who) {
+		_talkWho = who;
+		_mode = kTalk;
+		companionVerb();
+		for (uint guard = 0; talking() && guard < 40; ++guard)
+			advanceConversation();
+		endConversation();
+		applyStory();
+	};
+	auto people = [&](const char *when) {
+		Common::Array<byte> in;
+		_world.peopleInRoom(in);
+		Common::String list;
+		for (uint i = 0; i < in.size(); ++i)
+			list += Common::String::format(" %u", in[i]);
+		_log.line(Common::String::format("Story setup: %s: place %u room %u, people:%s", when, _world.currentLocation(),
+				_world.room(), list.c_str()));
+	};
+
+	firstVisionForSetup();
+	_state.setB(World::kShipmentFlags, 0);
+	_world.setPosition(0, 10);
+	// Hired troops at sietches away from the palace: a (motivation 80), b
+	// (motivation 30, the floor of 10), c the spy or the army troop.
+	uint ids[3] = { 0, 0, 0 };
+	uint found = 0;
+	for (uint id = 1; id <= World::kTroops && found < 3; ++id) {
+		const Troop t = _world.troop(id);
+		const int at = _world.troopPlace(id);
+		if (t.id && !t.harkonnen() && id != World::kProspectorTroop && at > 0 && _world.location((uint)at).isSietch())
+			ids[found++] = id;
+	}
+	if (found < 3) {
+		_log.line("Story setup: no troops for Chani's story");
+		return;
+	}
+	const uint a = ids[0], b = ids[1], c = ids[2];
+	for (uint k = 0; k < 3; ++k) {
+		if (!_world.troop(ids[k]).hired())
+			_world.rallyTroop(ids[k]);
+		_world.markDiscovered((uint)_world.troopPlace(ids[k]));
+	}
+	_world.placeTroopForTest(a, (uint)_world.troopPlace(a), Troop::kSpiceMining, 0);
+	_world.placeTroopForTest(b, (uint)_world.troopPlace(b), Troop::kSpiceMining, 0);
+	_world.setTroopByteForTest(a, 0x15, 80);
+	_world.setTroopByteForTest(b, 0x15, 30);
+	// 1. The phase callbacks' charisma (110be, 11139, 1117b through 6f78).
+	_state.setB(World::kCharisma, 0);
+	setGamePhase(0x28);
+	motivation("before Stilgar", a, b);
+	setGamePhase(0x2c);
+	motivation("after Stilgar (phase 0x2c)", a, b);
+	setGamePhase(0x44);
+	setGamePhase(0x48); // Chani met: the love scene's phase
+	motivation("after Chani (phase 0x48)", a, b);
+	_log.line(Common::String::format("Story setup: Chani's flags after phase 0x48: %#x (0x10: she follows Paul now and always), ds:1178 %u",
+			cr[15], _state.b(0x1178)));
+	setGamePhase(0x50); // the first worm ride
+	motivation("after the worm (phase 0x50)", a, b);
+	_pendingScene = 0;
+	_state.setB(World::kCharisma, 60);
+	_world.setTroopByteForTest(a, 0x15, 80);
+	_world.setTroopByteForTest(b, 0x15, 30);
+
+	// 2. The kidnapping (phase 0x60, the Harkonnen palace; 0x64, 1f13).
+	setGamePhase(0x5c);
+	setGamePhase(0x60);
+	chani("phase 0x60");
+	motivation("before the kidnapping", a, b);
+	setGamePhase(0x64);
+	while (_world.visionCount())
+		_world.dequeueVision();
+	chani("kidnapped");
+	motivation("while Chani is held", a, b);
+	const int fort = (int)cr[3] - 1;
+	if (cr[0] != 3 || fort < 2 || !_world.location((uint)fort).isFortress()) {
+		_log.line("Story setup: Chani is not in a fortress");
+		return;
+	}
+	const uint f = (uint)fort;
+	_state.setB(World::kUnread, 0); // Feyd-Rautha's message read (Thufir: "Look at the new message before we continue.")
+	talkTo(Thufir);  // "Chani kidnapped by Feyd-Rautha Harkonnen... use espionage troops"
+	talkTo(Stilgar); // "We all like Chani a lot..."
+
+	if (gurney) {
+		// 3g. Gurney told to stay at a sietch with an army troop (condition
+		// 288, ds:66 > 0, action 12 once): the next chapter, 0x68, while
+		// Chani is still held.
+		const uint p = (uint)_world.troopPlace(c);
+		_world.placeTroopForTest(c, p, Troop::kMilitaryTraining, 0);
+		_state.setW(GameState::kPersonsWith, _state.w(GameState::kPersonsWith) | (1 << Gurney));
+		_world.addCompanion(Gurney);
+		travelTo(p);
+		showRoom(1);
+		verb(Gurney); // STAY HERE: "Good! I'm going to try to teach these Fremen the handling of arms."
+		chani("after Gurney's STAY HERE");
+		motivation("after Gurney's STAY HERE", a, b);
+		talkTo(Stilgar); // "Good to see you with Chani again..."
+		// Her line still comes when she is met (360: phase 0x64-0x68): one more chapter.
+		_world.winFortForTest(f);
+		forceRules(true);
+		travelTo(f);
+		forceRules(false);
+		showRoom(3);
+		people("Chani's room");
+		talkTo(Chani);
+		chani("Chani met after Gurney's skip");
+		// 4g. A sietch lost with Stilgar in it (74b6): room 3 of the new fort.
+		const uint q = (uint)_world.troopPlace(a);
+		byte *sr = _state.vars + World::kCharacterTable + Stilgar * World::kCharacterSize;
+		_state.setW(GameState::kPersonsWith, _state.w(GameState::kPersonsWith) & ~(1 << Stilgar));
+		sr[0] = 2;
+		sr[1] = _world.location(q).type;
+		sr[2] = 0x80;
+		sr[3] = (byte)(q + 1);
+		_world.loseSietchForTest(q);
+		_log.line(Common::String::format("Story setup: sietch %u lost: type %#x, Stilgar's record %02x %02x %02x %02x", q,
+				_world.location(q).type, sr[0], sr[1], sr[2], sr[3]));
+		return;
+	}
+
+	// 3. A spy at her fortress (6a45: the nearest hidden fortress within 30
+	// cells): "One of my men told me that he was sure they had a prisoner."
+	_world.setLocationStatus(f, _world.location(f).status | 0x80);
+	int from = -1;
+	for (uint i = 2; i < _world.locationCount() && from < 0; ++i) {
+		uint dist;
+		const Location l = _world.location(i);
+		if (l.isSietch() && _world.nearestHiddenHarkonnen(i, dist) == (int)f && dist < 0x1e)
+			from = (int)i;
+	}
+	if (from < 0) {
+		_log.line(Common::String::format("Story setup: no sietch sends spies to place %u", f));
+		return;
+	}
+	_world.placeTroopForTest(c, (uint)from, Troop::kMilitaryTraining, 0);
+	_world.setTroopByteForTest(c, 0x17, 80); // an army skill that the Harkonnens never catch (72b0)
+	_world.markDiscovered((uint)from);
+	const bool sent = _world.startEspionage(c);
+	_log.line(Common::String::format("Story setup: troop %u at place %d on espionage: %s", c, from, sent ? "marching" : "refused"));
+	// It marches, then counts the Harkonnens (72b0: word 0x0c, then bit
+	// 0x40 of word 0x10); the prisoner line (588) follows its count (587).
+	uint periods = 0;
+	for (; periods < 3 * World::kSlotsPerDay && (_world.troopPlace(c) != (int)f || (_world.troop(c).occupation & 0x40) ||
+				!(troopWord(c, 0x10) & 0x40)); ++periods)
+		_world.advanceTime(1);
+	applyStory();
+	while (_world.visionCount())
+		_world.dequeueVision();
+	_log.line(Common::String::format("Story setup: after %u period(s) troop %u is at place %d, occupation %#x, speech %#x", periods, c,
+			_world.troopPlace(c), _world.troop(c).occupation, troopWord(c, 0x12)));
+	openMap(MapScreen::kFlat, false);
+	openTroop(c, true);
+	_log.line(Common::String::format("Story setup: the spy says \"%s\"", _troopLine.c_str()));
+	for (uint g = 0; g < 8 && nextTroopLine(); ++g)
+		_log.line(Common::String::format("Story setup: the spy says \"%s\"", _troopLine.c_str()));
+	{
+		Common::Event event;
+		event.type = Common::EVENT_KEYDOWN;
+		event.kbd.keycode = Common::KEYCODE_ESCAPE;
+		handleEvent(event);
+		_mode = kRoom;
+	}
+	leaveMap();
+
+	// 4. Paul cannot land there yet (503c: Harkonnens at the place).
+	uint harkonnen = 0, attacking = 0;
+	_world.countHostiles(f, harkonnen, attacking);
+	_log.line(Common::String::format("Story setup: place %u before the battle: %u Harkonnen troop(s), friendly %d: landing is fatal",
+			f, harkonnen, _world.friendlyPlace(f) ? 1 : 0));
+	// 5. The fortress taken (7443): landing is safe, Chani is still held.
+	_world.winFortForTest(f);
+	_world.countHostiles(f, harkonnen, attacking);
+	_log.line(Common::String::format("Story setup: place %u taken: status %#x, %u Harkonnen troop(s), friendly %d", f,
+			_world.location(f).status, harkonnen, _world.friendlyPlace(f) ? 1 : 0));
+	chani("the fortress taken");
+	motivation("the fortress taken", a, b);
+	// 6. Paul flies there and walks to room 3: she is there; her line frees her.
+	forceRules(true);
+	travelTo(f);
+	forceRules(false);
+	_log.line(Common::String::format("Story setup: Paul lands at place %u (room %u)", _world.currentLocation(), _world.room()));
+	showRoom(2);
+	people("room 2");
+	showRoom(3);
+	people("room 3");
+	talkTo(Chani); // "Oh Paul! I was so scared! ..." (360, action 12: phase 0x68)
+	chani("Chani met");
+	motivation("Chani met", a, b);
+	verb(Chani); // COME WITH ME: "Yes Paul, I want to follow you, now and always."
+	chani("COME WITH ME");
+	talkTo(Stilgar); // "Good to see you with Chani again. The Fremen have recovered their motivation!"
 }
 
 void GameScreen::endlessPlaySetup(bool withPaul) {

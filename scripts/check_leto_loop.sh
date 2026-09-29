@@ -31,7 +31,7 @@ for arg in "$@"; do
 	esac
 done
 
-SDL_AUDIODRIVER=dummy DUNE_DATA="${DUNE_DATA_FLOPPY:-$repo_root/data/floppy}" "$script_dir/test_dune_scummvm_sdl.sh" dump >/dev/null 2>&1 || {
+SDL_AUDIODRIVER=dummy DUNE_DATA="${DUNE_DATA_FLOPPY:-$repo_root/data/floppy}" "$script_dir/test_dune_scummvm_sdl.sh" build >/dev/null 2>&1 || {
 	echo "FAIL leto loop: build failed; run scripts/test_dune_scummvm_sdl.sh dump to see why"
 	exit 1
 }

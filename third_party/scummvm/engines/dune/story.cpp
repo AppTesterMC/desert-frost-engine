@@ -452,6 +452,220 @@ void World::shipSpice(uint16 amount) {
 			fulfilment * 100 / 128, _state.b(GameState::kDaysToShipment)));
 }
 
+// ---- The Fremen epidemic ------------------------------------------------------
+//
+// FINDINGS.md "The Fremen epidemic". ds:f8 counts the places with an
+// illness, ds:f9 is Chani's cure progress (a byte: 0x100 = cured), ds:11db
+// the latest place (floppy 11e8), troop word 0x12 bit 0x400 ill, 0x800 cured.
+
+bool World::illTroopAt(uint index) const {
+	// CD 1e24: any troop of the chain (hired or not) with speech bit 0x400;
+	// the floppy's 2169 tests the place's first troop only.
+	const uint first = _state.vars[Location::kTableOffset + index * Location::kRecordSize + 9];
+	if (!first)
+		return false;
+	Common::Array<uint> ids;
+	troopsAt(index, ids);
+	for (uint i = 0; i < ids.size(); ++i) {
+		if (READ_LE_UINT16(_state.vars + kTroopTable + (ids[i] - 1) * kTroopSize + 0x12) & 0x400)
+			return true;
+		if (floppy())
+			break;
+	}
+	return false;
+}
+
+int World::illnessPlace() const {
+	const uint16 p = word(0x11db);
+	return p ? placeIndex(p) : -1;
+}
+
+void World::illnessNewDay() {
+	// CD 1e43 (floppy 2180), from the new-day hook (1c5f / 1fa2): from the
+	// day stamped by phase 0x5c's callback (ds:1156 = day + 3), while the
+	// phase is still 0x5c (Chani's "OK Paul! I'm staying here to cure the
+	// Fremen" moves it to 0x5d) and Paul is not at Sihaya-Tuek (place 62, ds:114e
+	// != 0x7c8).
+	const uint16 today = (uint16)(_state.w(GameState::kGameTime) >> 4);
+	if (today < word(0x1156) || _state.b(GameState::kPhase) != 0x5c)
+		return;
+	if (placeOffset(currentLocation()) == 0x7c8)
+		return;
+	// The sietch or village (type < 0x28), not hidden, with the most hired
+	// troops at work (occupation < 8: not moving, stopped or captured; 1ea1);
+	// the first wins a tie. The CD leaves out place 16 (Tuono-Timin; ds:2c0),
+	// the floppy does not.
+	uint best = 0, bestCount = 0;
+	for (uint i = 0; i < locationCount(); ++i) {
+		const Location l = location(i);
+		if (l.type >= Location::kFortressMin || l.hidden() || (!floppy() && i == 16))
+			continue;
+		Common::Array<uint> ids;
+		troopsAt(i, ids);
+		uint count = 0;
+		for (uint k = 0; k < ids.size(); ++k) {
+			const Troop t = troop(ids[k]);
+			if (t.hired() && t.occupation < 8)
+				++count;
+		}
+		if (count > bestCount) {
+			bestCount = count;
+			best = i;
+		}
+	}
+	if (!bestCount)
+		return;
+	setWord(0x11db, placeOffset(best));
+	_state.setB(0xf8, (byte)(_state.b(0xf8) + 1));
+	// 1ea9 over the hired troops there: ill (speech 0x400) and stopped (7085).
+	Common::Array<uint> ids;
+	troopsAt(best, ids);
+	Common::String list;
+	for (uint k = 0; k < ids.size(); ++k) {
+		if (!troop(ids[k]).hired())
+			continue;
+		WRITE_LE_UINT16(&troopByte(ids[k], 0x12), READ_LE_UINT16(&troopByte(ids[k], 0x12)) | 0x400);
+		troopByte(ids[k], 3) |= Troop::kStopped;
+		list += Common::String::format(" %u", ids[k]);
+	}
+	queueVision(0x0f08, placeOffset(best)); // 1e9c -> 71b2: "There is a strange disease here in ..."
+	_log.line(Common::String::format("World: epidemic at place %u (day %u, %u working troop(s)); ill troops:%s; %u place(s) ill",
+			best, day(), bestCount, list.c_str(), _state.b(0xf8)));
+}
+
+void World::chaniCurePeriod() {
+	// CD 1d9f (floppy 20e2), once a period: not while Chani is in Paul's
+	// room (persons_in_room bit 7). The engine does not move a companion's
+	// record while she travels with Paul, so her travelling bit counts too.
+	enum { Chani = 7 };
+	if ((_state.w(GameState::kPersonsInRoom) | _state.w(GameState::kPersonsWith)) & (1 << Chani))
+		return;
+	// 1e01: phase 0x5d, Chani's record at a place (byte 2 = 0x80): she goes
+	// to room 2 of it, and the cure moves on when ill troops are there.
+	byte *c = _state.vars + kCharacterTable + Chani * kCharacterSize;
+	if (_state.b(GameState::kPhase) != 0x5d || c[2] != 0x80 || !c[3] || c[3] > locationCount())
+		return;
+	c[0] = 2;
+	const uint index = c[3] - 1u;
+	if (illTroopAt(index))
+		chaniCureStep(index);
+}
+
+void World::chaniCureStep(uint index) {
+	// CD 1eda (floppy 21f5): + 8 a period, so 32 periods (two days) from 0.
+	const byte progress = (byte)(_state.b(0xf9) + 8);
+	_state.setB(0xf9, progress);
+	if (progress)
+		return;
+	// Cured: every troop there (6603, hired or not) loses 0x400 and gets
+	// 0x800 (1eb1); Chani's message 0x709 "Paul, I'm so happy! I've managed
+	// to cure everybody, here in ...".
+	Common::Array<uint> ids;
+	troopsAt(index, ids);
+	for (uint k = 0; k < ids.size(); ++k)
+		WRITE_LE_UINT16(&troopByte(ids[k], 0x12), (uint16)((READ_LE_UINT16(&troopByte(ids[k], 0x12)) & ~0x400) | 0x800));
+	queueVision(0x0709, placeOffset(index));
+	_state.setB(0xf8, (byte)(_state.b(0xf8) - 1));
+	// The next place with an ill troop, else none (ds:11db = 0) and Chani is
+	// taken to the Harkonnen palace: phase 0x60 set directly (1f0d -> 11cb,
+	// no phase triggers).
+	int next = -1;
+	for (uint i = 0; i < locationCount() && next < 0; ++i)
+		if (illTroopAt(i))
+			next = (int)i;
+	setWord(0x11db, next >= 0 ? placeOffset((uint)next) : 0);
+	_log.line(Common::String::format("World: Chani has cured the troops at place %u (day %u); %u place(s) still ill, next %d",
+			index, day(), _state.b(0xf8), next));
+	if (next < 0) {
+		_state.setB(GameState::kPhase, 0x60);
+		uint16 cutscene, vision;
+		phaseCallback(0x60, cutscene, vision);
+		_log.line("World: the epidemic is over; Chani is taken to the Harkonnen palace (phase 0x60)");
+	}
+}
+
+void World::chaniStaysHere(uint character) {
+	// CD 9548 (floppy a00c): STAY HERE accepted; 1e01 with the speaker's
+	// record, then ds:f9 + 0x10.
+	enum { Chani = 7 };
+	byte *c = _state.vars + kCharacterTable + character * kCharacterSize;
+	if (character != Chani || _state.b(GameState::kPhase) != 0x5d || c[2] != 0x80 || !c[3] || c[3] > locationCount())
+		return;
+	c[0] = 2;
+	if (!illTroopAt(c[3] - 1u))
+		return;
+	_state.setB(0xf9, (byte)(_state.b(0xf9) + 0x10));
+	_log.line(Common::String::format("World: Chani stays at place %u to cure the Fremen (cure %#x)", c[3] - 1u, _state.b(0xf9)));
+}
+
+void World::curedTroopMet(uint id) {
+	// CD 1ebe, from the map contact's close (7b79) and an in-person troop
+	// chief (93a2). The floppy reaches phase 0x64 through its line's action 12.
+	if (floppy() || id < 1 || id > kTroops)
+		return;
+	if (!(READ_LE_UINT16(&troopByte(id, 0x12)) & 0x800))
+		return;
+	const byte phase = _state.b(GameState::kPhase);
+	if ((byte)(phase - 0x60) >= 4)
+		return;
+	_requestedPhase = 0x64;
+	_log.line(Common::String::format("World: troop %u, cured by Chani, is met at phase %#x: phase 0x64", id, phase));
+}
+
+void World::clearCuredBit(uint id) {
+	if (id >= 1 && id <= kTroops)
+		troopByte(id, 0x13) &= (byte)~0x08;
+}
+
+void World::chaniPrisoner() {
+	// The phase 0x64 callback (CD 1f13 via the jmp at 11e6, floppy 222e):
+	// Chani goes to room 3 of the northernmost Harkonnen fortress (the
+	// highest latitude word, over -100) that no Fremen troop is attacking
+	// (5098: occupation exactly 6). The scan runs while the next record's
+	// first name is below 8; the CD starts at place 2 and falls back to place
+	// 0, the floppy starts at place 0 and, with none, leaves her where she
+	// is. ds:f2 (her place's names) feeds the spies' line "One of my men told
+	// me that he was sure they had a prisoner." (w[0x4e] == w[0xf2]).
+	int best = -1;
+	int16 bestLatitude = -100;
+	const uint count = locationCount();
+	for (uint i = floppy() ? 0 : 2; i < count; ++i) {
+		const Location l = location(i);
+		const bool friendly = l.type < Location::kFortressMin || (l.status & 0x08); // 5d36
+		if (l.latitude > bestLatitude && !friendly) {
+			Common::Array<uint> ids;
+			troopsAt(i, ids);
+			uint attackers = 0;
+			for (uint k = 0; k < ids.size(); ++k) {
+				const Troop t = troop(ids[k]);
+				if (!(t.occupation & 0x20) && !t.harkonnen() && t.occupation == 6)
+					++attackers;
+			}
+			if (!attackers) {
+				bestLatitude = l.latitude;
+				best = (int)i;
+			}
+		}
+		if (i + 1 >= count || location(i + 1).firstName >= 8)
+			break;
+	}
+	if (best < 0 && !floppy())
+		best = 0;
+	if (best >= 0) {
+		const Location l = location((uint)best);
+		byte *c = _state.vars + kCharacterTable + 7 * kCharacterSize;
+		c[0] = 3;
+		c[1] = l.type;
+		c[2] = 0x80;
+		c[3] = (byte)(best + 1);
+		_state.setW(0xf2, (uint16)((l.firstName << 8) | l.lastName));
+		_log.line(Common::String::format("World: Chani is held at place %d, room 3 (latitude %d)", best, l.latitude));
+	} else {
+		_log.line("World: no Harkonnen fortress for Chani; she stays at the Harkonnen palace");
+	}
+	addSighting(0x2b0a); // Feyd-Rautha: "Ahh, your little darling is in my hands..."
+}
+
 void World::addSighting(uint16 sighting) {
 	byte &count = _state.vars[kSightings];
 	for (uint i = 0; i < count && i < 10; ++i)
@@ -773,6 +987,41 @@ void World::stageLocationForConditions(uint index) {
 		if (kSlots[k] == 0xd6)
 			setWord(0x11fd, (uint16)(0xda + octant));
 	}
+}
+
+void World::setTravelling(uint character, bool with) {
+	// COME WITH ME (CD 9603-9616) and STAY HERE (9556, also the companion
+	// sent home by 9673): the record's flag 0x40
+	// ("with Paul", which the talk menu and 94f3's ds:18 read) and the
+	// ds:10 bit; 956d stamps word 8 (joined) or 0x0a (left) with the game
+	// time unless the other stamp is under two periods old. The Fremen
+	// (character 14) never takes the flag (9603).
+	if (character >= 16 || (with && character == kFremen))
+		return;
+	byte *r = _state.vars + kCharacterTable + character * kCharacterSize;
+	const uint16 bit = (uint16)(1 << character);
+	const uint16 time = _state.w(GameState::kGameTime);
+	const uint set = with ? 8 : 0x0a, other = with ? 0x0a : 8;
+	if (with) {
+		r[15] |= 0x40;
+		_state.setW(GameState::kPersonsWith, _state.w(GameState::kPersonsWith) | bit);
+	} else {
+		r[15] &= (byte)~0x40;
+		_state.setW(GameState::kPersonsWith, _state.w(GameState::kPersonsWith) & ~bit);
+	}
+	if ((uint16)(time - READ_LE_UINT16(r + other)) >= 2)
+		WRITE_LE_UINT16(r + set, time);
+}
+
+void World::talkEnded(uint character) {
+	// 97cf (from 2997, the talk's close): the speaker has talked (flag
+	// 0x20; Gurney's "I'm Gurney Halleck..." needs it clear) and is no longer
+	// left behind in the desert (flag 0x04, the "If this was a race, I won!"
+	// lines).
+	if (character >= 16)
+		return;
+	byte &flags = _state.vars[kCharacterTable + character * kCharacterSize + 15];
+	flags = (byte)((flags | 0x20) & ~0x04);
 }
 
 int World::addCompanion(uint character) {

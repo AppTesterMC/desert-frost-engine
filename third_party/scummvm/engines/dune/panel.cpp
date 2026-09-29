@@ -166,7 +166,6 @@ void Panel::draw(Graphics::ManagedSurface &surface, const bool exits[4], int pre
 	Sprite icons(_system, _icons);
 	icons.drawFrame(15, target, 126, 148);
 	icons.drawFrame(14, target, kCommandLeft, kTop);
-	icons.drawFrame(26, target, 150, 137);
 	icons.drawFrame(12, target, 2, 154);
 	icons.drawFrame(12, target, 317, 154);
 	icons.drawFrame(3, target, 228, kTop);
@@ -242,11 +241,35 @@ void Panel::draw(Graphics::ManagedSurface &surface, const bool exits[4], int pre
 			drawText(surface, label, kTextLeft, y + 1, pressed ? kDarkColour : _rowDisabled[row] ? kDarkColour + 3 : kLightColour,
 					true);
 	}
+	// Paul's head (ICONES 0x10 + ds:E8), on top as ui_hud_head_redraw draws it;
+	// what lies under it is kept for redrawHead().
+	for (int y = 0; y < kHeadHeight; ++y)
+		for (int x = 0; x < kHeadWidth; ++x)
+			_headBackdrop[y * kHeadWidth + x] = *(const byte *)surface.getBasePtr(kHeadX + x, kHeadY + y);
+	_headBackdropValid = true;
+	icons.drawFrame(0x10 + _headIndex, target, kHeadX, kHeadY);
+}
+
+void Panel::redrawHead(Graphics::ManagedSurface &surface) {
+	if (_icons.empty() || !_headBackdropValid)
+		return;
+	for (int y = 0; y < kHeadHeight; ++y)
+		for (int x = 0; x < kHeadWidth; ++x)
+			*(byte *)surface.getBasePtr(kHeadX + x, kHeadY + y) = _headBackdrop[y * kHeadWidth + x];
+	Sprite icons(_system, _icons);
+	icons.drawFrame(0x10 + _headIndex, surface.surfacePtr(), kHeadX, kHeadY);
+}
+
+void Panel::drawHead(Graphics::ManagedSurface &surface) const {
+	if (_icons.empty())
+		return;
+	Sprite icons(_system, _icons);
+	icons.drawFrame(0x10 + _headIndex, surface.surfacePtr(), kHeadX, kHeadY);
 }
 
 Panel::Action Panel::hitTest(int x, int y, int &row, int &arrow) const {
 	row = arrow = -1;
-	// Paul's head (ICONES 26 at 150,137) sticks up from the box's top edge.
+	// Paul's head (ICONES 0x10 + ds:E8 at 150,137) sticks up from the box's top edge.
 	// The original's zone is that edge alone (92..229 x 152..159): a click
 	// on the head itself, in the view, does nothing (the user chose the
 	// original's zone on 2026-09-28; it was widened round the head before).
@@ -287,6 +310,13 @@ Panel::Action Panel::hitTest(int x, int y, int &row, int &arrow) const {
 	}
 
 	return kActionNone;
+}
+
+int Panel::greyedRowAt(int x, int y) const {
+	if (x < kCommandLeft || x >= kCommandRight || y < kCommandTop)
+		return -1;
+	const uint hit = MIN<uint>((y - kCommandTop) / kCommandHeight, kCommandRows - 1);
+	return commandText(hit) && _rowDisabled[hit] ? (int)hit : -1;
 }
 
 void Panel::wrapText(const Common::String &text, int width, bool small, Common::Array<Common::String> &lines,

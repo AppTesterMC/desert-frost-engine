@@ -20,7 +20,7 @@ shift 2>/dev/null || true
 seeds=${*:-1}
 floppy="${DUNE_DATA_FLOPPY:-$repo_root/data/floppy}"
 cd_data="${DUNE_DATA_CD:-$repo_root/data}"
-log_file="${DUNE_LOCAL_BUILD_ROOT:-/private/tmp/dune-scummvm-native-build}/sdl-run/saves/dune-ios.log"
+log_file="${DUNE_RUN_ROOT:-${DUNE_LOCAL_BUILD_ROOT:-/private/tmp/dune-scummvm-native-build}/sdl-run}/saves/dune-ios.log"
 status=0
 
 for seed in $seeds; do

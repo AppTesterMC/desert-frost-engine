@@ -18,7 +18,7 @@ data="${DUNE_DATA_FLOPPY:-$repo_root/data/floppy}"
 expected="$repo_root/tests/regression/flight-seeds-floppy.txt"
 local_root="${DUNE_LOCAL_BUILD_ROOT:-/private/tmp/dune-scummvm-native-build}"
 
-SDL_AUDIODRIVER=dummy DUNE_DATA="$data" "$script_dir/test_dune_scummvm_sdl.sh" dump >/dev/null 2>&1 || {
+SDL_AUDIODRIVER=dummy DUNE_DATA="$data" "$script_dir/test_dune_scummvm_sdl.sh" build >/dev/null 2>&1 || {
 	echo "FAIL flight landscape: build failed; run scripts/test_dune_scummvm_sdl.sh dump to see why"
 	exit 1
 }

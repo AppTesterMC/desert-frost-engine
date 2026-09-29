@@ -1,0 +1,13 @@
+# Harkonnen saboteurs and harvester worms (scripts/check_saboteurs.sh): the
+# setup (dune_story_setup=saboteurs) lets days pass until the saboteurs
+# damage a miner's harvester, shows the chief's message, contacts the troop
+# over the map (its lines, the greyed MODIFY EQUIPMENT, a refused order),
+# passes the day to the repair, sends an army troop to find the saboteurs,
+# then lets worms come to two harvesters (one with an orni); everything
+# happens during the setup.
+#
+# Comments after '#' on a command line say what a click hits and what a
+# wait lets finish; scripts/dune_script_trace.py prints what each line did.
+wait 15000              # the story setup runs (the days pass, the contacts, the hunt, the worms)
+checkpoint saboteurs-end
+quit
