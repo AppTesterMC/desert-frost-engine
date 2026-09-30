@@ -428,6 +428,7 @@ void Conversation::applyAction(const Dialogue::Entry &entry, bool wasSaid) {
 	case 15: // 0xA172: the speaker's third effect
 	case 11: // 0xA219: the next story phase (first time only)
 	case 12: // 0xA235: the next chapter (first time only)
+	case 13: // 0xA28E: the map window on the line's place (CD)
 		if (_eventHandler)
 			_eventHandler(_eventContext, entry.action(), wasSaid, _character);
 		else

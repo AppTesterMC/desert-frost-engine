@@ -24,12 +24,13 @@ checkpoint floppy-menu-save
 move 160 179
 click left 160 179      # row 3: Cancel: back to the globe menu
 wait 1500               # the menu comes back
-# EXIT GLOBE (the first row) leads to the flat map, as in the original: its
-# DUNE MAP title popup (seg000:5bb0), the map menu (seg000:878c) and the
-# planet in the left panel.
+# EXIT GLOBE (the first row) leads to the flat map, as in the original: the
+# map menu (seg000:878c) and the planet in the left panel. No DUNE MAP popup:
+# only the room's way in raises it (5a1a -> 5bb0); EXIT GLOBE goes through
+# 5a3d (captures/explore explore-10, Spice86).
 move 160 163
 click left 160 163      # row 1: EXIT GLOBE: the flat map
-wait 3000               # the map draws with its DUNE MAP popup
+wait 3000               # the map draws (no popup after EXIT GLOBE)
 checkpoint floppy-map-flat
 move 160 163
 click left 160 163      # row 1: EXIT MAPS: back to the throne room

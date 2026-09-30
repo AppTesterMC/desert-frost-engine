@@ -223,6 +223,11 @@ public:
 	uint captainTroop(uint index) const;
 	/** seg000:932e: before the captain speaks, stage the fort he knows of. */
 	void prepareCaptain();
+	/** seg000:31c9 (floppy likewise): the captain joins the room: ds:ee = 0, ds:ed and his record's flag 0x10. */
+	void captainEnters();
+	/** seg000:9584: OVERPOWER THE PRISONER; true when he is overpowered now. */
+	bool overpowerCaptain(uint speaker);
+	bool captainOverpowered() const { return _state.vars[kCharacterTable + kCaptain * kCharacterSize + 0x0f] & 0x10; }
 	/** Put a character's record where Paul is (a companion told to STAY HERE). */
 	void settleCharacter(uint index);
 
@@ -295,6 +300,8 @@ public:
 	bool rallyTroop(uint id);
 	/** A new occupation (seg000:6acb): the job clocks restart; ecology without bulbs becomes bulb growing. */
 	void setTroopOccupation(uint id, byte occupation);
+	/** Immutable floppy DS:169b-195e icon scripts, outside the saved state. */
+	const Common::Array<byte> &mapTroopIconData() const { return _mapTroopIconData; }
 	/** A troop's whole record (27 bytes), to take an order back (troop_apply_occupation_choice's refusal). */
 	void saveTroopRecord(uint id, byte *record) const {
 		if (id >= 1 && id <= kTroops)
@@ -650,6 +657,10 @@ public:
 	byte wormChance(uint place);
 	/** Test setup: put troop @p id at @p place with @p job and @p equipment (hired, away from any march). */
 	void placeTroopForTest(uint id, uint place, byte job, byte equipment);
+	/** The small rules' test (dune_story_setup=small-rules): a hired troop at a sietch away from Paul. */
+	bool prepareSmallRulesTest(uint &id, uint &place);
+	/** A troop record byte, for the story setups' tests. */
+	byte &troopByteForTest(uint id, uint offset) { return troopByte(id, offset); }
 	/**
 	 * End-game test setups (dune_story_setup=ecology-win / endless-play /
 	 * final-battle): every Harkonnen fortress but @p keep (-1 none) becomes
@@ -694,6 +705,32 @@ public:
 	 * spill, the change of charisma / 4 added to every troop's motivation.
 	 */
 	int changeCharisma(int delta);
+	/**
+	 * CD 2170 (floppy 2488), on every landing at @p arrived: the characters
+	 * waiting in room 1 of another sietch or the palace go further in, those
+	 * left in the desert walk to the nearest place (221d).
+	 */
+	void arrivalShuffle(uint arrived);
+	/** CD 1d66 (floppy 20a8), a new day: a character whose place changed kind, or whose room is past its table, is put in room 1. */
+	void dailyRoomFixup();
+	/** STAY HERE in the open desert: the record keeps the desert position (ds:4 longitude, ds:6 fine << 8 | row). */
+	void settleCharacterInDesert(uint index, uint16 longitude, int16 latitude, byte fine);
+	/** seg000:60f8: the battle gauge at @p index (0x80 even, higher the Fremen ahead). */
+	byte battleGauge(uint index);
+	/** seg000:6144: ds:fd = the gauge | 1. */
+	void seedBattleGauge(uint index);
+	/** actions_time_in_day_4 (CD 1f64, floppy 227c): the Harkonnen raid on a sietch. */
+	void harkonnenRaid();
+	/** The byte that skips the next raid (CD ds:11bc, floppy ds:11c9), set by every attack period (739e). */
+	uint raidSuppressOffset() const { return _floppy ? 0x11c9 : 0x11bc; }
+	/** harkonnen_pick_attack_target (CD 2017, floppy 232f): the target and the fort the raiders come from. */
+	bool pickRaidTarget(uint &target, uint &source);
+	/** The fortress a raid on sietch @p index would come from, -1 none (stages the place when @p stage). */
+	int raidSource(uint index, bool stage = true);
+	/** map_close_troop_contact_popup (CD 7b7c-7b89, floppy 889a-88a7): the contact's day in byte 0x14. */
+	void troopContacted(uint id);
+	/** SPECIALIZE IN ARMY / ECOLOGY accepted (CD 6abf, floppy 7859): the harvester (equipment bit 7) is left behind. */
+	void dropHarvester(uint id);
 	/** Test setups (dune_story_setup=chani): a fort won (7443) / a sietch lost (74b6). */
 	void winFortForTest(uint index) { fortressWon(index); }
 	void loseSietchForTest(uint index) { battleLost(index); }
@@ -729,6 +766,7 @@ private:
 	void rollDemand(uint16 &sighting);
 	void findSceneScripts(const Common::Array<byte> &image);
 	Common::Array<byte> _code;  ///< the executable's image, for the scripted scenes
+	Common::Array<byte> _mapTroopIconData;
 	int _scriptBase = -1;
 	int _scriptDelta = 0;
 	bool _emperorEnding = false;
@@ -748,6 +786,20 @@ private:
 	void applyJob(uint id, byte job);
 	/** The north/south quarrel on a new day (floppy sub_9A58 9A95, CD 6e20). */
 	void fremenQuarrel(uint id, uint index);
+	/**
+	 * troop_location_do_stuff_upon_new_day (CD 6e20, floppy 7b88), the first
+	 * thing the spice, army and irrigation handlers do on a day's first
+	 * period: the fortress conversion, the sietch's ring (6cfc), the
+	 * motivation decay after 8 days without contact, the quarrel.
+	 */
+	void troopNewDay(uint id, uint index);
+	/** seg000:6d19 (floppy 7a81): a troop under 20 (x 10 men) joins the smallest other troop at its place. */
+	bool mergeSmallTroop(uint id);
+	/** seg000:6d7b (floppy 7ae3): every 64 periods, 1 off the skills the job's class mask marks. */
+	void skillDecay(uint id);
+	bool fortressConversion(uint index);
+	/** seg000:6f93 (floppy 7cfb): motivation - @p amount; below 5 the troop sulks. */
+	void lowerMotivation(uint id, byte amount);
 
 	bool travelSubstep(uint id);
 	void travelSubsteps(uint id, uint n);

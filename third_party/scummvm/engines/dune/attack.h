@@ -68,6 +68,10 @@ public:
 	 * village or the Harkonnen palace, 0x33 for a fortress.
 	 */
 	void setBackdrop(uint16 sprite) { _backdrop = sprite; }
+	/** set_massive_attack (CD 7317 / 7391): the denser fire during MASSIVE ATTACK. */
+	void setMassive(bool massive) { _massive = massive; }
+	/** The sky flash's timer (MASSIVE ATTACK's rounds force 0x0b or 0x11, CD 7370-738f). */
+	void setSkyFlashTimer(int8 value) { _timer7.value = value; }
 
 private:
 	enum {

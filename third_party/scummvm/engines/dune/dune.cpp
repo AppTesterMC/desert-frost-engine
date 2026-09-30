@@ -40,6 +40,7 @@
 #include "dune/intro.h"
 #include "dune/harness.h"
 #include "dune/music.h"
+#include "dune/options.h"
 #include "dune/palace.h"
 #include "dune/resource.h"
 #include "dune/scene.h"
@@ -87,6 +88,16 @@ Common::Error DuneEngine::run() {
 	// loose. The choice is explicit so that a shared search path can never
 	// make the floppy target read the CD archive.
 	Resource resources(isCD, isAmiga);
+	if (!isAmiga) {
+		const uint language = ConfMan.hasKey("dune_language") ? ConfMan.getInt("dune_language") : 1;
+		if (!resources.setLanguage(language)) {
+			log.line(Common::String::format("ERROR: selected text language %u has missing or invalid game files", language));
+			return Common::Error(Common::kNoGameDataFoundError,
+				"The selected Dune text language is unavailable. Choose an installed language in Game Options > Game.");
+		}
+		log.line(Common::String::format("Option: text language %u (%s)", language, originalLanguageName(language)));
+	}
+	syncSoundSettings();
 
 	// Fail early, with a clear message, when the data is not where we look.
 	const char *probeName = isCD ? "INTDS.HSQ" : "DUNES.HSQ";
@@ -118,7 +129,8 @@ Common::Error DuneEngine::run() {
 		showStatus("Dune: the audio device did not start - no sound");
 
 	Music music;
-	const bool musicEnabled = !isDumpRun() && !ConfMan.hasKey("dune_no_music");
+	const bool musicEnabled = !isDumpRun() && ConfMan.get("music_driver") != "null" &&
+		!(ConfMan.hasKey("dune_no_music") && ConfMan.getBool("dune_no_music"));
 
 	startSong(music, resources, log, "WORMINTR.HSQ", musicEnabled);
 	bool keepRunning;
@@ -145,7 +157,7 @@ Common::Error DuneEngine::run() {
 	// As in the original, the game lands in the throne room; there is no
 	// start menu. Saving, loading and options belong to the book.
 	screen.setMusic(&music, musicEnabled);
-	// Options (Options > Engine, or scummvm.ini); off = as the original.
+	// Options (Game Options > Game, or scummvm.ini); off = as the original.
 	if (ConfMan.hasKey("dune_fix_leto_loop") && ConfMan.getBool("dune_fix_leto_loop")) {
 		screen.world().setFixLetoLoop(true);
 		log.line("Option: dune_fix_leto_loop on (Leto leaves the palace at his death, phase 0x4c)");
@@ -248,6 +260,21 @@ Common::Error DuneEngine::run() {
 
 	debugEnd();
 	return Common::kNoError;
+}
+
+void DuneEngine::syncSoundSettings() {
+	Engine::syncSoundSettings();
+	const bool mute = ConfMan.hasKey("mute") && ConfMan.getBool("mute");
+	const bool musicMute = mute || ConfMan.get("music_driver") == "null" ||
+		(ConfMan.hasKey("dune_no_music") && ConfMan.getBool("dune_no_music"));
+	_mixer->muteSoundType(Audio::Mixer::kMusicSoundType, musicMute);
+	// Audio::EmulatedChip (used by OPL) owns a Plain stream, not a Music
+	// stream. Dune has no other Plain streams; apply the user's music
+	// volume here as well, so ScummVM's Music volume actually controls it.
+	_mixer->muteSoundType(Audio::Mixer::kPlainSoundType, musicMute);
+	_mixer->setVolumeForSoundType(Audio::Mixer::kPlainSoundType, ConfMan.getInt("music_volume"));
+	_mixer->muteSoundType(Audio::Mixer::kSFXSoundType,
+		mute || (ConfMan.hasKey("dune_no_sound") && ConfMan.getBool("dune_no_sound")));
 }
 
 bool DuneEngine::hasFeature(EngineFeature feature) const {

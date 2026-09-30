@@ -237,6 +237,7 @@ private:
 		kRowStopTalking,
 		kRowTalkMore,   ///< " TALK TO ME "
 		kRowWorkForMe,  ///< " WORK FOR ME " (an unrallied troop's Fremen)
+		kRowOverpower,  ///< " OVERPOWER THE PRISONER " (the Harkonnen captain, CD 9584)
 		kRowGiveOrders, ///< GIVE ORDERS TO TROOP (a rallied troop's chief)
 		kRowCompanion,  ///< " COME WITH ME " / " STAY HERE " (characters)
 		kRowAskMore,    ///< ASK FOR MORE INFORMATION (troop contact)
@@ -327,6 +328,8 @@ private:
 	void desertStep(uint direction, bool counted);
 	/** The sun's glare and the faint (floppy 39C2). */
 	void thirstCheck();
+	/** desert_collapse_cutscene (CD 0e77): DEAD3.HNM with the slow dissolve. */
+	void desertCollapse();
 	void drawWalkView();
 	/** The landscape of build_landscape / project_and_draw (floppy 57FA, 5A8D) into @p view. */
 	void drawLandscape(Graphics::Surface &view, uint16 longitude, int16 latitude, byte fine, uint16 key, bool inPlace);
@@ -359,6 +362,8 @@ private:
 	// ---- The orni cockpit's destination screen (cockpit.cpp, notes/orni-cockpit-spec.md) ----
 	void openCockpit(bool changing);
 	void drawCockpit();
+	void cockpitHover(int x, int y);
+	int cockpitArrow(int x, int y) const;
 	void cockpitTap(int x, int y);
 	void cockpitCancel();
 	void updateCockpit(uint32 now);
@@ -367,10 +372,19 @@ private:
 	bool _cockpitChanging = false;  ///< opened by CHANGE DESTINATION during a flight
 	uint32 _cockpitStart = 0;
 	uint32 _cockpitDrawn = 0;
+	Common::Point _cockpitPointer = Common::Point(-1, -1);
+	Common::String _cockpitLabel;
 	// A companion sights a place (notes/orni-flight-spec.md 7): the cabin, the line, GO TOWARDS THIS PLACE.
 	bool _cabinView = false;
+	int _linePlace = -1;  ///< ds:47e6: the place a line names (a message, the ill place)
+	int _insetPlace = -1; ///< the map window of action 13 on that place (CD a28e)
+	bool _cabinWarning = false;     ///< the cabin shows the Harkonnen-zone warning's rows, not GO TOWARDS THIS PLACE
 	void drawCabin();
 	void showSighting(uint place, byte relativeBearing);
+	/** travel_pick_speaking_companion (CD 366f, floppy 3908): the companion, -1 nobody aboard, -2 no line (slot 0 empty). */
+	int flyoverSpeaker() const;
+	/** The fly-over line (CD 96d8, floppy a195): block 16, list 4, the first line whose condition holds with ds:23 = @p action. */
+	bool flyoverLine(byte action, Common::String &line);
 	uint16 _flightLng = 0;          ///< the flight's position when CHANGE DESTINATION opens the cockpit
 	int16 _flightLat = 0;
 	int _changeTarget = -1;         ///< CHANGE DESTINATION's pick: a place, -2 a desert point, -1 none
@@ -398,6 +412,7 @@ private:
 		kDesertLanding = 0xffff, ///< flyToward's answer for a landing in the open desert
 		kShotDown = 0xfffe       ///< ... for an ornithopter shot down over Harkonnen land
 	};
+	/** pending_room_action 4 (CD 35e9/3637, floppy 3889/38d7): true for CHANGE DESTINATION, false for IGNORE WARNING. */
 	bool askHostileZone();
 	// The CD's flight view (travel_select_flight_video, seg000:4ec6): MNT1
 	// sand, MNT2 sand to rock, MNT3 rock, MNT4 rock to sand, switched at the
@@ -447,8 +462,12 @@ private:
 	void speedrunSpiceFields(const Common::Array<uint> &troops);
 	bool _speedrunShipping = false;
 	void speedrunTravel(uint place);
+	void speedrunGarrison(const Common::Array<uint> *busy = nullptr);
+	void speedrunKeepInTouch();
 	/** Walk into a room of the place (seg000:3f27): the entry lines may speak. */
 	void enterRoom(uint room);
+	/** The room-leave scan (CD 3faa-3fc2, 36d3): false when a person's line stops the move. */
+	bool roomLeaveScan(uint room);
 	bool _speedrunRecruited = false;
 	int speedrunSpot(uint from, uint16 lng, int16 lat);
 	bool speedrunExplore();
@@ -505,7 +524,7 @@ private:
 	uint _dreamStep = 0xffff;
 	void endDream();
 	void applyDreamPalette(uint32 now, bool force);
-	void drawDreamSubtitle(const Common::Array<Common::String> &lines);
+	void drawDreamSubtitle(const Common::String &text);
 	void drawPlaceInset(uint place);
 	bool _ending = false;           ///< an ending text is up
 	Common::String _endingText = "As Paul Atreides failed"; ///< the ending's COMMAND, found by its start
@@ -521,6 +540,10 @@ private:
 	/** A rallied Fremen troop stationed at @p location. */
 	bool hiredTroopAt(uint location) const;
 	/** The next rallied Fremen troop id after @p after, cycling (0 none). */
+	Common::String _lastTroopRows; ///< logged when they change
+	Common::String _lastZoom;      ///< the talk zoom, logged when it changes
+	Common::String _lastRoomRows;  ///< the room menu, logged when it changes
+	bool troopInView(uint id) const; ///< the troop's icon would be in the flat map's view
 	uint nextRalliedTroop(uint after) const;
 	/** The last troop CONTACT FREMEN TROOPS reached (data_01955), 0 none. */
 	uint _lastContacted = 0;
@@ -591,16 +614,19 @@ private:
 	void skyPeriodChanged(bool blend);
 	void updateSkyBlend(uint32 now);
 	void spiralPresent();
+	void waitPumping(uint32 millis);
+	uint _lastProbeStep = 0xffff; ///< the CD flight's probe, logged once a step
 	bool _waitingBlend = false; ///< the WAIT verbs blend even in a capture run
 	bool _holdPresent = false;  ///< drawRoom composes without showing
 	bool _holdRedraw = false;   ///< passTime leaves the view to its caller
 	enum { kMaxRoomRows = 32 };
-	/** F4, the night battle view: built last (the user's order, 2026-09-29); off until then. */
-	static const bool kNightBattleView = false;
+	/** The night battle view in a battle (ds:2b, CD 2dd3; F4). */
+	static const bool kNightBattleView = true;
 	uint _roomRowSkip = 0;      ///< the room menu's skip (records), paged by " Others..."
 	bool _keepRowSkip = false;  ///< the next drawRoom keeps the page
 	/** The night battle (CD 0acd / floppy 0c51, drawn for every room while ds:2b is set, CD 2dd3). */
 	NightAttack *_nightAttack = nullptr;
+	class Sound *_attackSound = nullptr; ///< SN3 (CD) / SD3 (floppy): the night battle (CD 0b1c)
 	Sprite *_attackSheet = nullptr;
 	Common::Array<byte> _attackData;
 	uint32 _attackLast = 0;
@@ -608,6 +634,7 @@ private:
 	void endNightBattle();
 	void updateNightBattle(uint32 now);
 	enum {
+		kCdFlightStepMillis = 3834, ///< 0x300 ticks: the CD's travel step (travel_pump 4f2e)
 		kSkyStepMillis = 80,   ///< 0x10 ticks of the 200.3 Hz timer (CD 3901, floppy 3b9e)
 		kSpiralStepMillis = 11 ///< transition 0x2a's step (segvga 2572: 3 counts after the previous stamp, 2-3 ticks; fitted to captures/evening)
 	};

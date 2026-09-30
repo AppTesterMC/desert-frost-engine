@@ -4,7 +4,7 @@
     {
       "name": "segacd-panel",
       "data_env": "DUNE_DATA_SEGACD",
-      "data_default": "/private/tmp/dune-data/segacd",
+      "data_default": "/tmp/dune-data/segacd",
       "script": "tests/regression/segacd-panel.script",
       "timeout_seconds": 120,
       "checkpoints": [
@@ -26,7 +26,7 @@
     {
       "name": "segacd-talk",
       "data_env": "DUNE_DATA_SEGACD",
-      "data_default": "/private/tmp/dune-data/segacd",
+      "data_default": "/tmp/dune-data/segacd",
       "script": "tests/regression/segacd-talk.script",
       "timeout_seconds": 120,
       "checkpoints": [
@@ -48,7 +48,7 @@
     {
       "name": "segacd-map",
       "data_env": "DUNE_DATA_SEGACD",
-      "data_default": "/private/tmp/dune-data/segacd",
+      "data_default": "/tmp/dune-data/segacd",
       "script": "tests/regression/segacd-map.script",
       "timeout_seconds": 120,
       "checkpoints": [
@@ -70,7 +70,7 @@
     {
       "name": "amiga",
       "data_env": "DUNE_DATA_AMIGA",
-      "data_default": "/private/tmp/dune-data/amiga",
+      "data_default": "/tmp/dune-data/amiga",
       "script": "tests/regression/amiga.script",
       "timeout_seconds": 180,
       "checkpoints": [

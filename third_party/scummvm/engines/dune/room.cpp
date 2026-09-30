@@ -33,6 +33,69 @@
 
 namespace Dune {
 
+void drawVgaLine(Graphics::Surface &target, int x0, int y0, int x1, int y1, byte colour, uint16 pattern,
+		const Common::Rect &clip) {
+	auto put = [&](int x, int y) {
+		if (x >= 0 && x < target.w && y >= 0 && y < target.h)
+			*(byte *)target.getBasePtr(x, y) = colour;
+	};
+	auto bit = [&]() {
+		const bool b = (pattern & 0x8000) != 0;
+		pattern = (uint16)((pattern << 1) | (pattern >> 15));
+		return b;
+	};
+	const int dx = x1 - x0, dy = y1 - y0;
+	if (dy == 0) {
+		// segvga:1a3a: from the left end, |dx| + 1 pixels; the row clipped once.
+		if (y0 < clip.top || y0 >= clip.bottom)
+			return;
+		const int sx = dx < 0 ? x1 : x0;
+		for (int i = 0; i <= ABS(dx); ++i)
+			if (bit() && sx + i >= clip.left && sx + i < clip.right)
+				put(sx + i, y0);
+		return;
+	}
+	const int ystep = dy < 0 ? -1 : 1;
+	if (dx == 0) {
+		// segvga:1a86: from the top end, the start row clamped into 0..199.
+		int count = ABS(dy);
+		int y = ystep < 0 ? y0 - count : y0;
+		if (y >= 200)
+			return;
+		if (y < 0) {
+			count += y;
+			y = 0;
+		}
+		if (x0 < clip.left || x0 >= clip.right)
+			return;
+		for (int i = 0; i <= count; ++i)
+			if (bit() && y + i >= clip.top && y + i < clip.bottom)
+				put(x0, y + i);
+		return;
+	}
+	// segvga:1afb: the general case.
+	const int xstep = dx < 0 ? -1 : 1;
+	const int adx = ABS(dx), ady = ABS(dy);
+	const bool xMajor = adx > ady;
+	const int major = xMajor ? adx : ady, minor = xMajor ? ady : adx;
+	int err = major >> 1;
+	int x = x0, y = y0;
+	for (int i = 0; i < major; ++i) {
+		err += minor;
+		if (err >= major) {
+			err -= major;
+			x += xstep;
+			y += ystep;
+		} else if (xMajor) {
+			x += xstep;
+		} else {
+			y += ystep;
+		}
+		if (bit() && x >= clip.left && x < clip.right && y >= clip.top && y < clip.bottom)
+			put(x, y);
+	}
+}
+
 namespace {
 
 // Rasterise one polygon edge into a per-scanline x table, exactly as the
@@ -161,12 +224,14 @@ bool Room::draw(uint room, Sprite &sprites, Graphics::Surface &target, Sprite *c
 			if (modifier & 0x40) {
 				if (position + 8 > size)
 					return false;
-				const int x1 = READ_LE_UINT16(data + position) & 0x0fff;
-				const int y1 = READ_LE_UINT16(data + position + 2) & 0x0fff;
-				const int x2 = READ_LE_UINT16(data + position + 4) & 0x0fff;
-				const int y2 = READ_LE_UINT16(data + position + 6) & 0x0fff;
+				// loc_13BC9 (floppy likewise): the raw words, the pattern 0xffff
+				// (bp), clipped to the game area (ds:20920: 0, 0, 320, 152).
+				const int x1 = (int16)READ_LE_UINT16(data + position);
+				const int y1 = (int16)READ_LE_UINT16(data + position + 2);
+				const int x2 = (int16)READ_LE_UINT16(data + position + 4);
+				const int y2 = (int16)READ_LE_UINT16(data + position + 6);
 				position += 8;
-				target.drawLine(x1, y1, x2, y2, id);
+				drawVgaLine(target, x1, y1, x2, y2, id, 0xffff, Common::Rect(0, 0, 320, 152));
 			} else {
 				// Filled polygon: colour (8.8 fixed point) plus horizontal and
 				// vertical gradients, textured with 2 bits of Galois LFSR noise.

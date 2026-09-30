@@ -1,0 +1,5 @@
+# The story setup leaves Gurney and Jessica outside the palace, then lands
+# Paul elsewhere at phases 0x23, 0x24 and 0x2e. A companion is checked too.
+wait 15000
+checkpoint arrival-home-rooms
+quit

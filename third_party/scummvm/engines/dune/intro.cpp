@@ -229,7 +229,7 @@ FloppyIntro::FloppyIntro(OSystem *system, Resource &resources, StartupLog &log, 
 
 void FloppyIntro::startSong(const char *name) {
 	Common::Array<byte> song;
-	if (!_music || isFastIntroCapture() || ConfMan.hasKey("dune_no_music"))
+	if (!_music || isFastIntroCapture() || (ConfMan.hasKey("dune_no_music") && ConfMan.getBool("dune_no_music")))
 		return;
 	if (_resources.load(name, song) && _music->play(song))
 		_log.line(Common::String::format("Music: %s started (%u bytes)", name, song.size()));

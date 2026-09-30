@@ -4,7 +4,7 @@
     {
       "name": "cd",
       "data_env": "DUNE_DATA_CD",
-      "data_default": "/private/tmp/dune-data",
+      "data_default": "/tmp/dune-data",
       "script": "tests/regression/cd.script",
       "timeout_seconds": 180,
       "checkpoints": [
@@ -66,7 +66,7 @@
     {
       "name": "floppy",
       "data_env": "DUNE_DATA_FLOPPY",
-      "data_default": "/private/tmp/dune-data/floppy",
+      "data_default": "/tmp/dune-data/floppy",
       "script": "tests/regression/floppy.script",
       "timeout_seconds": 240,
       "checkpoints": [
@@ -212,7 +212,7 @@
     {
       "name": "story-comm",
       "data_env": "DUNE_DATA_FLOPPY",
-      "data_default": "/private/tmp/dune-data/floppy",
+      "data_default": "/tmp/dune-data/floppy",
       "script": "tests/regression/story-comm.script",
       "timeout_seconds": 240,
       "config": [
@@ -248,7 +248,7 @@
     {
       "name": "story-scene",
       "data_env": "DUNE_DATA_CD",
-      "data_default": "/private/tmp/dune-data",
+      "data_default": "/tmp/dune-data",
       "script": "tests/regression/story-scene.script",
       "timeout_seconds": 180,
       "config": [
@@ -276,7 +276,7 @@
     {
       "name": "story-ecology",
       "data_env": "DUNE_DATA_FLOPPY",
-      "data_default": "/private/tmp/dune-data/floppy",
+      "data_default": "/tmp/dune-data/floppy",
       "script": "tests/regression/story-ecology.script",
       "timeout_seconds": 240,
       "config": [
@@ -292,7 +292,7 @@
     {
       "name": "story-stillsuit",
       "data_env": "DUNE_DATA_CD",
-      "data_default": "/private/tmp/dune-data",
+      "data_default": "/tmp/dune-data",
       "script": "tests/regression/story-stillsuit.script",
       "timeout_seconds": 180,
       "config": [

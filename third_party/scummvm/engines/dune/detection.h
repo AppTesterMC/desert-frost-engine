@@ -26,8 +26,8 @@
 #define DUNE_DETECTION_H
 
 /**
- * Engine options shown in the game's Options > Engine tab (and read from
- * scummvm.ini). Off by default: the engine plays as the original does.
+ * Engine options shown in Game Options > Game (and read from scummvm.ini).
+ * The two original-bug fixes are off by default.
  *
  * dune_fix_leto_loop: the original never clears Duke Leto's character record
  * when he dies (phase 0x4c, CD sub_11166 / floppy phase callback), so he keeps
@@ -41,5 +41,7 @@
  */
 #define GAMEOPTION_FIX_LETO_LOOP GUIO_GAMEOPTIONS1
 #define GAMEOPTION_FIX_CELIMYN_TUEK GUIO_GAMEOPTIONS2
+#define GAMEOPTION_ORIGINAL_OPTIONS GUIO_GAMEOPTIONS3
+#define GAMEOPTION_AMIGA_OPTIONS GUIO_GAMEOPTIONS4
 
 #endif

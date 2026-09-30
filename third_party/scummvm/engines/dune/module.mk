@@ -19,6 +19,7 @@ MODULE_OBJS := \
 	map.o \
 	intro_scenes.o \
 	metaengine.o \
+	options.o \
 	music.o \
 	palace.o \
 	panel.o \

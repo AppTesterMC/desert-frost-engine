@@ -36,6 +36,140 @@ database's comment without re-reading every instruction.
 - WAIT FOR EVENING / WAIT FOR MORNING advance to a target time, running every
   skipped period's events.
 
+### Time on Dune: save-file observations and conversion
+
+Added 2026-09-30 from research supplied by the user. The basic clock was
+already documented above; the signatures, boundary values and editing examples
+below were not. Preserve the distinction between observed save values and
+independently verified executable behavior. This note concerns the DOS saves;
+do not apply their compressed signatures to native Amiga or Sega CD files.
+
+**Reported timing and display limits.** A day contains 16 periods of 90
+in-game minutes. One period takes approximately 60 real seconds, making an
+uninterrupted day approximately 16 real minutes. The executable-derived value
+above is about 59.9 seconds per period; menus and other suspended states stop
+that clock. The supplied research identifies Day 1 00:00 as the minimum,
+Day 1 04:30 as the zero/default time, and Day 1 09:00 as the gameplay start.
+WAIT FOR MORNING targets 04:30, and WAIT FOR EVENING targets 22:30. Travel
+advances game time through its own travel steps; see Flight below.
+
+The supplied observations distinguish the ordinary date indicator, which
+cycles after Day 365 22:30, the results display, which reaches Day 999 22:30,
+and the 16-bit time value, whose last pre-wrap evening is Day 4096 22:30.
+The CD date routine at `seg000:1ad1` adds three with 16-bit arithmetic before
+shifting by four; `seg000:1a6b` applies the 365-day display cycle and adds one.
+The results display's exact saturation behavior and the start-time differences
+between releases remain separate verification points; these observations do
+not establish a game-over deadline.
+
+**Reported compressed-byte landmarks.** The user found these prefixes before
+the saved state time, including in a save taken well after the last fortress
+was captured, during further spice mining and vegetation growth. In those
+observations the runs represented by the `F7` tokens continued to contain zero.
+
+```text
+v2.1  C3 89 B2 FF FF F7 24 00 xx xx DT DT
+v2.3  C4 89 B2 FF FF F7 30 00 xx xx DT DT
+v3.7  C9 85 D6 FF FF F7 68 00 xx xx DT DT
+```
+
+The v3.7 sequence was also reported in `DUNE38Sx.SAV`. The v2.3 and v3.8
+signatures have not been independently checked in this workstream.
+`F7 count value` is a run-length token: for example `F7 68 00` expands to
+104 zero bytes. It is not a fixed-position separator. A following zero byte
+can join the run, increasing its count and moving the subsequent compressed
+bytes. Decode the RLE body before locating a field; these signatures alone
+are not a reliable general-purpose patching method.
+
+**Correction to the proposed subhour interpretation.** The supplied note
+tentatively called `xx xx` a counter from `0000` through `FFFF` and suggested
+zeroing it when editing the date. The recovered CD state layout instead calls
+the word immediately before `game_time` **`rand_bits` at `ds:0000`**; the
+time word is at `ds:0002`. This is also the engine's `kRandomBits` /
+`kGameTime` layout and is consumed by `World::rollRandom()`. It must not be
+described as a verified fractional clock. Zeroing it changes random state;
+preserve it when only changing the date. The real timer countdown is the
+separate `ds:46db` field described above.
+
+**Reported Log 1 / Log 2 values.** The original table wrote the hexadecimal
+word most-significant byte first. The file stores its bytes in the opposite,
+little-endian order:
+
+| Time word | Bytes written to the file | Reported label |
+| --- | --- | --- |
+| `0xFFFD` | `FD FF` | Day 1 00:00 |
+| `0xFFFE` | `FE FF` | Day 1 01:30 |
+| `0xFFFF` | `FF FF` | Day 1 03:00 |
+| `0x0000` | `00 00` | Day 1 04:30 |
+| `0x000D` | `0D 00` | Day 2 00:00 |
+| `0x16CC` | `CC 16` | Day 365 22:30 |
+| `0x3E6C` | `6C 3E` | Day 999 22:30 |
+| `0xFFFC` | `FC FF` | Day 4096 22:30 |
+
+For a desired numbered day and a 90-minute slot counted from midnight,
+multiply the day by 16, add the slot, subtract 19, and keep the low 16 bits.
+The following is literal Python for calculating and encoding that word:
+
+```python
+def encode_time(day, slot_from_midnight):
+    assert 1 <= day <= 4096
+    assert 0 <= slot_from_midnight < 16
+    time_word = (day * 16 + slot_from_midnight - 19) & 0xffff
+    return time_word.to_bytes(2, "little")
+
+assert encode_time(2, 0).hex(" ") == "0d 00"
+assert encode_time(10, 8).hex(" ") == "95 00"  # Day 10, noon
+```
+
+The supplied four-byte example `00 00 95 00` zeros the preceding word as
+well as setting Day 10 noon; preserve that word instead for a date-only
+change. DOS saves also duplicate the time in their first, uncompressed
+header word (`load_save_game_timestamp`, CD `seg000:b30f`; stamping at
+`seg000:b389`). Updating only the state copy can leave the menu's date
+different from the date loaded into play. Edit the decoded state time and
+header consistently, then re-encode RLE and update the packed length; see
+[save compatibility](../../third_party/scummvm/engines/dune/SAVES.md).
+
+**Implementation follow-up discovered while recording this note.**
+`GameScreen::slotLabel()` still contains an old placeholder that treats a
+time unit as an hour and divides by 24. The ordinary date calculation also
+needs a check that the three-period addition wraps at 16 bits near `FFFF`.
+These are recorded fidelity gaps, not changes made by this documentation
+update. Reproduce the original DOS load-menu labels and boundary dates
+before correcting them; do not use the original Amiga save/load menus.
+### External save and asset references (2026-09-30)
+
+The user supplied two further historical references. Read them alongside the
+executable-backed findings above; their unresolved guesses are not engine rules.
+
+- [Dune Editor: Savegame Hex editing](https://sites.google.com/site/duneeditor/savegame-editing)
+  collects community notes on save slots, RLE, 28-byte place records,
+  27-byte troop records, equipment, spice stocks, contact range and the
+  troop position field used for map icons. It credits Rymoah and John2022
+  and references earlier forum/wiki work. Useful leads for save fixtures and
+  map-troop investigations; its decimal file offsets describe particular
+  compressed examples, not universal offsets. Its save-slot list includes
+  restart slot 0, manual slots 1/2 and automatic slots 3/4. Its troop-position
+  table and record fields must be checked against each release's native
+  coordinate/animation routines before implementation.
+- [Dune Editor: bigs_fr mirror](https://sites.google.com/site/duneeditor/bigs_fr-mirror)
+  preserves historical floppy/CD file inventories and format research on HSQ,
+  sprite sheets, SAL scene commands and map resources. It describes sprite
+  offset tables, palette blocks, packed pixels/RLE, and scene placement,
+  transformations, shapes and character markers. Its music/sound sections
+  mainly list files; its save section only identifies the filename extension.
+  Those sections are not complete audio or save-format specifications.
+
+**Local cross-checks and limits.** The engine already has separate HSQ and
+save-RLE decoders (`resource.cpp`, `saves.cpp`); do not substitute one for the
+other. A save's six-byte header is outside the RLE body, which resolves some
+apparent marker exceptions in older editing notes. The location status bit
+`0x01` means exhausted for harvesting in the recovered rules; vegetation can
+cause exhaustion, but the bit alone is not a vegetation record. Palette and
+SAL format notes are retained as references without changing the user's
+current functionality/completion priority. The executable and verified
+original captures remain the authority for fixes.
+
 ## Flight (verified / annotated)
 
 - A travel steps every 0x300 PIT ticks = **3.83 s** (`travel_pump`,

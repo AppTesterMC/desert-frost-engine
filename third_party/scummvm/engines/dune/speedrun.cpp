@@ -24,8 +24,10 @@
 // follows the PC speedrun (notes/speedrun/route.md) through the game's own
 // actions, the same ones the menu rows call, and logs each milestone as
 // "Speedrun: step ... OK" or "Speedrun: BLOCKED ...". A step the engine
-// could not reach by play and had to set by hand is logged as "FORCED"; the
-// run only counts as finished with no FORCED line and the ending reached.
+// could not reach by play and had to set by hand is logged as "FORCED".
+// This remains an assisted engine-logic test: campaign recruitment, movement,
+// equipment, contact opening and battle retries do not all use player input.
+// A completed run is not proof that the game is completable through its UI.
 
 #include "dune/scene.h"
 
@@ -112,6 +114,13 @@ void GameScreen::speedrunCampaignSetup() {
 		speedrunEquip((uint)here);
 		++rallied;
 	}
+	// The seeded late-game fixture still needs the prospectors' initial
+	// lesson at its normal chapter. Its first specialization dispatches
+	// event 3 by phase; doing that at 0x50 wrongly starts the war council
+	// and consumes its lines. Use the ordinary occupation/lesson controls.
+	_state.setB(GameState::kPhase, 5);
+	_world.setTroopOccupation(World::kProspectorTroop, Troop::kWaitingForOrders);
+	speedrunOrders(World::kProspectorTroop, Troop::kSpiceMining, false, -2);
 	// Stilgar travels with Paul from day 3 (route item 18).
 	_world.setTravelling(5, true);
 	_world.addCompanion(5);
@@ -126,7 +135,7 @@ void GameScreen::speedrunCampaignSetup() {
 	while (_world.visionCount())
 		_world.dequeueVision();
 	_state.setB(GameState::kPhase, 0x4f);
-	speedrunLog(Common::String::format("FORCED campaign start: %u troops rallied and training, Stilgar with Paul, chapters 4-0x4c applied, phase 0x4f", rallied));
+	speedrunLog(Common::String::format("FORCED campaign start: %u troops rallied, troop 3 prospecting and others training, Stilgar with Paul, chapters 4-0x4c applied, phase 0x4f", rallied));
 	// Day 3 (route item 19): the troops fetch the free krys knives and guns
 	// lying in the sietches (MOVE TROOP, MODIFY EQUIPMENT), and train.
 	for (uint id = 1; id <= World::kTroops; ++id) {
@@ -266,9 +275,89 @@ void GameScreen::speedrunCampaign() {
 	int target = -1, stage = -1;
 	Common::Array<uint> group;
 	for (uint round = 0; round < 400 && speedrunAlive(); ++round) {
+		// A raid can catch Paul while he waits at the gathering site. Fight
+		// that battle through the same attack/save-reload route before waiting.
+		if (_battle && !speedrunFight(_world.currentLocation())) {
+			speedrunLog("BLOCKED the raid at Paul's gathering site could not be won");
+			return;
+		}
 		if (!_battle) {
 			speedrunShipment(); // the Emperor's demands until the last fort falls
 			speedrunSpice();    // the miners keep up with them
+			speedrunKeepInTouch();
+			speedrunGarrison(&group); // the soldiers not in the attack keep out of the raids' reach
+			// The Emperor's demands grow (16-18 t by the second month): when
+			// the stock falls under 25 t with fewer than twelve miners, a free
+			// soldier becomes a miner, as a player would (the campaign's own
+			// army still takes the forts).
+			if (_world.spiceStock() < 25000) {
+				uint miners = 0, spare = 0;
+				for (uint id = 1; id <= World::kTroops; ++id) {
+					const Troop t = _world.troop(id);
+					if (!t.id || t.harkonnen() || !t.hired() || (t.occupation & 0x60))
+						continue;
+					if ((t.occupation & 0x0f) == Troop::kSpiceMining)
+						++miners;
+					else if ((t.occupation & 0x0f) == kJobTraining && !spare) {
+						bool inGroup = false;
+						for (uint k = 0; k < group.size(); ++k)
+							inGroup = inGroup || group[k] == id;
+						if (!inGroup)
+							spare = id;
+					}
+				}
+				if (miners < 12 && spare) {
+					speedrunLog(Common::String::format("spice stock %u kg: troop %u turns to spice mining", _world.spiceStock(), spare));
+					speedrunOrders(spare, Troop::kSpiceMining, true, -2);
+				}
+			}
+			// The prospectors, caught in a raid, keep occupation 6 after the
+			// battle is won (75e3 clears only the captured bit), and their
+			// place stays "won" every period (739e -> 7429), which puts the
+			// final attack back to stage 1 (7493): a player gives them their
+			// job back.
+			const Troop p = _world.troop(World::kProspectorTroop);
+			const int pAt = _world.troopPlace(World::kProspectorTroop);
+			if (p.hired() && (p.occupation & 0x2f) == 6 && pAt >= 0 && !(_world.location((uint)pAt).status & 0x02)) {
+				speedrunLog("the prospectors go back to prospecting after a battle");
+				speedrunOrders(World::kProspectorTroop, Troop::kSpiceMining, false, -2);
+			}
+		}
+		// A Harkonnen raid on one of our sietches (CD 1f64): the nearest free
+		// soldiers march there to fight (83fd sets them fighting on arrival).
+		for (uint i = 0; i < _world.locationCount() && speedrunAlive(); ++i) {
+			const Location l = _world.location(i);
+			if (!l.isSietch() || !(l.status & 0x02) || (int)i == target)
+				continue;
+			uint hs, fs;
+			_world.battleForces(i, hs, fs);
+			if (!hs || fs >= hs + hs / 4)
+				continue;
+			uint sum = fs;
+			for (uint pass = 0; pass < World::kTroops && sum < hs + hs / 4; ++pass) {
+				uint best = 0, bestDistance = 0xffff;
+				for (uint id = 1; id <= World::kTroops; ++id) {
+					const Troop t = _world.troop(id);
+					if (!t.id || t.harkonnen() || !t.hired() || (t.occupation & 0x70) || (t.occupation & 0x0f) != kJobTraining)
+						continue;
+					bool busy = false;
+					for (uint k = 0; k < group.size(); ++k)
+						busy = busy || group[k] == id;
+					const int at = _world.troopPlace(id);
+					if (busy || at < 0 || at == (int)i)
+						continue;
+					const Location a = _world.location((uint)at);
+					const uint d = _world.cellDistance(a.longitude, a.latitude, l.longitude, l.latitude);
+					if (d < bestDistance) {
+						bestDistance = d;
+						best = id;
+					}
+				}
+				if (!best || !_world.issueMoveOrder(best, i))
+					break;
+				sum += _world.troopStrength(best);
+				speedrunLog(Common::String::format("troop %u marches to defend sietch %u (Harkonnen %u, Fremen %u)", best, i, hs, fs));
+			}
 		}
 		if (!speedrunAlive())
 			break;
@@ -507,7 +596,8 @@ void GameScreen::speedrunCampaign() {
 				group.clear();
 				// MASSIVE ATTACK with reloads wins from 70 % of the fort's
 				// strength (balance about 73, 28 % a roll, 32 reloads).
-				for (uint k = 0; k < army.size() && sum * 10 < bestH * 9; ++k) {
+				// A fort its raiders left empty (CD 1f64) still needs one troop to walk in.
+				for (uint k = 0; k < army.size() && (group.empty() || sum * 10 < bestH * 9); ++k) {
 					group.push_back(army[k]);
 					sum += _world.troopStrength(army[k], true);
 				}
@@ -518,16 +608,24 @@ void GameScreen::speedrunCampaign() {
 				} else {
 					const Location tl = _world.location((uint)target);
 					uint best = 0xffff;
-					for (uint i = 0; i < _world.locationCount(); ++i) {
-						const Location l = _world.location(i);
-						if (l.hidden() || !_world.friendlyPlace(i) || _world.placeInBattle(i))
-							continue;
-						const uint d = _world.cellDistance(l.longitude, l.latitude, tl.longitude, tl.latitude);
-						if (d < best) {
-							best = d;
-							stage = (int)i;
+					// Not a sietch another fortress could raid while the
+					// group gathers (World::raidSource), when there is a choice.
+					for (uint pass = 0; pass < 2 && best == 0xffff; ++pass)
+						for (uint i = 0; i < _world.locationCount(); ++i) {
+							const Location l = _world.location(i);
+							if (l.hidden() || !_world.friendlyPlace(i) || _world.placeInBattle(i))
+								continue;
+							if (pass == 0 && l.isSietch()) {
+								if (_world.raidSource(i) >= 0)
+									continue; // the target itself raids too
+
+							}
+							const uint d = _world.cellDistance(l.longitude, l.latitude, tl.longitude, tl.latitude);
+							if (d < best) {
+								best = d;
+								stage = (int)i;
+							}
 						}
-					}
 					for (uint k = 0; k < group.size(); ++k)
 						if (_world.troopPlace(group[k]) != stage)
 							_world.issueMoveOrder(group[k], (uint)stage);
@@ -586,7 +684,7 @@ void GameScreen::speedrunCampaign() {
 		}
 		if (_mode != kRoom && !_ending)
 			showRoom(_world.room());
-		for (uint p = 0; p < 4 && speedrunAlive(); ++p)
+		for (uint p = 0; p < 4 && speedrunAlive() && !_battle; ++p)
 			passTime(1);
 	}
 	if (!speedrunAlive())
@@ -632,7 +730,97 @@ void GameScreen::speedrunCampaign() {
 	speedrunFinalAttack();
 }
 
+void GameScreen::speedrunKeepInTouch() {
+	// The daily decay (CD 6e4e): a troop not contacted for more than 8 days
+	// loses a motivation point a day and, below 5, sulks. A player keeps in
+	// touch: every troop not contacted for a week gets a map contact
+	// (closing it writes the day into byte 0x14, 7b89).
+	const byte day = (byte)(_state.w(GameState::kGameTime) >> 4);
+	for (uint id = 1; id <= World::kTroops && !_ending; ++id) {
+		const Troop t = _world.troop(id);
+		if (!t.id || t.harkonnen() || !t.hired() || (t.occupation & 0x20))
+			continue;
+		if ((byte)(day - _world.troopByteForTest(id, 0x14)) < 7)
+			continue;
+		if (speedrunOpenOrders(id))
+			speedrunCloseOrders();
+	}
+}
+
+void GameScreen::speedrunGarrison(const Common::Array<uint> *busy) {
+	// The Harkonnen raids (World::harkonnenRaid, CD 1f64) come from a
+	// fortress within 30 cells of a sietch with Fremen troops (2047-2070).
+	// Early on no troop of ours can stand against a fortress, so a player
+	// keeps the soldiers out of reach: from phase 0x2c on, a soldier at an
+	// exposed sietch marches to the nearest safe one (MOVE TROOP); the
+	// miners prefer safe fields (speedrunSpiceFields).
+	if (_state.b(GameState::kPhase) < 0x2c)
+		return;
+	for (uint id = 1; id <= World::kTroops; ++id) {
+		const Troop t = _world.troop(id);
+		const byte job = t.occupation & 0x0f;
+		if (!t.id || t.harkonnen() || !t.hired() || id == World::kProspectorTroop || (t.occupation & 0x60) ||
+				job != kJobTraining)
+			continue;
+		bool inGroup = false;
+		for (uint k = 0; busy && k < busy->size(); ++k)
+			inGroup = inGroup || (*busy)[k] == id;
+		const int at = _world.troopPlace(id);
+		if (inGroup || at < 0 || !_world.location((uint)at).isSietch())
+			continue;
+		const int source = _world.raidSource((uint)at);
+		if (source < 0)
+			continue;
+		// In the campaign (busy set) the troops wait by hidden forts on
+		// purpose, to find them: only a known fortress sends them away.
+		if (busy && _world.location((uint)source).hidden())
+			continue;
+		// Only when the fortress could win: the sietch's Fremen against its garrison.
+		uint hs, fs, ht, ft;
+		_world.battleForces((uint)source, hs, fs);
+		_world.battleForces((uint)at, ht, ft);
+		if (ft >= hs + hs / 5)
+			continue;
+		const Location here = _world.location((uint)at);
+		int best = -1;
+		uint bestDistance = 0xffff;
+		for (uint i = 0; i < _world.locationCount(); ++i) {
+			const Location l = _world.location(i);
+			if ((int)i == at || !l.isSietch() || l.hidden() || !_world.friendlyPlace(i) || (l.status & 0x02) ||
+					_world.wouldQuarrel(id, i) || _world.raidSource(i) >= 0)
+				continue;
+			const uint d = _world.cellDistance(here.longitude, here.latitude, l.longitude, l.latitude);
+			if (d < bestDistance) {
+				bestDistance = d;
+				best = (int)i;
+			}
+		}
+		if (best < 0)
+			continue;
+		speedrunLog(Common::String::format("troop %u leaves sietch %d, in reach of a Harkonnen fortress (place %d), for sietch %d",
+				id, at, _world.raidSource((uint)at), best));
+		speedrunOrders(id, -1, false, best);
+	}
+}
+
 void GameScreen::speedrunTravel(uint place) {
+	// A player does not land where Harkonnens hold the place and no Fremen
+	// fight for it: a sietch lost to a raid (CD 1f64) is a fortress now.
+	if (place < _world.locationCount()) {
+		uint harkonnen = 0, attacking = 0;
+		_world.countHostiles(place, harkonnen, attacking);
+		const Location l = _world.location(place);
+		if (!_world.friendlyPlace(place) && harkonnen && !attacking && !(l.status & 2)) {
+			speedrunLog(Common::String::format("does not land at place %u: Harkonnens hold it", place));
+			return;
+		}
+		if (l.type < Location::kFortressMin && (l.status & 2)) {
+			// Nor at a sietch the Harkonnens are raiding: it may fall
+			// during the flight.
+			speedrunLog(Common::String::format("does not land at place %u: the Harkonnens are raiding it", place));
+			return;
+		}
+	}
 	// The worm once it has been ridden (phase 0x50, ds:0a bit 6), the
 	// ornithopter before.
 	if (_state.b(World::kPaulEvents) & 0x40)
@@ -1157,6 +1345,8 @@ void GameScreen::speedrunStory() {
 				speedrunOrders(troops[k], (phase < 0x2c || k < 3) ? Troop::kSpiceMining : kJobTraining, true, -2);
 		}
 		speedrunSpice();
+		speedrunGarrison();
+		speedrunKeepInTouch();
 		if (_mode == kRoom)
 			speedrunWait();
 		if (!_speedrunRoundVisits && _state.b(GameState::kPhase) == phase && !_speedrunDone.empty()) {
@@ -1186,6 +1376,8 @@ bool GameScreen::speedrunClickRow(RowAction action, int argument, const char *wh
 	for (uint i = 0; i < Panel::kCommandRows; ++i) {
 		if (_rowActions[i] != action || (argument >= 0 && _rowArguments[i] != argument))
 			continue;
+		if (_panel.rowDisabled(i))
+			return false; // A disabled row is not a successful command.
 		speedrunPause(900); // the watcher reads the menu first
 		Common::Event event;
 		event.type = Common::EVENT_LBUTTONDOWN;
@@ -1308,21 +1500,25 @@ void GameScreen::speedrunOrders(uint id, int job, bool harvester, int moveTo, co
 			}
 		}
 		if (!done && current() != wanted) {
-			// No such row for this troop (a spice troop's menu has no army), or
-			// the answer refused: set as the old bot did, and say so.
-			_world.setTroopOccupation(id, (byte)wanted);
-			speedrunLog(Common::String::format("orders: troop %u to %s (set directly: no row, or refused)", id, kJobs[wanted & 15]));
+			// Missing/disabled rows and refusal lines are gameplay rules.
+			// Keep the accepted state and retry later if it becomes possible.
+			speedrunLog(Common::String::format("orders: troop %u defers %s (no enabled row, or refused)", id, kJobs[wanted & 15]));
 		}
 	}
 	if (takeHarvester) {
 		if (open && _mode == kTroop && speedrunClickRow(kRowEquipment, -1, Common::String::format("troop %u, MODIFY EQUIPMENT", id).c_str())) {
-			_world.takeEquipment(id, 0);
-			drawTroop();
-			speedrunLog(Common::String::format("orders: troop %u takes the harvester lying at place %d", id, at));
+			const Common::Rect item = _equipRects[1][0];
+			if (!item.isEmpty()) {
+				Common::Event event;
+				event.type = Common::EVENT_LBUTTONDOWN;
+				event.mouse = Common::Point((item.left + item.right) / 2, (item.top + item.bottom) / 2);
+				handleEvent(event); // MODIFY EQUIPMENT's actual item hit test.
+			}
+			speedrunLog(Common::String::format("orders: troop %u %s the harvester lying at place %d", id,
+					(_world.troop(id).equipment & 0x80) ? "takes" : "could not take", at));
 			speedrunClickRow(kRowEquipDone, -1, nullptr);
 		} else {
-			_world.takeEquipment(id, 0);
-			speedrunLog(Common::String::format("orders: troop %u takes the harvester (set directly)", id));
+			speedrunLog(Common::String::format("orders: troop %u defers the harvester (no enabled equipment row)", id));
 		}
 	}
 	if (moveTo >= -1) {
@@ -1346,14 +1542,7 @@ void GameScreen::speedrunOrders(uint id, int job, bool harvester, int moveTo, co
 					moveTo >= 0 ? Common::String::format("place %d", moveTo).c_str() : "its three sietches"));
 		}
 		if (!picked) {
-			if (moveTo == -1 && queue) {
-				for (uint k = 0; k < 3; ++k)
-					_world.setProspectorDestination(k, k < count ? World::placeOffset(queue[k]) : 0);
-				_world.issueMoveOrder(id, 0);
-			} else if (moveTo >= 0) {
-				_world.issueMoveOrder(id, (uint)moveTo);
-			}
-			speedrunLog(Common::String::format("orders: troop %u moves (set directly)", id));
+			speedrunLog(Common::String::format("orders: troop %u defers movement (no enabled move row)", id));
 		}
 	}
 	speedrunCloseOrders();
@@ -1408,8 +1597,8 @@ void GameScreen::speedrunSpice() {
 		const uint id = ids[k];
 		const Troop t = _world.troop(id);
 		const int at = _world.troopPlace(id);
-		if (at < 0 || (t.occupation & 0x60))
-			continue; // marching, or not ours to order
+		if (at < 0 || (t.occupation & 0x60) || id == World::kProspectorTroop)
+			continue; // marching, not ours to order, or not a miner
 		// A harvester multiplies the harvest by four (seg000:708a): take one
 		// here, or march to the nearest one lying free, however far.
 		if (!(t.equipment & 0x80)) {
@@ -1440,18 +1629,9 @@ void GameScreen::speedrunSpice() {
 				}
 			}
 		}
-		// A spice troop prospects its place first (seg000:70cc), then mines it
-		// (6fe5: only a prospected place that is not exhausted yields). The
-		// prospectors keep prospecting along their queue.
-		if (id == World::kProspectorTroop)
-			continue;
-		const byte job = _world.troop(id).occupation & 0x0f;
-		const Location l = _world.location((uint)at);
-		const bool prospected = (l.status & 0x40) != 0, exhausted = (l.status & 0x01) != 0;
-		if (!prospected && l.spiceDensity && job != Troop::kProspecting)
-			speedrunOrders(id, Troop::kProspecting, false, -2);
-		else if (prospected && !exhausted && l.spiceDensity && job != Troop::kSpiceMining)
-			speedrunOrders(id, Troop::kSpiceMining, false, -2);
+		// Ordinary miners cannot become prospectors from the class menu
+		// (CD 69b3, ds:216e; floppy 774d, ds:27d4). Troop 3's existing
+		// queue prospects the fields; miners wait or move to another field.
 	}
 	speedrunSpiceFields(ids);
 }
@@ -1461,7 +1641,16 @@ void GameScreen::speedrunSpiceFields(const Common::Array<uint> &troops) {
 	// shipments in a row end the game (floppy sub_4748), so the spice has to
 	// come from the rich fields, as a player does: the harvest is the field's
 	// density times the troop (seg000:708a).
-	auto richness = [&](uint i) { return (uint)(_world.location(i).spiceDensity & 0xf0); };
+	// A sietch a Harkonnen raid can reach (speedrunGarrison) ranks below
+	// every safe field once the raids can come; it is used when nothing
+	// else is left.
+	Common::Array<bool> exposed;
+	exposed.resize(_world.locationCount());
+	for (uint i = 0; i < _world.locationCount(); ++i)
+		// A conquered fortress turns into a sietch two days later (CD
+		// 6e28-6e47, floppy 7b90-7baf): anticipate the coming raid exposure.
+		exposed[i] = _state.b(GameState::kPhase) >= 0x2c && _world.raidSource(i) >= 0;
+	auto richness = [&](uint i) { return (uint)(_world.location(i).spiceDensity & 0xf0) + (exposed[i] ? 0 : 0x100); };
 	// Any place of ours with a field: sietches, and the forts and villages
 	// taken from the Harkonnens.
 	auto usable = [&](uint i) {
@@ -1475,7 +1664,7 @@ void GameScreen::speedrunSpiceFields(const Common::Array<uint> &troops) {
 			!_world.prospectorDestination(0) && p.motivation >= 12) {
 		Common::Array<uint> fields;
 		for (uint i = 0; i < _world.locationCount(); ++i)
-			if (usable(i) && !(_world.location(i).status & 0x40) && richness(i))
+			if (usable(i) && !(_world.location(i).status & 0x40) && (_world.location(i).spiceDensity & 0xf0))
 				fields.push_back(i);
 		Common::sort(fields.begin(), fields.end(), [&](uint a, uint b) { return richness(a) > richness(b); });
 		if (!fields.empty()) {
@@ -1487,6 +1676,26 @@ void GameScreen::speedrunSpiceFields(const Common::Array<uint> &troops) {
 			}
 			speedrunLog(Common::String::format("the prospectors go to prospect places%s", list.c_str()));
 			speedrunOrders(World::kProspectorTroop, -1, false, -1, queue, count); // MOVE TROOP, three sietches
+		} else {
+			// An idle prospecting troop need not wait beside a hostile fort.
+			// Its ordinary destination picker also accepts a prospected sietch.
+			const int at = _world.troopPlace(World::kProspectorTroop);
+			uint nearest = 0xffff;
+			int refuge = -1;
+			for (uint i = 0; at >= 0 && exposed[(uint)at] && i < _world.locationCount(); ++i) {
+				if (!usable(i) || exposed[i] || !_world.location(i).isSietch())
+					continue;
+				const uint distance = _world.placeDistance((uint)at, i);
+				if (distance < nearest) {
+					nearest = distance;
+					refuge = (int)i;
+				}
+			}
+			if (refuge >= 0) {
+				const uint queue[1] = { (uint)refuge };
+				speedrunLog(Common::String::format("idle prospectors leave exposed place %d for safe place %d", at, refuge));
+				speedrunOrders(World::kProspectorTroop, -1, false, -1, queue, 1);
+			}
 		}
 	}
 	// The miners: to the richest prospected field that is not exhausted, three
@@ -1495,7 +1704,7 @@ void GameScreen::speedrunSpiceFields(const Common::Array<uint> &troops) {
 	Common::Array<uint> fields;
 	for (uint i = 0; i < _world.locationCount(); ++i) {
 		const Location l = _world.location(i);
-		if (usable(i) && (l.status & 0x40) && !(l.status & 0x01) && richness(i))
+		if (usable(i) && (l.status & 0x40) && !(l.status & 0x01) && (l.spiceDensity & 0xf0))
 			fields.push_back(i);
 	}
 	Common::sort(fields.begin(), fields.end(), [&](uint a, uint b) { return richness(a) > richness(b); });
@@ -1506,12 +1715,6 @@ void GameScreen::speedrunSpiceFields(const Common::Array<uint> &troops) {
 		if (at >= 0 && (t.occupation & 0x0f) == Troop::kSpiceMining)
 			assigned[(uint)at]++;
 	}
-	// The rich fields nobody prospects yet, for miners with nothing left.
-	Common::Array<uint> fresh;
-	for (uint i = 0; i < _world.locationCount(); ++i)
-		if (usable(i) && !(_world.location(i).status & 0x40) && richness(i))
-			fresh.push_back(i);
-	Common::sort(fresh.begin(), fresh.end(), [&](uint a, uint b) { return richness(a) > richness(b); });
 	for (uint k = 0; k < troops.size(); ++k) {
 		const uint id = troops[k];
 		const Troop t = _world.troop(id);
@@ -1522,7 +1725,7 @@ void GameScreen::speedrunSpiceFields(const Common::Array<uint> &troops) {
 		if (at < 0)
 			continue;
 		// A miner whose field is spent (or who stopped) moves on at any
-		// motivation: to a field in work, else to prospect a new one itself.
+		// motivation: to a prospected field in work; otherwise it waits for troop 3.
 		const Location spent = _world.location((uint)at);
 		// The harvest reads the density's high nibble (seg000:708a): below 0x10
 		// a field yields nothing though it is not flagged exhausted. A march
@@ -1546,26 +1749,14 @@ void GameScreen::speedrunSpiceFields(const Common::Array<uint> &troops) {
 					moved = true;
 				}
 			}
-			for (uint f = 0; f < fresh.size() && !moved; ++f) {
-				const uint i = fresh[f];
-				if ((int)i == at || assigned[i] >= 1 || _world.wouldQuarrel(id, i))
-					continue;
-				speedrunLog(Common::String::format("troop %u leaves spent place %d to prospect place %u (density %#x)", id, at, i,
-						_world.location(i).spiceDensity));
-				speedrunOrders(id, Troop::kProspecting, false, (int)i);
-				if (_world.troop(id).occupation & 0x40) {
-					assigned[i]++;
-					moved = true;
-				}
-			}
+
 			continue;
 		}
 		if (t.motivation < 12)
 			continue;
-		// Its own field counts whether prospected yet or not (the jobs loop
-		// prospects it first); an exhausted one counts nothing.
+		// Only a prospected, unexhausted field can supply the miner (6b96).
 		const Location here = _world.location((uint)at);
-		const uint mine = !(here.status & 0x01) ? richness((uint)at) : 0;
+		const uint mine = (here.status & 0x41) == 0x40 && (here.spiceDensity & 0xf0) ? richness((uint)at) : 0;
 		for (uint f = 0; f < fields.size(); ++f) {
 			const uint i = fields[f];
 			if ((int)i == at || richness(i) < mine + 0x30 || assigned[i] >= 3 || _world.wouldQuarrel(id, i))
@@ -1598,7 +1789,10 @@ bool GameScreen::speedrunMeet(uint who) {
 		speedrunTravel((uint)place);
 	if (_ending)
 		return false;
-	showRoom(c.room ? c.room : 1);
+	// The landing may have moved him (CD 2170: Stilgar and the later
+	// characters wander the palace's rooms): read the record again.
+	const Character now = _world.character(who);
+	showRoom(now.room ? now.room : 1);
 	speedrunConverse(); // an entry line
 	Common::Array<byte> people;
 	_world.peopleInRoom(people);
@@ -1607,7 +1801,7 @@ bool GameScreen::speedrunMeet(uint who) {
 			return true;
 	const byte *r = _state.vars + World::kCharacterTable + who * World::kCharacterSize;
 	speedrunLog(Common::String::format("character %u is not in room %u of place %d (record %02x %02x %02x %02x %02x, ds:4-7 %02x %02x %02x %02x)",
-			who, c.room, place, r[0], r[1], r[2], r[3], r[4], _state.b(4), _state.b(5), _state.b(6), _state.b(7)));
+			who, now.room, place, r[0], r[1], r[2], r[3], r[4], _state.b(4), _state.b(5), _state.b(6), _state.b(7)));
 	return false;
 }
 
@@ -1675,10 +1869,13 @@ void GameScreen::speedrunFinalAttack() {
 	else
 		force(2, "Thufir did not come");
 	// Stage 3: Thufir stays at the sietch by the palace.
+	// The allies wait in room 2: whoever waits in room 1 of a sietch
+	// walks further in whenever Paul lands elsewhere (CD 2170), so a
+	// player parks them there.
 	rideWormTo(council);
 	if (_ending)
 		return;
-	showRoom(1);
+	enterRoom(2);
 	if (!((_state.w(GameState::kPersonsWith) >> kThufir) & 1)) {
 		_world.setTravelling(kThufir, true);
 		_world.addCompanion(kThufir);
@@ -1694,7 +1891,7 @@ void GameScreen::speedrunFinalAttack() {
 		if (!speedrunMeet(parked[k]) || !speedrunCompanion(parked[k], true))
 			continue;
 		rideWormTo(council);
-		showRoom(1);
+		enterRoom(2);
 		// A refusal (her topic-6 answer) can give way once her pending lines
 		// are said: talk, then ask again (three times at most).
 		for (uint tries = 0; tries < 3 && !_ending && !speedrunCompanion(parked[k], false); ++tries) {
@@ -1707,7 +1904,8 @@ void GameScreen::speedrunFinalAttack() {
 		speedrunCompanion(kStilgar, true);
 	if (speedrunMeet(kChani))
 		speedrunCompanion(kChani, true);
-	rideWormTo(council); // the arrival's entry scan: "Hey! here we are."
+	rideWormTo(council);
+	enterRoom(2); // the room's entry scan: "Hey! here we are."
 	speedrunConverse();
 	if (stage() == 4)
 		speedrunLog("step 51 OK: the war council, stage 4");
@@ -1734,13 +1932,13 @@ void GameScreen::speedrunFinalAttack() {
 		if (here < 2 || here > 4)
 			_world.issueMoveOrder(id, 2 + id % 3);
 	}
-	// Atomics lying free away from the palace (a won fort's stock, or a
-	// swallowed harvester's troop left them): as a player short of men would,
+	// Atomics lying free, including around the palace: a store there
+	// still needs a troop to carry it. As a player short of men would,
 	// the biggest troop without atomics marches there, takes them (MODIFY
 	// EQUIPMENT) and comes back.
 	Common::HashMap<uint, uint> fetch; // troop -> the place of the atomics
 	for (uint i = 0; i < _world.locationCount(); ++i) {
-		if ((i >= 2 && i <= 4) || !_world.friendlyPlace(i) || _world.placeInBattle(i))
+		if (!_world.friendlyPlace(i) || _world.placeInBattle(i))
 			continue;
 		byte c[7];
 		_world.placeFreeEquipment(i, c);
@@ -1858,6 +2056,88 @@ void GameScreen::speedrun(const Common::String &part) {
 	if (!loadDialogue())
 		return;
 	speedrunLog(Common::String::format("start (%s, %s)", part.c_str(), _world.floppy() ? "floppy" : "CD"));
+	speedrunLog("coverage engine-assisted-v1: direct campaign actions and battle save/reload retries; player-UI completion unverified");
+	if (part == "orders") {
+		// Deliberately seeded regression states, not campaign progression.
+		// Test the bot against the same rows and reaction gate as a player.
+		const uint id = 2;
+		speedrunLog("order-check setup: seeded troop 2 and phase/reaction bits; not a playthrough");
+		_world.rallyTroop(id);
+		_world.setTroopOccupation(id, Troop::kWaitingForOrders);
+		_state.setB(GameState::kPhase, 1);
+		speedrunOrders(id, Troop::kSpiceMining, false, -2);
+		const bool selected = (_world.troop(id).occupation & 0x0f) == Troop::kSpiceMining;
+		speedrunLog(Common::String::format("order-check %s enabled occupation is accepted", selected ? "PASS" : "FAIL"));
+
+		const Troop beforeMove = _world.troop(id);
+		speedrunOrders(id, -1, false, 12);
+		const Troop afterMove = _world.troop(id);
+		speedrunLog(Common::String::format("order-check %s phase-1 disabled move preserves occupation and destination",
+				beforeMove.occupation == afterMove.occupation && beforeMove.location == afterMove.location ? "PASS" : "FAIL"));
+
+		_state.setB(GameState::kPhase, 5);
+		const byte beforeJob = _world.troop(id).occupation;
+		speedrunOrders(id, Troop::kProspecting, false, -2);
+		speedrunLog(Common::String::format("order-check %s absent prospecting row preserves ordinary miner",
+				_world.troop(id).occupation == beforeJob ? "PASS" : "FAIL"));
+
+		// The conversion/rest refusal reads troop bitfield_10 bit 5 in its
+		// list-4 line (CD condition 627, Amiga/floppy condition 626).
+		_state.setB(GameState::kPhase, 0x50);
+		_world.setTroopOccupation(id, Troop::kMilitaryTraining);
+		byte *record = _state.vars + World::kTroopTable + (id - 1) * World::kTroopSize;
+		WRITE_LE_UINT16(record + 0x10, READ_LE_UINT16(record + 0x10) | 0x20);
+		const byte beforeRefusal = _world.troop(id).occupation;
+		speedrunOrders(id, Troop::kSpiceMining, false, -2);
+		speedrunLog(Common::String::format("order-check %s refused occupation preserves soldier",
+				_world.troop(id).occupation == beforeRefusal ? "PASS" : "FAIL"));
+		// A seeded just-won fort beside a hostile garrison, and a weaker
+		// safe field. Only the two sites are visible to the bot planner.
+		int exposed = -1, safe = -1;
+		for (uint i = 2; i < _world.locationCount(); ++i) {
+			if (!_world.location(i).isSietch())
+				continue;
+			if (_world.raidSource(i) >= 0 && exposed < 0)
+				exposed = (int)i;
+			else if (_world.raidSource(i) < 0 && safe < 0)
+				safe = (int)i;
+		}
+		if (exposed < 0 || safe < 0) {
+			speedrunLog("order-check FAIL field-safety fixture needs exposed and safe sietches");
+		} else {
+			for (uint i = 2; i < _world.locationCount(); ++i)
+				_world.setLocationStatus(i, (byte)(_world.location(i).status | 0x80));
+			for (uint n = 1; n <= World::kTroops; ++n) {
+				const int at = _world.troopPlace(n);
+				if (n != id && n != World::kProspectorTroop && (at == exposed || at == safe))
+					_world.placeTroopForTest(n, 0, Troop::kWaitingForOrders, 0);
+			}
+			byte *risk = _state.vars + World::placeOffset((uint)exposed);
+			risk[8] = (byte)(Location::kFortressMin + (risk[8] & 7));
+			risk[10] = 0x48; // friendly, prospected, awaiting fortress conversion
+			risk[18] = 0xf0;
+			byte *refuge = _state.vars + World::placeOffset((uint)safe);
+			refuge[10] = 0x40;
+			refuge[18] = 0x20;
+			_world.placeTroopForTest(id, (uint)safe, Troop::kSpiceMining, 0);
+			_world.placeTroopForTest(World::kProspectorTroop, (uint)exposed, Troop::kProspecting | Troop::kStopped, 0);
+			_world.setTroopByteForTest(id, 0x15, 50);
+			_world.setTroopByteForTest(World::kProspectorTroop, 0x15, 50);
+			for (uint k = 0; k < 3; ++k)
+				_world.setProspectorDestination(k, 0);
+			speedrunLog(Common::String::format("order-check setup: held fort %d, safe field %d; not a playthrough", exposed, safe));
+			Common::Array<uint> miners;
+			miners.push_back(id);
+			speedrunSpiceFields(miners);
+			speedrunLog(Common::String::format("order-check %s miner avoids a fort's coming raid exposure",
+					_world.troopPlace(id) == safe && !(_world.troop(id).occupation & 0x40) ? "PASS" : "FAIL"));
+			speedrunLog(Common::String::format("order-check %s idle prospectors accept the safe destination queue",
+					_world.troopPlace(World::kProspectorTroop) == safe && (_world.troop(World::kProspectorTroop).occupation & 0x40)
+					? "PASS" : "FAIL"));
+		}
+		speedrunLog("end");
+		return;
+	}
 	const uint16 shot = _panel.findCommand("You know what?", true);
 	for (uint k = 0; shot != 0xffff && k < 4; ++k)
 		speedrunLog(Common::String::format("ending text %u: \"%s\"", shot + k, _panel.commandString(shot + k).c_str()));

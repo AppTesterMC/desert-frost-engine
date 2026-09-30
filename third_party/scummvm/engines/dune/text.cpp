@@ -86,6 +86,28 @@ Common::String SentenceBank::command(uint index) const {
 	return out;
 }
 
+void SentenceBank::patchCommandNumber(uint index, uint value) {
+	uint length;
+	const byte *p = entry(_commands, index, length);
+	if (!p)
+		return;
+	byte *s = _commands.data() + (p - _commands.data());
+	uint i = 0;
+	while (i < length && (s[i] < '0' || s[i] > '9'))
+		++i;
+	if (i >= length)
+		return;
+	while (i < length && s[i] >= '0' && s[i] <= '9')
+		++i;
+	if (i < 3)
+		return;
+	value = MIN<uint>(value, 999);
+	const uint hundreds = value / 100, tens = value / 10 % 10, ones = value % 10;
+	s[i - 3] = hundreds ? (byte)('0' + hundreds) : ' ';
+	s[i - 2] = (!hundreds && !tens) ? ' ' : (byte)('0' + tens);
+	s[i - 1] = (byte)('0' + ones);
+}
+
 Common::String SentenceBank::text(uint16 id, bool secondPhraseFile, const GameState &state) const {
 	Common::String out;
 	uint length;

@@ -48,6 +48,7 @@
 #include "dune/scene.h"
 #include "dune/sky.h"
 #include "dune/attack.h"
+#include "dune/sound.h"
 #include "dune/sprite.h"
 #include "dune/text.h"
 #include "dune/world.h"
@@ -672,7 +673,7 @@ void GameScreen::spiralPresent() {
 			// Paced by the clock, as the original waits on the PIT counter.
 			const uint32 due = start + ++stepCount * kSpiralStepMillis, now = _system->getMillis();
 			if ((int32)(due - now) > 0)
-				_system->delayMillis(due - now);
+				waitPumping(due - now);
 		}
 	}
 	_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
@@ -710,6 +711,14 @@ bool GameScreen::battleCheck() {
 		_endingText = text.size() > 12 ? text.substr(0, 12) : text;
 		emperorEnding();
 		return true;
+	}
+	if (!_battle && _state.b(0x2b) && !_desert && _world.placeInBattle(_world.currentLocation())) {
+		// A Harkonnen raid on the sietch where Paul is (CD 2000-2010, floppy
+		// 2318-2328): he is moved to its room 1, and the night battle begins.
+		_battle = true;
+		_room = _world.room();
+		refreshRooms();
+		_log.line(Common::String::format("Battle: the Harkonnens attack place %u with Paul there", _world.currentLocation()));
 	}
 	if (_battle && !_world.placeInBattle(_world.currentLocation())) {
 		_battle = false;
@@ -757,6 +766,7 @@ void GameScreen::showRoom(uint number) {
 	_commList = -1;
 	_world.setPosition(_world.currentLocation(), number);
 	_room = number;
+	_world.captainEnters(); // 31c9
 	refreshRooms();
 	updateRoomVars();
 	if (_world.placeType() == Location::kHarkonnenPalace && number == 2 && !skipsRules() &&
@@ -823,6 +833,7 @@ void GameScreen::travelToward(uint16 longitude, int16 latitude) {
 	if (arrivalIsFatal(arrived))
 		return;
 	_world.markDiscovered(arrived);
+	_world.arrivalShuffle(arrived); // 4054 -> 2170
 	_world.setPosition(arrived, 1);
 	_world.rollRoomRotation();
 	_room = 1;
@@ -868,6 +879,7 @@ void GameScreen::travelTo(uint locationIndex) {
 	if (arrivalIsFatal(arrived))
 		return;
 	_world.markDiscovered(arrived);
+	_world.arrivalShuffle(arrived); // 4054 -> 2170
 	_world.setPosition(arrived, 1);
 	if (from != arrived || fromDesert) {
 		// travel_finish_at_destination parks it on the destination's pad, and
@@ -887,8 +899,13 @@ void GameScreen::travelTo(uint locationIndex) {
 			// loc_4fb0: no clip and no landing animation, the room is drawn at once.
 			if (!isFastCapture() && _flightSkipped)
 				_log.line("Travel: skipped to the destination, no approach clip");
-			else if (!isFastCapture())
-				playArrivalVideo(_world.location(arrived).type);
+			else if (!isFastCapture()) {
+				// 4894-48e3: SIET (a sietch), PALACE (the palace), FORT (a
+				// fortress); a village or the Harkonnen palace has no clip.
+				const byte type = _world.location(arrived).type;
+				if (type <= Location::kPalace || (type >= Location::kFortressMin && type <= Location::kFortressMax))
+					playArrivalVideo(type);
+			}
 		} else
 			animateOrni(-1);
 	}
@@ -1142,6 +1159,13 @@ void GameScreen::drawNightBattle() {
 				: (type == Location::kHarkonnenPalace || type < Location::kFortressMin) ? 0x30 : 0x33;
 		_nightAttack->setBackdrop(backdrop);
 		_attackLast = _system->getMillis();
+		// 0b1c-0b1e: sound effect 3 (SN3.HSQ on the CD, SD3.HSQ on the floppy).
+		Common::Array<byte> voc;
+		if (!isFastCapture() && _resources.load(_world.floppy() ? "SD3.HSQ" : "SN3.HSQ", voc)) {
+			delete _attackSound;
+			_attackSound = new Sound(_system);
+			_attackSound->playVOC(voc);
+		}
 		_log.line(Common::String::format("Battle: the night battle at place %u (backdrop %#x)", _world.currentLocation(), backdrop));
 	}
 	_attackSheet->setPalette();
@@ -1155,6 +1179,8 @@ void GameScreen::endNightBattle() {
 	// loc_00b21 (CD 0b21, floppy 0ca5): the particle task goes.
 	delete _nightAttack;
 	_nightAttack = nullptr;
+	delete _attackSound;
+	_attackSound = nullptr;
 	delete _attackSheet;
 	_attackSheet = nullptr;
 	_attackData.clear();
@@ -1503,9 +1529,17 @@ void GameScreen::drawRoom(int pressedRow, int pressedArrow) {
 		++count;
 	}
 	setRows(actions, arguments, commands, count);
-	for (uint i = 0; i < count; ++i)
+	Common::String rowsLine = "Room rows:";
+	for (uint i = 0; i < count; ++i) {
 		if (greyed[i])
 			_panel.setRowDisabled(i, true);
+		const char *text = _panel.commandText(i);
+		rowsLine += Common::String::format(" [%s%s]", text ? text : "?", greyed[i] ? " greyed" : "");
+	}
+	if (rowsLine != _lastRoomRows) {
+		_lastRoomRows = rowsLine;
+		_log.line(rowsLine);
+	}
 	if (_sceneActive || (_desert && !_walking) || (kNightBattleView && _battle))
 		for (uint d = 0; d < 4; ++d)
 			exits[d] = false;
@@ -1578,7 +1612,30 @@ void GameScreen::panelAction(Panel::Action action, int row, int arrow) {
 			openMap(MapScreen::kFlat, true);
 			return;
 		case kRowMassiveAttack:
+			// menu_callback_choice_massive_attack (CD 7317-7396): the denser
+			// fire while the rounds run, then 20 rounds of the sky flash
+			// forced to 0x0b or 0x11 (rand_masked 0x201) with a wait of
+			// 0x28 ticks, + 2 when the high byte is set.
+			if (_nightAttack)
+				_nightAttack->setMassive(true);
 			_world.massiveAttack(_world.currentLocation());
+			if (_nightAttack && !isFastCapture()) {
+				for (uint k = 0; k < 20 && !_quitRequested; ++k) {
+					const uint16 r = _world.lcgRandMasked(0x201);
+					_nightAttack->setSkyFlashTimer((r & 1) ? 0x11 : 0x0b);
+					const uint32 until = _system->getMillis() + (0x28 + (r >> 8)) * 5;
+					while (_system->getMillis() < until && !_quitRequested) {
+						updateNightBattle(_system->getMillis());
+						Common::Event event;
+						while (pollDuneEvent(_system, event))
+							if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER)
+								_quitRequested = true;
+						_system->delayMillis(5);
+					}
+				}
+			}
+			if (_nightAttack)
+				_nightAttack->setMassive(false);
 			dumpScreen(_system, "battle-massive");
 			if (!battleCheck())
 				drawRoom();
@@ -1707,7 +1764,58 @@ void GameScreen::panelAction(Panel::Action action, int row, int arrow) {
 	enterRoom(exit & 0x7f);
 }
 
+bool GameScreen::roomLeaveScan(uint room) {
+	// ui_click_move_room 3faa-3fc2 (floppy likewise): ds:0c = the room Paul
+	// heads for, pending_room_action 1, the interrupt gate armed; the scan
+	// (run_room_leave_dialogue_scan 36d3 -> npc_auto_dialogue 3520) lets the
+	// first person here whose topic-4 line holds say it ("Where are you
+	// going so fast? I have to talk to you!", "DON'T USE THIS DOOR! ...",
+	// a sietch's "No, no wait! ..."). A line whose event drops the gate
+	// (event 2) stops the move and the talk stays open; otherwise the move
+	// goes on. Capture runs skip it, as the entry scan (roomEntryScan),
+	// unless dune_room_scans is set (scripts/check_room_leave.sh).
+	if (((isFastCapture() || isDumpRun() || isDuneHarnessRun()) && !ConfMan.hasKey("dune_room_scans")) || _sceneActive ||
+			!loadDialogue())
+		return true;
+	_state.setB(0x0c, (byte)room);
+	_state.setB(0x23, 1);
+	Common::Array<byte> people;
+	_world.peopleInRoom(people);
+	for (uint i = 0; i < people.size(); ++i) {
+		const uint who = people[i];
+		const uint group = MIN<uint>(who, World::kFremenChief);
+		if (const uint troop = _world.troopForPerson(who))
+			stageTroopForConditions(troop);
+		if (!_conversation->hasLine(group, 4, 0x80))
+			continue;
+		_log.line(Common::String::format("Room: character %u speaks as Paul leaves for room %u", who, room));
+		_conversation->armGate();
+		// The line is picked before the speaker counts as met (35a6 marks
+		// him afterwards): Leto's line tests "not met yet" (w[0e] bit 0).
+		const uint16 met = _state.w(GameState::kPersonsMet);
+		openTalk(who);
+		_talkKind = kTalkNormal;
+		_conversation->start(group, 4, 0x80, true, true);
+		_state.setW(GameState::kPersonsMet, met);
+		advanceConversation();
+		if (who < 16)
+			_state.setW(GameState::kPersonsMet, (uint16)(_state.w(GameState::kPersonsMet) | (1 << who)));
+		_conversation->finishPending(); // the line's event (2 drops the gate)
+		_state.setB(0x23, 0);
+		if (!_conversation->gateHeld()) {
+			_log.line("Room: the move is interrupted");
+			return false;
+		}
+		endConversation();
+		return true;
+	}
+	_state.setB(0x23, 0);
+	return true;
+}
+
 void GameScreen::enterRoom(uint room) {
+	if (!roomLeaveScan(room))
+		return;
 	// ui_click_move_room (seg000:3f27): ds:26 cleared; the first move inside
 	// a place marks it visited (status bit 4), counts a sietch (ds:25) and
 	// flags the first entry (ds:26 = 0xff); ds:0c the new room; then
@@ -1858,6 +1966,20 @@ void GameScreen::mapTap(int x, int y) {
 		cockpitTap(x, y);
 		return;
 	}
+	if (!_map->selecting()) {
+		const uint troop = _map->hitTroop(x, y);
+		if (troop) {
+			// Floppy CS:9426-944a: remote contact needs range >= 2;
+			// otherwise only the troop at Paul's current place can answer.
+			if (_world.contactRange() < 2 && _world.troopPlace(troop) != (int)_world.currentLocation())
+				return;
+			_lastContacted = troop;
+			_recruiting = false;
+			_log.line(Common::String::format("Map: troop %u selected by icon", troop));
+			openTroop(troop, true);
+			return;
+		}
+	}
 	const int hit = _map->hitLocation(x, y);
 	if (hit < 0) {
 		// A desert point: the flight goes that way, and whatever the
@@ -1897,6 +2019,23 @@ bool GameScreen::hiredTroopAt(uint location) const {
 		if (!_world.troop(ids[i]).harkonnen() && _world.troop(ids[i]).hired())
 			return true;
 	return false;
+}
+
+bool GameScreen::troopInView(uint id) const {
+	if (!_map)
+		return false;
+	if (!_world.mapTroopIconData().empty())
+		return _map->hasTroopIcon(id);
+	const byte *r = _state.vars + World::kTroopTable + (id - 1) * World::kTroopSize;
+	uint16 lng = READ_LE_UINT16(r + 6);
+	int16 lat = (int16)READ_LE_UINT16(r + 8);
+	if (!(r[3] & 0x40) && _world.troopPlace(id) >= 0) {
+		const Location l = _world.location((uint)_world.troopPlace(id));
+		lng = l.longitude;
+		lat = l.latitude;
+	}
+	int x, y;
+	return _map->projectPosition(lng, lat, x, y) && x >= 4 && x < 316 && y >= 4 && y < 148;
 }
 
 uint GameScreen::nextRalliedTroop(uint after) const {
@@ -1992,9 +2131,26 @@ void GameScreen::animateOrni(int step) {
 		if (isRecording())
 			recordFrame(_system, 100); // a recorded run keeps the frame's time
 		else
-			_system->delayMillis(100);
+			waitPumping(100);
 	}
 	clean.free();
+}
+
+void GameScreen::waitPumping(uint32 millis) {
+	// A blocking animation (the take-off, the spiral) still lets a harness
+	// script's checkpoints fall at their time; input is ignored, as the
+	// original's loops do, but a quit is kept.
+	const uint32 until = _system->getMillis() + millis;
+	do {
+		Common::Event event;
+		while (pollDuneEvent(_system, event))
+			if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER)
+				_quitRequested = true;
+		const uint32 now = _system->getMillis();
+		if ((int32)(until - now) <= 0)
+			break;
+		_system->delayMillis(MIN<uint32>(until - now, 5));
+	} while (true);
 }
 
 byte GameScreen::defaultVoiceMode() const {
@@ -2114,8 +2270,11 @@ void GameScreen::drawMirror() {
 		if (_resources.load("PAUL.HSQ", paul)) {
 			Sprite face(_system, paul);
 			face.setPalette();
-			// Centred in the frame; Paul ages with the clock (seg000:917a).
-			const uint expression = MIN<uint>((uint)(_state.w(GameState::kGameTime) >> 6), 8u) * 2;
+			// Centred in the frame; Paul ages with the clock (CD 917a, floppy
+			// 9c7a): min(time >> 6, 8) x 2, plus 1 once ds:f4 (the desert
+			// walks' count, desert.cpp) reaches 0x10: the weathered face.
+			const uint expression = MIN<uint>((uint)(_state.w(GameState::kGameTime) >> 6), 8u) * 2 +
+									(_state.b(0xf4) >= 0x10 ? 1 : 0);
 			if (_world.amiga()) {
 				// The Amiga's picture includes the gilt frame: Paul, where he
 				// talks from (measured on the recording), shows inside it.
@@ -2193,6 +2352,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 	const int startCell = _world.mapCell(a.longitude, a.latitude);
 	uint total = _world.cellDistance(a.longitude, a.latitude, b.longitude, b.latitude);
 	uint step = 0;
+	_lastProbeStep = 0xffff;
 	const uint32 kTurnRepeatMillis = 250; // 0x32 ticks between repeats of a held turn
 	bool skipping = isFastCapture();
 	if (!skipping) {
@@ -2317,18 +2477,28 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 	const bool cdView = !skipping && !dunes && !_world.floppy() && startCdFlightView();
 	auto present = [&]() {
 		if (cdView) {
-			// The terrain six cells ahead on the route (travel_probe_terrain_ahead, seg000:4e8e).
+			// travel_probe_terrain_ahead (CD 4e8e-4ec4): the map bytes six and
+			// seven steps ahead, averaged whole ((a + b) >> 1, stage bits
+			// included), then the low nibble tested (>= 8 rock, 4ed0).
 			uint16 aLng = lng;
 			int16 aLat = lat;
 			byte aFraction = fraction;
 			const byte keepHeading = heading;
 			for (uint k = 0; k < 6; ++k)
 				routeStep(aLng, aLat, aFraction, lng, lat);
+			uint16 bLng = aLng;
+			int16 bLat = aLat;
+			routeStep(bLng, bLat, aFraction, lng, lat);
 			heading = keepHeading;
-			const int c0 = _world.mapCell(lng, lat), c1 = _world.mapCell(aLng, aLat);
+			const int c6 = _world.mapCell(aLng, aLat), c7 = _world.mapCell(bLng, bLat);
 			const Common::Array<byte> &m = _world.map();
-			const byte t0 = c0 >= 0 ? (m[c0] & 0x0f) : 0, t1 = c1 >= 0 ? (m[c1] & 0x0f) : 0;
-			drawCdFlightView((byte)((t0 + t1) / 2));
+			const uint b6 = c6 >= 0 ? m[c6] : 0, b7 = c7 >= 0 ? m[c7] : 0;
+			const byte terrainAhead = (byte)(((b6 + b7) >> 1) & 0x0f);
+			if (step != _lastProbeStep) {
+				_lastProbeStep = step;
+				_log.line(Common::String::format("Flight: step %u at %u ms at %04x/%d, terrain ahead %x (bytes %02x %02x)", step, _system->getMillis(), (uint)lng, (int)lat, terrainAhead, b6, b7));
+			}
+			drawCdFlightView(terrainAhead);
 			_map->drawMinimap(_surface, Common::Rect(202, 3, 318, 61), _panel);
 			setFlightRows();
 			_panel.setLeftPanel(Panel::kLeftBook);
@@ -2403,6 +2573,10 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		}
 	};
 	uint32 next = _system->getMillis();
+	// travel_pump (CD 4f27-4f31): a step every 0x300 ticks of the 200.3 Hz
+	// counter on the CD (captures/cd-flight-long: palace -> Carthag-Tuek,
+	// 22 steps, about 84 s); the floppy's recordings keep 0.64 s a cell.
+	const uint32 stepMillis = _world.floppy() ? (uint32)World::kFlightStepMillis : kCdFlightStepMillis;
 	uint periods = 0;
 	if (skipping && isDumpRun() && !isDuneHarnessRun()) {
 		// Dump runs fly instantly; picture the view once ("flight").
@@ -2461,8 +2635,12 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 					_quitRequested = true;
 				} else if (event.type == Common::EVENT_KEYDOWN && event.kbd.keycode == Common::KEYCODE_ESCAPE) {
 					cockpitCancel();
+				} else if (event.type == Common::EVENT_MOUSEMOVE) {
+					cockpitHover(event.mouse.x, event.mouse.y);
+					drawCockpit();
 				} else if (event.type == Common::EVENT_LBUTTONDOWN) {
-					const int arrow = _map->hitArrow(event.mouse.x, event.mouse.y);
+					cockpitHover(event.mouse.x, event.mouse.y);
+					const int arrow = cockpitArrow(event.mouse.x, event.mouse.y);
 					int row, arrowHit;
 					if (arrow >= 0) {
 						static const int dx[5] = { 0, 1, 0, -1, 0 }, dy[5] = { -1, 0, 1, 0, 0 };
@@ -2498,7 +2676,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 			fraction = 0x80;
 		}
 		_changeTarget = -1;
-		next = _system->getMillis() + World::kFlightStepMillis;
+		next = _system->getMillis() + stepMillis;
 		_flightFrameAt = _system->getMillis();
 	};
 	auto aimAt = [&](uint place) {
@@ -2589,9 +2767,9 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 				}
 				if (dunes || cdView)
 					present();
-				_system->delayMillis(dunes || cdView ? 40 : 10);
+				_system->delayMillis(dunes ? 40 : 10); // the CD's clips keep their 80 ms frames
 			}
-			next += World::kFlightStepMillis;
+			next += stepMillis;
 		}
 		if (_quitRequested)
 			break;
@@ -2625,9 +2803,13 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 					skipping = false;
 					if (!dunes)
 						present();
-					if (!askHostileZone())
-						aimAt(from); // BACK TO STARTING POINT
-					next = _system->getMillis() + World::kFlightStepMillis;
+					if (askHostileZone()) {
+						if (ConfMan.hasKey("dune_speedrun"))
+							aimAt(from); // the bot picks its starting point in the cockpit
+						else
+							changeDestination();
+					}
+					next = _system->getMillis() + stepMillis;
 					_flightFrameAt = _system->getMillis();
 				}
 				if (++hostileSteps >= 8) {
@@ -2646,7 +2828,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 			_map->addFlightTrail((uint16)lng, (int16)lat);
 			_map->setFlight(true, (uint16)lng, (int16)lat, freeFlight ? (int)from : destination);
 			present();
-			recordFrame(_system, World::kFlightStepMillis); // a recorded run: one frame a cell
+			recordFrame(_system, stepMillis); // a recorded run: one frame a cell
 		}
 		if (freeFlight && step > 1 && _world.mapCell(lng, lat) == startCell) {
 			// The route crossed the starting cell, the free flight's destination.
@@ -2679,9 +2861,39 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 				_world.markDiscovered((uint)sighted);
 				aimAt((uint)sighted);
 				showSighting((uint)sighted, sightedBearing);
-				next = _system->getMillis() + World::kFlightStepMillis;
+				next = _system->getMillis() + stepMillis;
 				_flightFrameAt = _system->getMillis();
 			}
+		}
+	}
+	// travel_arrival_landing_sequence (CD 4894-48c6) for a sietch or the
+	// palace: the minimap goes (489d), and the flight clips run on over sand
+	// (terrain forced to 0, so the loop comes back to MNT1) until MNT1 plays
+	// its frame 0x3c (sietch) or 0x16 (palace); the approach clip takes over
+	// from there (playArrivalVideo). A skipped flight has no run-in (F1).
+	if (cdView && !skipping && !_quitRequested && destination >= 0) {
+		const byte type = _world.location((uint)destination).type;
+		if (type <= Location::kPalace && _flightVideo) {
+			const uint handoff = type == Location::kPalace ? 0x16 : 0x3c;
+			uint lastFrame = _flightVideo->frameNumber();
+			for (uint guard = 0; guard < 20000 && !_quitRequested; ++guard) {
+				drawCdFlightView(0);
+				const uint frame = _flightVideo->frameNumber();
+				if (frame != lastFrame && _mntClip == 0 && frame == handoff)
+					break;
+				lastFrame = frame;
+				setFlightRows();
+				const bool exits[4] = { false, false, false, false };
+				_panel.draw(_surface, exits, -1, -1, day());
+				_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
+				_system->updateScreen();
+				Common::Event event;
+				while (pollDuneEvent(_system, event))
+					if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER)
+						_quitRequested = true;
+				_system->delayMillis(10);
+			}
+			_log.line(Common::String::format("Travel: the sand loop runs in to MNT1 frame %#x", handoff));
 		}
 	}
 	if (_map)
@@ -2718,57 +2930,148 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 }
 
 bool GameScreen::askHostileZone() {
-	// pending_room_action 4 (seg000:41ae): "  ****  WARNING  ****
-	// ENTERING HARKONNEN ZONE" over the view; the flight goes on or turns
-	// back (the original also offers CHANGE DESTINATION, not built here).
-	// Returns true to resume.
+	// pending_room_action 4, armed by travel_route_hostile_zone_check (CD
+	// 4182-41ae, floppy 43d6-4402) and shown by the travel dispatch (CD
+	// 35e9, floppy 3889); the flight pump waits (ds:11ca) until a row is
+	// taken. The same code in both releases:
+	// - a companion aboard (ds:1152): the ORNYCAB cabin, the companion's
+	//   head and the fly-over line (block 16 list 4, ds:23 = 4: "Watch out!
+	//   We are entering the Harkonnen zone...! We'd better get out of here
+	//   fast!"), then the menu (CD 3572, floppy 3818);
+	// - nobody aboard (CD 3637, floppy 38d7): the cockpit (map_screen_draw_base,
+	//   CD 439f / floppy 4bce: the sky, ORNYPAN) with COMMAND "  ****  WARNING
+	//   ****\r\rENTERING HARKONNEN ZONE" (CD 0xbf, floppy 0xb3) at (0x66,
+	//   0x4e) in colour 0x200c, and the same menu.
+	// The menu (CD ds:1f9e, floppy ds:2620): CHANGE DESTINATION (CD 497a,
+	// floppy 51fd: the cockpit over the flight) and IGNORE WARNING (the
+	// flight goes on); the CD adds " WHAT ? ", greyed with nobody aboard
+	// (3662), lit for a companion (357c).
+	// Returns true for CHANGE DESTINATION.
 	if (ConfMan.hasKey("dune_speedrun")) {
-		_log.line("Speedrun: turns back from the Harkonnen zone");
-		return false; // the bot never flies on into Harkonnen land
+		_log.line("Speedrun: CHANGE DESTINATION, back to the starting point");
+		return true; // the bot never flies on into Harkonnen land
 	}
-	const uint16 resume = _panel.findCommand("RESUME FLIGHT"), back = _panel.findCommand("BACK TO STARTING POINT");
-	const uint16 warning = _panel.findCommand("  ****  WARNING", true);
-	if (resume == 0xffff)
-		return true;
-	RowAction actions[Panel::kCommandRows] = { kRowNone, kRowNone };
-	int arguments[Panel::kCommandRows] = { 0, 0 };
-	uint16 commands[Panel::kCommandRows] = { resume, back };
-	setRows(actions, arguments, commands, back != 0xffff ? 2 : 1);
-	if (warning != 0xffff) {
-		Common::Array<Common::String> lines;
-		Common::String text = _panel.commandString(warning), line;
-		for (uint i = 0; i <= text.size(); ++i) {
-			if (i == text.size() || text[i] == '\r') {
-				lines.push_back(line);
-				line.clear();
-			} else {
-				line += text[i];
+	const int speaker = flyoverSpeaker();
+	if (speaker == -2)
+		return false; // CD 3613 / floppy 38b3: slot 0 empty, nothing is shown
+	const uint16 change = _panel.findCommand("CHANGE DESTINATION"), ignore = _panel.findCommand("IGNORE WARNING");
+	if (change == 0xffff || ignore == 0xffff)
+		return false;
+	const bool cd = !_world.floppy();
+	const uint16 what = cd ? _panel.findCommand("\" WHAT ? \"") : 0xffff;
+	Common::String line;
+	if (speaker >= 0) {
+		if (!flyoverLine(4, line))
+			return false; // no line matched: no menu (CD 3628, floppy 38c8)
+		_log.line(Common::String::format("Flight: entering the Harkonnen zone; companion %d: %s", speaker, line.c_str()));
+		openTalk((uint)speaker);
+		_cabinView = true;
+		_cabinWarning = true;
+		_talkLines.clear();
+		_talkLine = 0;
+		_talkLastPage = line;
+		_panel.wrapText(line, 208 - 2 * 16, false, _talkLines);
+		startTalkAnimation();
+		drawTalk();
+	} else {
+		_log.line("Flight: entering the Harkonnen zone (nobody aboard)");
+		_surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
+		_panel.applyPalette();
+		if (_map)
+			_map->applyPalette();
+		Graphics::Surface view = _surface.surfacePtr()->getSubArea(Common::Rect(0, 0, 320, 152));
+		if (_world.amiga())
+			amigaDesertView(_system, _resources, view, _state.w(GameState::kGameTime));
+		else
+			drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
+		setSkyPalette(false);
+		Common::Array<byte> ornypanData;
+		if (_resources.load("ORNYPAN.HSQ", ornypanData)) {
+			Sprite ornypan(_system, ornypanData);
+			ornypan.setPalette();
+			ornypan.drawFrame(0, &view, 0, 19);
+			ornypan.drawFrame(1, &view, 10, 43);
+		}
+		const uint16 warning = _panel.findCommand("****  WARNING", true);
+		if (warning != 0xffff) {
+			// font_draw_string (CD d1c5): '\r' goes back to x and 10 rows
+			// down; colour word 0x200c: ink 0x0c, the glyph cells' clear
+			// pixels in 0x20.
+			const Common::String text = _panel.commandString(warning);
+			int x = 0x66, y = 0x4e;
+			for (uint i = 0; i < text.size(); ++i) {
+				if (text[i] == '\r') {
+					x = 0x66;
+					y += 10;
+					continue;
+				}
+				const char glyph[2] = { text[i], 0 };
+				const int w = _panel.textWidth(glyph, false);
+				_surface.fillRect(Common::Rect(x, y, x + w, y + 9), 0x20);
+				_panel.drawText(_surface, glyph, x, y, 0x0c, false);
+				x += w;
 			}
 		}
-		drawInfoBox(lines);
+		RowAction actions[Panel::kCommandRows] = { kRowNone, kRowNone, kRowNone };
+		int arguments[Panel::kCommandRows] = { 0, 0, 0 };
+		uint16 commands[Panel::kCommandRows] = { change, ignore, what };
+		setRows(actions, arguments, commands, what != 0xffff ? 3 : 2);
+		if (what != 0xffff)
+			_panel.setRowDisabled(2, true);
+		_panel.setNavMode(Panel::kNavBlank);
+		_panel.setLeftPanel(Panel::kLeftBook);
+		_panel.setCompanions(_world.companion(0), _world.companion(1));
+		const bool exits[4] = { false, false, false, false };
+		_panel.draw(_surface, exits, -1, -1, day());
+		_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
+		_system->updateScreen();
 	}
-	const bool exits[4] = { false, false, false, false };
-	_panel.draw(_surface, exits, -1, -1, day());
-	_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
-	_system->updateScreen();
-	_log.line("Flight: entering the Harkonnen zone");
+	{
+		Common::String rows;
+		for (uint i = 0; i < Panel::kCommandRows; ++i)
+			if (const char *t = _panel.commandText(i))
+				rows += Common::String::format("%s%s%s", rows.empty() ? "" : " / ", t, _panel.rowDisabled(i) ? " (greyed)" : "");
+		_log.line("Flight: warning rows " + rows);
+	}
 	dumpScreen(_system, "flight-hostile");
-	for (;;) {
+	bool changing = false;
+	for (bool done = false; !done && !_quitRequested;) {
 		Common::Event event;
 		while (pollDuneEvent(_system, event)) {
 			if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER) {
 				_quitRequested = true;
-				return true;
+				break;
 			}
-			if (event.type != Common::EVENT_LBUTTONDOWN)
-				continue;
 			int row, arrow;
-			if (_panel.hitTest(event.mouse.x, event.mouse.y, row, arrow) == Panel::kActionCommand && row >= 0 &&
-					row < (back != 0xffff ? 2 : 1))
-				return row == 0;
+			if (event.type != Common::EVENT_LBUTTONDOWN ||
+					_panel.hitTest(event.mouse.x, event.mouse.y, row, arrow) != Panel::kActionCommand)
+				continue;
+			if (row == 0 || row == 1) {
+				changing = row == 0;
+				done = true;
+				break;
+			}
+			if (row == 2 && speaker >= 0 && what != 0xffff) {
+				_talkLines.clear(); // " WHAT ? " (9ed5): the line again
+				_talkLine = 0;
+				_panel.wrapText(_talkLastPage, 208 - 2 * 16, false, _talkLines);
+				drawTalk();
+			}
 		}
+		if (done)
+			break;
+		if (speaker >= 0)
+			update();
 		_system->delayMillis(10);
 	}
+	if (speaker >= 0) {
+		_cabinView = false;
+		_cabinWarning = false;
+		_talkAnimating = false;
+		_mode = kMap;
+	}
+	_log.line(changing ? "Flight: CHANGE DESTINATION at the warning" : "Flight: IGNORE WARNING");
+	return changing;
 }
 
 bool GameScreen::arrivalIsFatal(uint place) {
@@ -2776,6 +3079,11 @@ bool GameScreen::arrivalIsFatal(uint place) {
 	// place in battle, or not the Atreides', Fremen attacking it start the
 	// night battle (not built: Paul arrives); otherwise any Harkonnen troop
 	// there means room screen 4, "he was immediately shot".
+	// 503c-5041: every arrival clears ds:fd and ds:2b first (a battle Paul
+	// flew away from, or a raid while he was leaving, ends for him here).
+	_state.setB(0xfd, 0);
+	_state.setB(0x2b, 0);
+	_battle = false;
 	if (place >= _world.locationCount() || skipsRules())
 		return false;
 	const Location l = _world.location(place);
@@ -2786,6 +3094,7 @@ bool GameScreen::arrivalIsFatal(uint place) {
 	if (attacking || (l.status & 2)) {
 		_battle = true;
 		_state.setB(0x2b, 1); // 5058
+		_world.seedBattleGauge(place); // 505c -> 6144: ds:fd
 		_log.line(Common::String::format("Arrival: place %u is in battle, Paul joins it", place));
 		return false;
 	}
@@ -2945,10 +3254,19 @@ void GameScreen::stageTroopForConditions(uint troopId) {
 	// bulbs"; 0xdc on the floppy).
 	const uint16 items = (uint16)(_panel.findCommand("a spice-harvester") + 1);
 	_state.setW(names + 6, (uint16)(items + MIN<uint>(6, r[0x0e])));
-	// The duration phrase (sub_132c7; its thresholds are not transcribed):
-	// "for a very short time" ... "for 12 days", or "but our job is finished".
+	// The duration phrase (CD 32c7, floppy 356b; the same code): the
+	// periods since the job began (word 0x0a) at ds:42, the days at ds:41;
+	// a stopped troop "but our job is finished", else below 3 periods "for a
+	// very short time", below 16 "for a few hours", below 32 "for 1 day",
+	// then "for 12 days" with the days written over its number (d03c finds
+	// the digits, e2e3 writes three right-aligned characters ending there;
+	// the COMMAND record stays patched).
 	const uint periods = (uint16)(_state.w(GameState::kGameTime) - READ_LE_UINT16(r + 0x0a));
-	const uint step = (t.occupation & Troop::kStopped) ? 4 : periods < 4 ? 0 : periods < 16 ? 1 : periods < 96 ? 2 : 3;
+	_state.setW(0x42, (uint16)periods);
+	_state.setB(0x41, (byte)(periods >> 4));
+	const uint step = (t.occupation & Troop::kStopped) ? 4 : periods < 3 ? 0 : periods < 0x10 ? 1 : periods < 0x20 ? 2 : 3;
+	if (step == 3 && loadDialogue())
+		_sentences->patchCommandNumber((uint)(durations - 1 + 3), periods >> 4);
 	_state.setW(names + 10, (uint16)(durations + step));
 	_state.setW(names + 12, (uint16)(ranks + MIN<uint>(5, t.spiceSkill >> 4)));
 	_state.setW(names + 14, (uint16)(ranks + MIN<uint>(5, t.armySkill >> 4)));
@@ -3381,10 +3699,11 @@ void GameScreen::drawTroop() {
 					ill || job == Troop::kProspecting);
 			add(kRowEquipment, 0, "MODIFY EQUIPMENT", !equipment);
 			add(kRowMoveTroop, 0, "MOVE TROOP", ill || waiting || phase < 5);
-			// The fifth row: the floppy's CUT CONTACT (0x49, 945d), the CD's
-			// NO MORE ORDERS (0x52, 8763); the same close.
-			const bool cut = _world.floppy() && _panel.findCommand("CUT CONTACT") != 0xffff;
-			add(kRowTroopDone, 0, cut ? "CUT CONTACT" : "NO MORE ORDERS");
+			// The fifth row (CD 782d, floppy 8553): CUT CONTACT on a map visit,
+			// NO MORE ORDERS when the room's GIVE ORDERS TO TROOP opened the
+			// map (map_view_reentry_count, CD ds:46f3, bumped at 5a06); it
+			// then returns to the room (8763).
+			add(kRowTroopDone, 0, _troopFromRoom ? "NO MORE ORDERS" : "CUT CONTACT");
 		}
 	} else {
 		composeView();
@@ -3446,8 +3765,16 @@ void GameScreen::drawTroop() {
 		add(kRowTroopDone, 0, "NO MORE ORDERS");
 	}
 	setRows(actions, arguments, commands, count);
-	for (uint i = 0; i < count; ++i)
+	Common::String rowsLine = Common::String::format("Troop rows (troop %u):", _troopId);
+	for (uint i = 0; i < count; ++i) {
 		_panel.setRowDisabled(i, disabled[i]);
+		const char *text = _panel.commandText(i);
+		rowsLine += Common::String::format(" [%s%s]", text ? text : "?", disabled[i] ? " greyed" : "");
+	}
+	if (rowsLine != _lastTroopRows) {
+		_lastTroopRows = rowsLine;
+		_log.line(rowsLine);
+	}
 	_panel.setLeftPanel(_troopFromMap ? Panel::kLeftGlobe : Panel::kLeftBook);
 	const bool exits[4] = { false, false, false, false };
 	_panel.draw(_surface, exits, -1, -1, day());
@@ -3767,6 +4094,8 @@ void GameScreen::companionVerb() {
 		if (with) {
 			_world.setTravelling(_talkWho, false);
 			_world.settleCharacter(_talkWho);
+			if (_desert) // the record keeps the desert position (ds:4, ds:6)
+				_world.settleCharacterInDesert(_talkWho, _walkLng, _walkLat, _walkFine);
 			_world.removeCompanion(_talkWho);
 			_world.chaniStaysHere(_talkWho); // CD 9548, floppy a00c: the epidemic's cure
 		} else {
@@ -3851,6 +4180,7 @@ void GameScreen::openTalk(uint character) {
 	_talkLine = 0;
 	_talkBargain = false;
 	_talkKind = kTalkNormal;
+	_insetPlace = -1;
 	debugSetScene(Common::String::format("talk/%u", character));
 }
 void GameScreen::applyStory() {
@@ -4088,6 +4418,17 @@ void GameScreen::storyEvent(void *context, byte event, bool wasSaid, uint speake
 		// 0xA235: the next chapter.
 		screen->_pendingPhase = (byte)((state.b(GameState::kPhase) & 0xfc) + 4);
 		break;
+	case 13:
+		// CD 0xA28E (callback_event_dialogue_line_0d): unless the voices
+		// speak alone (ds:28e7 == 1) or the line's place (ds:47e6) is Paul's,
+		// a window on the map round that place (drawPlaceInset); the dream
+		// draws it itself. The floppy's event 13 (a9ce) only sets ds:42ce
+		// to 600 (not built).
+		if (!screen->_world.floppy() && screen->_linePlace >= 0 && (uint)screen->_linePlace != screen->_world.currentLocation()) {
+			screen->_insetPlace = screen->_linePlace;
+			screen->_log.line(Common::String::format("Talk: action 13, the map window on place %d", screen->_linePlace));
+		}
+		break;
 	default:
 		break;
 	}
@@ -4153,6 +4494,7 @@ void GameScreen::stageIllnessNames(uint speaker) {
 	_state.setW(_state.nameTable + 2, l.firstName);
 	_state.setW(_state.nameTable + 4, (uint16)(12 + l.lastName));
 	_illnessNamesStaged = true;
+	_linePlace = ill; // ds:47e6 (9519)
 	_log.line(Common::String::format("Talk: speaker %u, the ill place %d named (9519)", speaker, ill));
 }
 
@@ -4242,6 +4584,8 @@ void GameScreen::update() {
 			drawRoom();
 		else if (_mode == kMap)
 			drawMapScreen();
+		else if (_mode == kTroop && _troopFromMap)
+			drawTroop();
 	}
 	if (_pendingWakeUp && _mode == kTalk && (isFastCapture() || _system->getMillis() >= _wakeUpAt))
 		waterOfLifeWakeUp(); // Stilgar's line has had its time (seg000:2ccf)
@@ -4256,6 +4600,13 @@ void GameScreen::update() {
 			passTime(1);
 		checkIdle(now);
 		updateCockpit(now);
+		if ((_mode == kMap || (_mode == kTroop && _troopFromMap)) && _map &&
+				_map->mode() == MapScreen::kFlat && !_cockpit && !isDumpRun() && _map->tickTroopIcons(now)) {
+			if (_mode == kTroop)
+				drawTroop(); // keep the contact/density windows over the animated map
+			else
+				drawMapScreen();
+		}
 		// The globe's rotation task (CD seg000:b9ae) turns it one phase a
 		// pass while it is up, in both visions. Never in dump or harness
 		// runs (isFastCapture above; nor a real-time harness), whose
@@ -4330,11 +4681,17 @@ void GameScreen::drawTalk() {
 		// While a line is spoken the view zooms twice onto the speaker (the
 		// room pixel-doubled, as the recording shows), the portrait comes up
 		// on the left and the line sits in a balloon.
-		if (!_visionDream && !_cabinView) {
-		Common::Point p = _talkWho < ARRAYSIZE(_personPos) ? _personPos[_talkWho] : Common::Point(-1, -1);
-		if (p.x < 0)
-			p = Common::Point(160, 60);
-		const int x0 = CLIP<int>(p.x + 12 - 80, 0, 160), y0 = CLIP<int>(p.y + 20 - 38, 0, 76);
+		// zoom_room_to_dialogue_speaker (CD 3af9-3b55, floppy 3d80-3dc4, the
+		// same code): the speaker's anchor (the character part's position
+		// recorded as the room is drawn, CD ds:47f8/47fa) clamped to 0xf0 and
+		// 0x71 is the top-left of an 80x38 window, zoomed 4x (vga_zoom,
+		// bp = 6) over the view; no anchor, no zoom (3b21).
+		const Common::Point p = _talkWho < ARRAYSIZE(_personPos) ? _personPos[_talkWho] : Common::Point(-1, -1);
+		if (!_visionDream && !_cabinView && _world.amiga()) {
+		// The Amiga's zoom is not traced (no capture): the engine's earlier
+		// 2x round the speaker stays there.
+		const Common::Point q = p.x >= 0 ? p : Common::Point(160, 60);
+		const int x0 = CLIP<int>(q.x + 12 - 80, 0, 160), y0 = CLIP<int>(q.y + 20 - 38, 0, 76);
 		Graphics::ManagedSurface copy;
 		copy.create(320, 152, Graphics::PixelFormat::createFormatCLUT8());
 		copy.blitFrom(*_surface.surfacePtr(), Common::Rect(0, 0, 320, 152), Common::Point(0, 0));
@@ -4343,6 +4700,23 @@ void GameScreen::drawTalk() {
 			byte *dst = (byte *)_surface.getBasePtr(0, y);
 			for (int x = 0; x < 320; ++x)
 				dst[x] = src[x / 2];
+		}
+		copy.free();
+		} else if (!_visionDream && !_cabinView && p.x >= 0 && p.y >= 0) {
+		const int x0 = MIN<int>(p.x, 0xf0), y0 = MIN<int>(p.y, 0x71);
+		const Common::String zoom = Common::String::format("Talk: zoom on person %u, anchor (%d, %d), window (%d, %d)", _talkWho, p.x, p.y, x0, y0);
+		if (zoom != _lastZoom) {
+			_lastZoom = zoom;
+			_log.line(zoom);
+		}
+		Graphics::ManagedSurface copy;
+		copy.create(320, 152, Graphics::PixelFormat::createFormatCLUT8());
+		copy.blitFrom(*_surface.surfacePtr(), Common::Rect(0, 0, 320, 152), Common::Point(0, 0));
+		for (int y = 0; y < 152; ++y) {
+			const byte *src = (const byte *)copy.getBasePtr(x0, MIN<int>(y0 + y / 4, 151));
+			byte *dst = (byte *)_surface.getBasePtr(0, y);
+			for (int x = 0; x < 320; ++x)
+				dst[x] = src[x / 4];
 		}
 		copy.free();
 		}
@@ -4383,9 +4757,7 @@ void GameScreen::drawTalk() {
 			Common::String text;
 			for (uint i = 0; i < _talkLines.size(); ++i)
 				text += (i ? " " : "") + _talkLines[i];
-			Common::Array<Common::String> wrapped;
-			_panel.wrapText(text, 320 - 2 * 16, false, wrapped);
-			drawDreamSubtitle(wrapped);
+			drawDreamSubtitle(text);
 			if (_dreamPlace >= 0)
 				drawPlaceInset((uint)_dreamPlace);
 		} else if (_visionDream) {
@@ -4399,6 +4771,16 @@ void GameScreen::drawTalk() {
 			_panel.wrapText(text, dreamBox.width() - 2 * 3, false, narrow);
 			// The ink is colour 240, which VIS's palette makes light (floppy 2f54).
 			drawBubble(narrow, 0, MIN<uint>(bubbleLines(), narrow.size()), dreamBox, 240, 3);
+		} else if (!_world.floppy() && _voiceMode != 1 && !_cabinView) {
+			// The CD's text mode (voice_subtitle_mode 0, subtitle_setup_layout
+			// 8ccd): no balloon, the line at the foot of the view in the
+			// dream's style (cd-speedrun-day1 sp-07, sp-20 to sp-22).
+			Common::String text;
+			for (uint i = 0; i < _talkLines.size(); ++i)
+				text += (i ? " " : "") + _talkLines[i];
+			drawDreamSubtitle(text);
+			if (_insetPlace >= 0)
+				drawPlaceInset((uint)_insetPlace); // action 13 in person (a28e)
 		} else if (_talkLines.size() && _talkLine < _talkLines.size() && box.width() - 24 < 176) {
 			// Re-wrap the page to the balloon's width.
 			Common::String text;
@@ -4420,12 +4802,25 @@ void GameScreen::drawTalk() {
 	if (_sceneActive)
 		_panel.setNavMode(Panel::kNavBlank);
 	if (_cabinView) {
-		// menu_go_towards_this_place (floppy ds:2618): one row; the flight
-		// already homes on the place, so the compass is dark.
-		RowAction actions[Panel::kCommandRows] = { kRowNone };
-		int arguments[Panel::kCommandRows] = { 0 };
-		uint16 commands[Panel::kCommandRows] = { _panel.findCommand("GO TOWARDS THIS PLACE") };
-		setRows(actions, arguments, commands, 1);
+		// menu_go_towards_this_place (floppy ds:2618, CD ds:1f92): GO TOWARDS
+		// THIS PLACE, and " WHAT ? " on the CD; the flight already homes on
+		// the place, so the compass is dark. The Harkonnen-zone warning's
+		// menu (floppy ds:2620, CD ds:1f9e): CHANGE DESTINATION, IGNORE
+		// WARNING, and on the CD " WHAT ? ", lit while a companion speaks
+		// (CD 357c).
+		RowAction actions[Panel::kCommandRows] = { kRowNone, kRowNone, kRowNone };
+		int arguments[Panel::kCommandRows] = { 0, 0, 0 };
+		uint16 commands[Panel::kCommandRows];
+		uint count = 0;
+		if (_cabinWarning) {
+			commands[count++] = _panel.findCommand("CHANGE DESTINATION");
+			commands[count++] = _panel.findCommand("IGNORE WARNING");
+		} else {
+			commands[count++] = _panel.findCommand("GO TOWARDS THIS PLACE");
+		}
+		if (!_world.floppy() && _panel.findCommand("\" WHAT ? \"") != 0xffff)
+			commands[count++] = _panel.findCommand("\" WHAT ? \"");
+		setRows(actions, arguments, commands, count);
 		for (uint d = 0; d < 4; ++d)
 			exits[d] = false;
 		_panel.setNavMode(Panel::kNavBlank);
@@ -4468,12 +4863,77 @@ void GameScreen::applyDreamPalette(uint32 now, bool force) {
 		_system->updateScreen();
 }
 
-void GameScreen::drawDreamSubtitle(const Common::Array<Common::String> &lines) {
-	// voice_subtitle_mode 0 (subtitle_setup_layout, CD 8ccd): the 9-row
-	// font in colour 15 with a one-pixel outline in colour 8, from x 15, the
-	// last line's top at y 136 (captures/cd-dream).
+void GameScreen::drawDreamSubtitle(const Common::String &text) {
+	// voice_subtitle_mode 0 (subtitle_setup_layout, CD 8d62): the strip
+	// ds:223c, 320 wide with 16-pixel side pads, justified (flags 1), the
+	// 9-row font in colour 15 with a one-pixel outline in colour 8, placed
+	// so that it ends at y 0x92 (loc_09025): the last line's top at y 136.
+	// layout_subtitle_lines (8e16): each word takes its width and a 6-pixel
+	// gap from the 288-pixel budget; a line's leftover spreads over its gaps
+	// (commit_line: leftover / gaps + 6, the remainder one pixel each from
+	// the first gap), the last line keeps plain 6-pixel gaps, and no line is
+	// justified when any would need gaps of 0x1e or more (8df0).
 	// The original's colours 15 (63,63,63) and 8 (14,10,12) are taken by
-	// their nearest match in the palette the dream has set.
+	// their nearest match in the palette on screen. The engine's text
+	// origin sits one pixel left of the original's pen (captures/cd-dream,
+	// cd-speedrun-day1 sp-20: the ink from x 16).
+	struct Line {
+		Common::Array<Common::String> words;
+		int advance, pad;
+	};
+	Common::Array<Line> lines;
+	const int budget = 320 - 16 - 16;
+	Common::Array<Common::String> words;
+	auto commit = [&](int remaining) {
+		Line l;
+		l.words = words;
+		const int n = (int)words.size();
+		const int leftover = MAX(remaining, 0);
+		l.advance = n > 1 ? leftover / (n - 1) + 6 : leftover + 6;
+		l.pad = n > 1 ? leftover % (n - 1) : 0;
+		lines.push_back(l);
+		words.clear();
+	};
+	int remaining = budget;
+	Common::String word;
+	for (uint i = 0; i <= text.size(); ++i) {
+		const char c = i < text.size() ? text[i] : ' ';
+		if (c != ' ' && c != '\r' && c != '\n') {
+			word += c;
+			continue;
+		}
+		if (!word.empty()) {
+			const int need = _panel.textWidth(word.c_str(), false) + 6;
+			if (remaining - need >= 0) {
+				remaining -= need;
+				words.push_back(word);
+			} else if (remaining - need + 6 >= 0) {
+				words.push_back(word);
+				commit(remaining - need + 6);
+				remaining = budget;
+			} else if (!words.empty()) {
+				commit(remaining);
+				remaining = budget - need;
+				words.push_back(word);
+			} else {
+				words.push_back(word);
+				commit(0);
+				remaining = budget;
+			}
+			word.clear();
+		}
+		if (c == '\r' && !words.empty()) {
+			commit(remaining);
+			remaining = budget;
+		}
+	}
+	if (!words.empty())
+		commit(remaining);
+	bool justify = true;
+	for (uint i = 0; i < lines.size(); ++i)
+		if (!lines[i].words.empty() && lines[i].advance >= 0x1e)
+			justify = false;
+
 	byte pal[256 * 3];
 	_system->getPaletteManager()->grabPalette(pal, 0, 256);
 	auto nearest = [&](int r, int g, int b) {
@@ -4490,13 +4950,27 @@ void GameScreen::drawDreamSubtitle(const Common::Array<Common::String> &lines) {
 	};
 	const byte ink = nearest(255, 255, 255), outline = nearest(56, 40, 48);
 	const int count = (int)lines.size();
+	static const int8 kAround[4][2] = { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } };
 	for (int i = 0; i < count; ++i) {
-		const char *text = lines[i].c_str();
-		const int x = 15, y = 136 - 10 * (count - 1 - i);
-		static const int8 kAround[4][2] = { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } };
-		for (uint k = 0; k < 4; ++k)
-			_panel.drawText(_surface, text, x + kAround[k][0], y + kAround[k][1], outline, false);
-		_panel.drawText(_surface, text, x, y, ink, false);
+		const bool stretch = justify && i + 1 != count;
+		int pad = stretch ? lines[i].pad : 0;
+		int x = 15;
+		const int y = 136 - 10 * (count - 1 - i);
+		for (uint w = 0; w < lines[i].words.size(); ++w) {
+			if (w) {
+				int advance = stretch ? lines[i].advance : 6;
+				if (pad > 0) {
+					++advance;
+					--pad;
+				}
+				x += advance;
+			}
+			const char *t = lines[i].words[w].c_str();
+			for (uint k = 0; k < 4; ++k)
+				_panel.drawText(_surface, t, x + kAround[k][0], y + kAround[k][1], outline, false);
+			_panel.drawText(_surface, t, x, y, ink, false);
+			x += _panel.textWidth(t, false);
+		}
 	}
 }
 
@@ -4626,10 +5100,16 @@ void GameScreen::setTalkRows() {
 		add(kRowWorkForMe, "\" WORK FOR ME \"");
 	else if (_talkWho >= World::kFremenChief)
 		add(kRowGiveOrders, "GIVE ORDERS TO TROOP");
+	else if (_talkWho == World::kCaptain && !_world.captainOverpowered() && _world.captainTroop(_world.currentLocation()))
+		add(kRowOverpower, "\" OVERPOWER THE PRISONER \""); // setup_npc_dialogue_menu 90c0
 	else if (_talkWho < World::kFremen && _talkWho != 0) // not the Duke in the palace
 		add(kRowCompanion, (_state.w(GameState::kPersonsWith) & (1 << _talkWho)) ? "\" STAY HERE \"" : "\" COME WITH ME \"");
 	else if (_talkWho == 0)
 		add(kRowCompanion, "\" COME WITH ME \"");
+	// The CD's menu_NPC_actions (setup_npc_dialogue_menu, 90bd-9118) keeps
+	// " WHAT ? " (the last line again, 9ed5) before STOP TALKING; the
+	// floppy's has no such record (its COMMAND1 has no " WHAT ? ").
+	add(kRowWhat, "\" WHAT ? \"");
 	add(kRowStopTalking, "STOP TALKING");
 	setRows(actions, arguments, commands, count);
 }
@@ -4714,6 +5194,13 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 	}
 
 	if (_mode == kMap && _map) {
+		if (_cockpit && (event.type == Common::EVENT_MOUSEMOVE || event.type == Common::EVENT_LBUTTONDOWN)) {
+			cockpitHover(event.mouse.x, event.mouse.y);
+			if (event.type == Common::EVENT_MOUSEMOVE) {
+				drawCockpit();
+				return false;
+			}
+		}
 		if ((event.type == Common::EVENT_LBUTTONDOWN || event.type == Common::EVENT_RBUTTONDOWN) && _map->caption()) {
 			// Either button dismisses the DUNE MAP popup (seg000:5c76, 5ce4).
 			_map->setCaption(false);
@@ -4721,7 +5208,7 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 				drawMapScreen();
 		}
 		if (event.type == Common::EVENT_LBUTTONDOWN) {
-			const int arrow = _map->hitArrow(event.mouse.x, event.mouse.y);
+			const int arrow = _cockpit ? cockpitArrow(event.mouse.x, event.mouse.y) : _map->hitArrow(event.mouse.x, event.mouse.y);
 			if (arrow >= 0) {
 				static const int dx[5] = { 0, 1, 0, -1, 0 }, dy[5] = { -1, 0, 1, 0, 0 };
 				if (arrow == 4 && _map->mode() == MapScreen::kGlobe)
@@ -4748,6 +5235,8 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 					if (_movingTroop) {
 						_movingTroop = 0;
 						openMap(MapScreen::kFlat, false);
+						_map->setCaption(false); // back in the map view: no popup (only 5a1a raises it)
+						drawMapScreen();
 						break;
 					}
 					leaveMap();
@@ -4762,6 +5251,8 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 					if (_world.issueMoveOrder(id, (uint)_rowArguments[row]))
 						dumpScreen(_system, "troop-moving");
 					openMap(MapScreen::kFlat, false);
+					_map->setCaption(false); // back in the map view: no popup (only 5a1a raises it)
+					drawMapScreen();
 					break;
 				}
 				case kRowFly:
@@ -4814,6 +5305,11 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 				}
 				case kRowFlatMap:
 					openMap(MapScreen::kFlat, false);
+					// ui_transition_to_map_interface (CD 5a3d, from EXIT GLOBE
+					// bc81) raises no DUNE MAP popup: only the room's way in
+					// does (5a1a -> 5bb0).
+					_map->setCaption(false);
+					drawMapScreen();
 					break;
 				case kRowOrnithopter:
 					// seg000:42e9: the orni cockpit, choosing a destination.
@@ -4826,15 +5322,22 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 					findProspectors();
 					break;
 				case kRowContact: {
-					// seg000:86cc: the next rallied troop after the last one
-					// contacted; the map centres on it and its popup opens.
-					const uint id = nextRalliedTroop(_lastContacted);
+					// seg000:86cc: the last troop contacted while it still has
+					// an icon on the map (86ea-86f3), else the next one with an
+					// icon, by id (86fa); the map does not move. Releases whose
+					// icon scripts are not loaded retain the projected-position check.
+					uint id = 0;
+					if (_lastContacted && troopInView(_lastContacted))
+						id = _lastContacted;
+					for (uint step = 1; !id && step <= World::kTroops; ++step) {
+						const uint next = (_lastContacted + step - 1) % World::kTroops + 1;
+						const Troop t = _world.troop(next);
+						if (!t.harkonnen() && t.hired() && troopInView(next))
+							id = next;
+					}
 					if (id) {
 						_lastContacted = id;
 						_recruiting = false;
-						const Troop t = _world.troop(id);
-						if (t.location >= Location::kTableOffset)
-							_map->centreOn((t.location - Location::kTableOffset) / Location::kRecordSize);
 						openTroop(id, true);
 					}
 					break;
@@ -5073,6 +5576,13 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 				byte job = (byte)_rowArguments[row];
 				if (job == Troop::kSpiceMining && _troopId == World::kProspectorTroop)
 					job = Troop::kProspecting;
+				if ((_world.troop(_troopId).occupation & 0x0f) == job) {
+					// 6a91 (floppy 782b): the job it already has: the menu
+					// closes, no answer.
+					_troopChoosing = false;
+					drawTroop();
+					return false;
+				}
 				byte before[World::kTroopSize];
 				_world.saveTroopRecord(_troopId, before);
 				_world.setTroopOccupation(_troopId, job);
@@ -5090,6 +5600,12 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 					if (!_conversation->gateHeld()) {
 						_world.restoreTroopRecord(_troopId, before);
 						_log.line(Common::String::format("Troops: troop %u refuses the order", _troopId));
+					} else if ((_world.troop(_troopId).occupation & 0x0f) >> 2) {
+						// 6ab8-6abf (floppy 7852-7859): an accepted job of the
+						// army or ecology classes (occupation >> 2 not 0)
+						// leaves the harvester behind: equipment bit 7 goes,
+						// and nothing takes it back.
+						_world.dropHarvester(_troopId);
 					}
 					if (_pendingScene == 0x12f8) {
 						// The prospectors' answer (event 3) below phase 0x14: the map lesson, in the popup.
@@ -5125,6 +5641,7 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 			// goes with the contact's other marks (7b81; not built).
 			_world.curedTroopMet(_troopId);
 			_world.clearCuredBit(_troopId);
+			_world.troopContacted(_troopId); // 7b89: the day of the contact (the daily decay's clock)
 			applyStory();
 		}
 		if (_troopFromMap && !_troopFromRoom) {
@@ -5245,6 +5762,16 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 			case kRowWorkForMe:
 				workForMe();
 				break;
+			case kRowOverpower:
+				// seg000:9584: the threat, then block 0x85 (character 16's
+				// list 5, the auto mask 0x20): "We were enough to handcuff
+				// him..." (ds:ed above 0x80) or "I can't overpower him alone.
+				// I am going to need some help."
+				_world.overpowerCaptain(_talkWho);
+				_conversation->start(16, 5, 0x20, true, true);
+				_talkEnded = false;
+				advanceConversation();
+				break;
 			case kRowGiveOrders: {
 				// seg000:5a03: the map opens on the troop behind this chief.
 				Common::Array<uint> ids;
@@ -5259,8 +5786,8 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 						openMap(MapScreen::kFlat, false);
 						// The detour bumps map_view_reentry_count: no DUNE MAP popup (seg000:5a03).
 						_map->setCaption(false);
+						_troopFromRoom = true; // before the menu is drawn: its fifth row
 						openTroop(ids[i], true);
-						_troopFromRoom = true;
 						break;
 					}
 				}

@@ -12,7 +12,7 @@ set -eu
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 repo_source_root="$repo_root/third_party/scummvm"
-local_root="${DUNE_LOCAL_BUILD_ROOT:-/private/tmp/dune-scummvm-native-build}"
+local_root="${DUNE_LOCAL_BUILD_ROOT:-/tmp/dune-scummvm-native-build}"
 . "$script_dir/scummvm_source.sh"
 source_root="$local_root/scummvm"
 build_root="$local_root/build-sdl-dune"
@@ -85,14 +85,16 @@ elif [ "${1:-}" = "speedrun" ]; then
 	part=${2:-campaign}
 	seed=${3:-1}
 	mkdir -p "$evidence_root/logs"
-	printf '[scummvm]\nsavepath=%s\ndune_speedrun=%s\ndune_rng_seed=%s\ndune_no_music=1\n' \
+	printf '[scummvm]\nsavepath=%s\ndune_speedrun=%s\ndune_rng_seed=%s\ndune_no_music=1\ndune_floppy_start=99\ndune_intro_start=99\ndune_skip_cd_story=1\n' \
 		"$run_root/saves" "$part" "$seed" > "$config"
-	log="$evidence_root/logs/speedrun-$part-$(basename -- "${DUNE_DATA:-cd}").log"
+	log="$run_root/speedrun-$part-stdout.log"
+	run_status=0
 	SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
 		perl -e 'alarm 900; exec @ARGV' -- ./scummvm -c "$config" --gfx-mode=surface --no-fullscreen \
-		--path="${DUNE_DATA:-$repo_root}" dune >"$log" 2>&1 || true
+		--path="${DUNE_DATA:-$repo_root}" dune >"$log" 2>&1 || run_status=$?
 	grep -E "Speedrun:|Battle:|BLOCKED" "$log" | tail -60
 	echo "log: $log"
+	exit "$run_status"
 elif [ "${1:-}" = "harness" ]; then
 	input_script=${2:?harness requires an input script}
 	checkpoint_dir=${3:?harness requires a checkpoint directory}
@@ -112,7 +114,7 @@ elif [ "${1:-}" = "harness" ]; then
 		cat "$extra_config" >> "$config"
 	fi
 	SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE="$checkpoint_dir/audio.raw" \
-		perl -e 'alarm 300; exec @ARGV' -- ./scummvm -c "$config" --gfx-mode=surface \
+		perl -e 'alarm shift; exec @ARGV' -- "${DUNE_HARNESS_SECONDS:-300}" ./scummvm -c "$config" --gfx-mode=surface \
 		--no-fullscreen --path="${DUNE_DATA:-$repo_root}" dune
 else
 	printf '[scummvm]\nsavepath=%s\n' "$run_root/saves" > "$config"

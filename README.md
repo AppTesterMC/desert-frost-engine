@@ -54,9 +54,10 @@ details.
 
 ## Current state of the engine
 
-This is a development build, not an end-user release yet. The DOS floppy and
-CD releases play from the intro to the ending; the Amiga and Sega CD ports are
-younger (see their rows). The table shows what works; the full status is in
+This is a development build, not an end-user release yet. Engine-assisted
+checks have reached the ending from new games on DOS floppy, CD and Amiga;
+a complete player-input playthrough remains unverified. Sega CD functionality
+is more limited (see its row). The table shows what works; the full status is in
 [`engines/dune/README.md`](third_party/scummvm/engines/dune/README.md).
 
 | Area | State |
@@ -66,8 +67,8 @@ younger (see their rows). The table shows what works; the full status is in
 | Intro | CD: the videos in the executable's own order, with Irulan's narration and subtitles, the MTG1-3 flyovers, the story scenes and PLANT; floppy: all 33 scenes, credits and the narrated prologue |
 | World | places, room tables, exits and characters read from the game's executable; palace, sietches, villages and fortresses; characters on the markers the executable assigns |
 | Dialogue and book | the original dialogue engine (conditions, actions, talking portraits) and Paul's book |
-| Map | the flat map with the places' icons and original-style labels, the original DUNE MAP popup, map menu and planet panel, travel (with the CD's flight and arrival videos), and the globe with the game menu |
-| Saves | save and load in the original `DUNE21S?.SAV` / `DUNE37S?.SAV` format |
+| Map | the flat map with place and troop icons, original-style labels, troop hit testing and orders, animated marches and arrival; the original DUNE MAP popup, map menu and planet panel, travel (with the CD's flight and arrival videos), and the globe with the game menu |
+| Saves | DOS floppy/CD `DUNE21S?.SAV` / `DUNE37S?.SAV` and isolated engine Amiga `DUNEAMS?.SAV` logs; matching legacy engine Amiga saves can be read without moving or rewriting them ([save details](third_party/scummvm/engines/dune/SAVES.md)) |
 | Sound | HERAD AdLib music through ScummVM's OPL emulator |
 | iOS | direct touch, the audio-session fix, ad-hoc-signed IPA builds |
 | Gameplay | the game clock, flight, hiring Fremen troops (WORK FOR ME) and giving them orders, the prospector lesson and MOVE TROOP with the spice-density popup, GO & SEARCH FOR EQUIPMENT, the palace plan, people standing where the original's per-landing rotation puts them, spice harvest and prospecting, rallying (charisma), the results screen, all following the executable's rules ([gameplay-rules.md](notes/research/gameplay-rules.md)) |
@@ -75,30 +76,42 @@ younger (see their rows). The table shows what works; the full status is in
 | Ecology and ending | the ecology route (wind traps, bulbs, irrigation, vegetation spreading on the map, fortresses taken, MODIFY EQUIPMENT), the ecology win (vegetation takes the forts; the final attack), the Harkonnen zone, deaths on arrival, the final scene, and playing on after the final battle |
 | Desert and flight | walking in the desert with its landscape, the ornithopter cockpit and destination screen, steering in free flight, CHANGE DESTINATION, the flight landscape (seeded row by row as the original, checked against its memory) and sightings of companions |
 | War and the ending | troop marches and espionage, fort battles, MASSIVE ATTACK and FIGHT FOR A WHOLE DAY, the Harkonnen captain, worm riding, the smugglers' village and their trade (offers, ARGUE / ACCEPT / REFUSE, bills paid through Duncan), Harkonnen saboteurs and worm attacks on harvesters, the Fremen epidemic cured by Chani, Chani's kidnapping and rescue, the quarrel between north and south troops (as in the original: mixed troops stop working) and the final attack on the Harkonnen palace |
-| Amiga | plays on the shared engine: its files, sheets, rooms, 32-colour palettes, copper sky and data segment are converted to the DOS layouts on load. Rooms, dialogue, map, globe, book, mirror, flights and the story screens work. Not ported yet: the intro (the game opens in the throne room), music and sound, and the desert landscape (walks and flights show plain sky over sand) |
+| Amiga | plays on the shared engine: its files, sheets, rooms, 32-colour palettes, copper sky and data segment are converted to the DOS layouts on load. Rooms, dialogue, map, globe, book, mirror, flights and story screens work. The ornithopter cockpit draws the full original dashboard; destination labels, map scrolling and recentering, cancel, and CHANGE DESTINATION resume have desktop checks. The Leto loop and Celimyn-Tuek options are also available. These checks do not establish a completable Amiga campaign. Not ported yet: the intro (the game opens in the throne room), music and sound, and the desert landscape (walks and flights show plain sky over sand) |
 | Sega CD / Mega CD | its own host: the disc's index, text, tile screens and initial game data, the original room screens, panel, conversations with portraits, and the map with travel. Not yet: verbs, videos, sound, flight and battles. The Mega CD (Europe) entry is detected but untested |
 | Not yet | full command lists per room |
 
-`scripts/check_speedrun.sh` lets a bot play the known PC speedrun route through
-the engine's own actions and checks that it reaches the Emperor's throne room
-(the route is in [`notes/speedrun/route.md`](notes/speedrun/route.md)). It plays from a new game to
-the ending on both the floppy and the CD release.
+`scripts/check_speedrun.sh [campaign|full] [seed...]` checks the known PC route
+through scripted engine actions (the route is in
+[`notes/speedrun/route.md`](notes/speedrun/route.md)). `campaign` starts after
+Leto's death; `full` starts a new game. The default checks both DOS releases;
+Amiga can be selected explicitly. A passing result is assisted engine-logic
+coverage. It does not establish a player-controlled UI run or an uninterrupted
+campaign; the evidence report records setup, reloads and other assistance.
+
+The bot still calls campaign actions directly and retries lost battles through
+save/load. Seeded campaigns are separate from new-game progression evidence;
+results apply to the tested build and do not certify an untested IPA.
 
 The reverse-engineering record, with a source and confidence for each fact, is
 in [`FINDINGS.md`](third_party/scummvm/engines/dune/FINDINGS.md).
 
 ## Game options
 
-Options that change the original's behaviour are **off by default**, so the
-engine plays as the original does. Turn them on per game in ScummVM's
-**Options > Engine** tab (desktop and iPhone), or in `scummvm.ini` under the
+The two story fixes below are **off by default**. Turn them on per game in ScummVM's
+**Game Options > Game** tab (desktop and iPhone), or in `scummvm.ini` under the
 game's section. ScummVM's command line cannot pass engine-specific settings,
 so there is no command-line switch.
 
-The options are offered for the DOS floppy and CD releases. A game entry added
-to ScummVM by an older build shows the checkboxes only after Dune has been
-started once, because ScummVM refreshes the entry's stored options when the
-game starts.
+Language and audio options are offered for the DOS floppy and CD releases; the
+Leto loop and Celimyn-Tuek story options are also available for Amiga. A game
+entry added to ScummVM by an older build shows the checkboxes only after Dune
+has been started once, because ScummVM refreshes the entry's stored options
+when the game starts. See [the original option mapping](third_party/scummvm/engines/dune/ORIGINAL-OPTIONS.md).
+
+Amiga uses fixed English resources; Paula music and sound playback are not
+implemented. Its Game tab does not offer DOS language or AdLib controls.
+Controller bindings and Save path use the standard **Keymaps** and **Paths** tabs.
+Native Amiga `DUNE10S` saves remain unsupported; see the save details above.
 
 | Option | `scummvm.ini` key | What it does |
 | --- | --- | --- |
@@ -114,7 +127,7 @@ engine keeps that behaviour, to stay faithful to the original.
 
 **How to turn the fix on** (off by default):
 
-- In ScummVM: the Dune game's **Options > Engine**, tick **Fix the Leto loop**.
+- In ScummVM: the Dune game's **Game Options > Game**, tick **Fix the Leto loop**.
   It is the same on desktop and iPhone.
 - Or add `dune_fix_leto_loop=true` under the game's section in `scummvm.ini`.
 
@@ -131,7 +144,7 @@ a stage the story never reaches, so it is never found. By default the engine
 keeps that behaviour.
 
 **How to turn the fix on** (off by default): tick **Fix Celimyn-Tuek** in the
-game's **Options > Engine**, or add `dune_fix_celimyn_tuek=true` to
+game's **Game Options > Game**, or add `dune_fix_celimyn_tuek=true` to
 `scummvm.ini`. The byte becomes 0x58 in memory at new game and after a load;
 a save file changes only when the game saves. `scripts/check_celimyn_tuek.sh`
 checks both settings.

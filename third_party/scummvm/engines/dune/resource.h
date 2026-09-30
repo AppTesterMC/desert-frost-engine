@@ -41,7 +41,7 @@ class SegaCdArchive;
  */
 class Resource {
 public:
-	explicit Resource(bool useArchive, bool amiga = false) : _useArchive(useArchive), _amiga(amiga), _segaCd(nullptr) {}
+	explicit Resource(bool useArchive, bool amiga = false) : _useArchive(useArchive), _amiga(amiga), _segaCd(nullptr), _language(1) {}
 
 	/**
 	 * Sega CD: serve the PC names that have a counterpart on the disc
@@ -51,6 +51,12 @@ public:
 	bool segaCd() const { return _segaCd != nullptr; }
 
 	bool load(const Common::String &name, Common::Array<byte> &data) const;
+	/** Physical bank access for the language-independent command identifiers. */
+	bool loadUntranslated(const Common::String &name, Common::Array<byte> &data) const;
+
+	/** Select a complete DOS text bank before constructing the panel/intro. */
+	bool setLanguage(uint language);
+	uint language() const { return _language; }
 
 	/** Decode an HSQ bit stream (without its six-byte header). */
 	static bool unpackHSQ(const byte *packed, uint32 packedSize, byte *unpacked, uint32 unpackedSize);
@@ -64,6 +70,7 @@ private:
 	bool _useArchive;
 	bool _amiga;
 	const SegaCdArchive *_segaCd;
+	uint _language;
 };
 
 } // namespace Dune

@@ -1,0 +1,73 @@
+# Floppy CS:74af/750a/75c1/76e0: visible troop sprites, contact and march.
+# check_map_troops.sh prepares three labelled variants of the chapter-20 save.
+wait 15000
+click left 160 163
+wait 1000
+click left 35 176
+wait 1000
+click left 160 187
+wait 1000
+click left 160 163
+wait 2000
+click left 160 163
+wait 1000
+checkpoint troops-stationary
+click left 238 141
+wait 500
+checkpoint troops-contact
+click left 160 187
+wait 500
+checkpoint troops-pick
+click left 196 81
+wait 500
+checkpoint troops-dispatch
+checkpoint troops-march-start
+click left 236 104
+wait 200
+checkpoint troops-moving-contact
+click left 160 195
+wait 200
+periods 1
+wait 200
+checkpoint troops-march-step
+checkpoint troops-arrived
+# Reload slot 2: troop 1 is hidden; no phantom click target.
+click left 35 176
+wait 500
+click left 160 187
+wait 500
+click left 160 171
+wait 1000
+click left 160 163
+wait 500
+checkpoint troops-hidden
+click left 238 141
+wait 200
+checkpoint troops-hidden-click
+# Reload slot 3: visited, unhired troop has its question-mark icon but no contact.
+click left 35 176
+wait 500
+click left 160 187
+wait 500
+click left 160 179
+wait 1000
+click left 160 163
+wait 500
+checkpoint troops-unhired
+click left 238 141
+wait 200
+checkpoint troops-unhired-click
+# Reload slot 4: hired but outside the early local-contact range.
+click left 35 176
+wait 500
+click left 160 187
+wait 500
+click left 160 187
+wait 1000
+click left 160 163
+wait 500
+checkpoint troops-local-range
+click left 238 141
+wait 200
+checkpoint troops-local-range-click
+quit

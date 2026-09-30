@@ -1,0 +1,57 @@
+# Developer setup dune_test_cockpit=1 opens the destination map at the palace.
+# Everything after setup is a normal pointer, button or key event.
+wait 500
+checkpoint cockpit-open
+move 181 102
+wait 300
+checkpoint cockpit-target
+move 90 50
+wait 300
+checkpoint cockpit-desert
+move 160 171
+wait 300
+checkpoint cockpit-caption
+move 160 89
+wait 300
+click left 160 89       # the current palace is inert
+wait 300
+checkpoint cockpit-current-place
+click left 291 176      # scroll the destination map east
+wait 300
+checkpoint cockpit-scrolled
+click left 275 176      # recentre on Paul
+wait 300
+move 181 102
+wait 300
+checkpoint cockpit-recentred
+click left 76 90        # Amiga: left edge band scrolls the same as the nav arrow
+wait 300
+checkpoint cockpit-edge-left
+click left 246 90       # right edge band restores the longitude
+wait 300
+checkpoint cockpit-edge-right
+click left 160 36       # above the map scrolls north
+wait 300
+checkpoint cockpit-edge-up
+click left 160 139      # below the map restores the latitude
+wait 300
+checkpoint cockpit-edge-down
+click left 160 163      # Cancel returns to the palace front
+wait 300
+checkpoint cockpit-cancelled
+click left 160 171      # TAKE AN ORNITHOPTER again
+wait 300
+key ESC                # keyboard Cancel also returns to the exterior
+wait 300
+checkpoint cockpit-escaped
+click left 160 171
+wait 300
+move 181 102
+wait 300
+click left 181 102      # choose Carthag-Tuek directly
+wait 1500              # capture mode completes the actual flight pump immediately
+checkpoint cockpit-arrived
+click left 275 164      # enter the destination's sietch
+wait 1000
+checkpoint cockpit-sietch
+quit

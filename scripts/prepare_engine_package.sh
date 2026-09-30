@@ -58,7 +58,11 @@ for f in LICENSE NOTICE CONTRIBUTING.md Makefile; do put "$f"; done
 # Build, check and packaging scripts for the ScummVM engine (the DOSBox and
 # Spice86 tracks, and the maintainer's device-report helpers, stay private).
 for f in \
-	scummvm_source.sh \
+	scummvm_source.sh check_scummvm_source.sh check_cockpit.sh \
+	check_map_troops.sh check_amiga_arrival.sh \
+	check_original_options.sh check_original_options.py check_amiga_options.sh check_amiga_options.py \
+	check_save_compatibility.sh check_save_compatibility.py \
+	check_speedrun_evidence.sh check_speedrun_orders.sh dune_speedrun_evidence.py \
 	test_dune_scummvm_sdl.sh test_dune_scummvm_native.sh test_dune_scummvm_runtime.sh \
 	check_dune_build.sh check_speedrun.sh watch_speedrun.sh check_flight_landscape.sh check_leto_loop.sh check_celimyn_tuek.sh check_hemispheres.sh check_search_equipment.sh check_water_of_life.sh check_ecology_win.sh check_endless_play.sh check_smugglers.sh check_chani.sh check_epidemic.sh check_head.sh check_all.sh check_saboteurs.sh check_other_releases.sh build_dune_scummvm_ios.sh install_dune_scummvm_ios_devicectl.sh \
 	ScummVM-iOS.xcscheme PREFLIGHT.md README-local-builds.md \
@@ -97,7 +101,21 @@ fi
 # Extra patterns (e.g. personal names) come from an untracked local file, so
 # the check itself publishes nothing personal: one extended regex per line.
 extra=$(grep -v '^#' "$ROOT/.package-private-patterns" 2>/dev/null | paste -sd'|' - || true)
-private=$(grep -rIilE "/Volumes/|/Users/[a-z]|192\\.168\\.[0-9]+\\.[0-9]+|/private/tmp/claude|~/|Dune-DOS-reference|Dune-refs/${extra:+|$extra}" "$REPO" \
+
+# Keep the prohibited strings out of this public checker itself. Adjacent
+# quoted fragments form the patterns only when the script runs.
+blocked_patterns=(
+	"/Vol""umes/"
+	"/Us""ers/[a-z]"
+	"192""\\.168\\.[0-9]+\\.[0-9]+"
+	"/private/""tmp/"
+	"~""/"
+	"Dune""-DOS-reference"
+	"Dune""-refs/"
+)
+private_pattern=$(printf '%s|' "${blocked_patterns[@]}")
+private_pattern=${private_pattern%|}
+private=$(grep -rIilE "$private_pattern${extra:+|$extra}" "$REPO" \
 	--exclude='prepare_engine_package.sh' || true)
 if [ -n "$private" ]; then
 	printf 'Private paths or addresses in:\n%s\n' "$private" >&2
@@ -108,6 +126,8 @@ if [ -n "$unlicensed" ]; then
 	printf 'Engine files without the GPL-3.0-or-later header:\n%s\n' "$unlicensed" >&2
 	fail=1
 fi
+# Private handover notes (local paths, work in progress) are never published.
+[ -e "$REPO/notes/handover" ] && { echo "notes/handover must not be packaged" >&2; fail=1; }
 [ -f "$REPO/$ENGINE/COPYING" ] || { echo "Missing $ENGINE/COPYING" >&2; fail=1; }
 if [ "$fail" -ne 0 ]; then
 	printf 'Package NOT ready; fix the above. Partial output left in %s\n' "$OUT" >&2

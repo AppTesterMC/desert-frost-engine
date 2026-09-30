@@ -29,6 +29,7 @@
 
 #include "dune/scene.h"
 
+#include "common/config-manager.h"
 #include "common/endian.h"
 #include "common/system.h"
 #include "graphics/paletteman.h"
@@ -36,6 +37,7 @@
 #include "dune/amiga.h"
 #include "dune/debug.h"
 #include "dune/harness.h"
+#include "dune/hnm.h"
 #include "dune/resource.h"
 #include "dune/sky.h"
 #include "dune/sprite.h"
@@ -472,6 +474,8 @@ void GameScreen::thirstCheck() {
 		drawRoom();
 		return;
 	}
+	if (!_world.floppy() && !_world.amiga())
+		desertCollapse(); // CD 3757 -> 0e77
 	const uint home = _walkFrom >= 0 ? (uint)_walkFrom : _world.currentLocation();
 	const byte type = _world.location(home).type;
 	const uint room = type < 0x21 ? (type == Location::kPalace ? 10 : 2) : 1;
@@ -488,6 +492,86 @@ void GameScreen::thirstCheck() {
 	_mode = kRoom;
 	_state.setB(0xe7, (byte)(_state.b(0xe7) + 1));
 	showRoom(room);
+}
+
+void GameScreen::desertCollapse() {
+	// desert_collapse_cutscene (CD 0e77-0ea3; the floppy has none): the
+	// WORMSUIT score (not built here), DEAD3.HNM's first frame into the game
+	// area, then its five other frames, each revealed by transition 0x3c
+	// (segvga 2a10: the slow dissolve, a 15-bit LFSR walking the game area,
+	// 80 pixels a tick), the head redrawn over them; then Paul's head goes
+	// down (181e).
+	Common::Array<byte> video;
+	if (!_resources.load("DEAD3.HNM", video))
+		return;
+	HnmPlayer player(_system);
+	if (!player.begin(video) || !player.step())
+		return;
+	_log.line("Desert: Paul collapses (DEAD3.HNM)");
+	// The video's palette chunks set only their own ranges (the panel keeps
+	// its colours): the entries the video leaves black stay as they are.
+	byte keep[256 * 3];
+	_system->getPaletteManager()->grabPalette(keep, 0, 256);
+	auto present = [&]() {
+		byte pal[256 * 3];
+		const byte *video = player.palette();
+		for (uint i = 0; i < 256; ++i) {
+			const bool set = video[3 * i] || video[3 * i + 1] || video[3 * i + 2];
+			for (uint k = 0; k < 3; ++k)
+				pal[3 * i + k] = set ? video[3 * i + k] : keep[3 * i + k];
+		}
+		_system->getPaletteManager()->setPalette(pal, 0, 256);
+		_panel.applyPalette();
+		const bool exits[4] = { false, false, false, false };
+		_panel.draw(_surface, exits, -1, -1, day()); // the panel stays under the game area
+		const byte black[3] = { 0, 0, 0 };
+		_system->getPaletteManager()->setPalette(black, 0, 1);
+		_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
+		_system->updateScreen();
+	};
+	for (int y = 0; y < 152; ++y)
+		memcpy(_surface.getBasePtr(0, y), player.screen() + 320 * y, 320);
+	present();
+	dumpScreen(_system, "desert-collapse-0");
+	const bool fast = isDumpRun() || isDuneFastHarness() || isRecording() ||
+			(ConfMan.hasKey("dune_speedrun") && !ConfMan.hasKey("dune_speedrun_watch"));
+	for (uint frame = 1; frame <= 5 && !_quitRequested; ++frame) {
+		if (!player.step())
+			break;
+		const byte *next = player.screen();
+		if (fast) {
+			for (int y = 0; y < 152; ++y)
+				memcpy(_surface.getBasePtr(0, y), next + 320 * y, 320);
+		} else {
+			// The dissolve: the LFSR offset and that offset + 0x7fff each
+			// step, 80 steps a tick (5 ms), offset 0 at the end.
+			uint16 lfsr = 1;
+			uint batch = 0;
+			byte *dst = (byte *)_surface.getBasePtr(0, 0);
+			do {
+				dst[lfsr] = next[lfsr];
+				if ((uint)lfsr + 0x7fff < 320 * 152)
+					dst[lfsr + 0x7fff] = next[lfsr + 0x7fff];
+				const bool carry = lfsr & 1;
+				lfsr >>= 1;
+				if (carry)
+					lfsr ^= 0x4400;
+				if (++batch == 0x50) {
+					batch = 0;
+					present();
+					_system->delayMillis(5);
+					Common::Event event;
+					while (pollDuneEvent(_system, event))
+						if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER)
+							_quitRequested = true;
+				}
+			} while (lfsr != 1 && !_quitRequested);
+			dst[0] = next[0];
+		}
+		present();
+		dumpScreen(_system, Common::String::format("desert-collapse-%u", frame).c_str());
+	}
+	headDown("desert collapse"); // 0ea3 -> 181e
 }
 
 void GameScreen::dumpDesertWalk() {

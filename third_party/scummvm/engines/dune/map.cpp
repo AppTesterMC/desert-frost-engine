@@ -32,6 +32,7 @@
 #include "dune/amiga.h"
 #include "dune/map.h"
 
+#include "common/algorithm.h"
 #include "common/endian.h"
 #include "common/system.h"
 #include "common/util.h"
@@ -40,8 +41,10 @@
 #include "graphics/surface.h"
 
 #include "dune/debug.h"
+#include "dune/harness.h"
 #include "dune/panel.h"
 #include "dune/resource.h"
+#include "dune/room.h"
 #include "dune/scene.h"
 #include "dune/sprite.h"
 #include "dune/text.h"
@@ -296,15 +299,23 @@ bool MapRenderer::unproject(int16 latitude, uint16 longitude, int x, int y, int1
 }
 
 bool MapRenderer::project(int16 latitude, uint16 longitude, int16 placeLatitude, uint16 placeLongitude,
-		int &x, int &y) const {
+		int &x, int &y, bool troopMargin) const {
 	const int top = latitude + 98;
 	const int row = placeLatitude + 98;
 	const int band = row - top;
-	if (band < 0 || band >= kViewRows || row < kBandBegin || row >= kBandEnd)
+	if (band < (troopMargin ? -5 : 0) || band >= (troopMargin ? 39 : kViewRows) ||
+			row < kBandBegin || row >= kBandEnd)
 		return false;
 	const int len = rowLength((uint16)row);
 	if (!len)
 		return false;
+	if (troopMargin) {
+		// Floppy CS:b544-b57f: signed longitude delta, fractional pixels
+		// retained through the multiply; the troop position is not a cell centre.
+		x = 160 + (((int16)(placeLongitude - longitude) * len * 4) >> 16);
+		y = 76 + 4 * (placeLatitude - latitude - 18);
+		return x > -16 && x < 328 && y > -16 && y < 160;
+	}
 	const uint32 rotation = (uint32)longitude * (uint32)len;
 	const int subpixel = (rotation >> 14) & 3;
 	int out = 140 - subpixel;
@@ -386,6 +397,9 @@ bool MapScreen::open(Mode mode, bool selectDestination, bool fromFlatView) {
 	_captionStart = _system->getMillis();
 	_flying = false;
 	_trail.clear();
+	_troopIcons.clear();
+	_troopIconsAt = _system->getMillis();
+	_troopIconPhase = 0;
 	_results = 0;
 	_resultsColours = false;
 	if (!loadGlobe())
@@ -561,6 +575,216 @@ void MapScreen::drawIcons(Graphics::ManagedSurface &surface) {
 				if (_index[py * 320 + px] == 0xff)
 					_index[py * 320 + px] = (byte)i;
 	}
+}
+
+// ---- DOS floppy troop icons (CS:74af-7715, 78ce-7923, c4b3-c52f) --------------
+
+byte MapScreen::iconData(uint16 offset) const {
+	const Common::Array<byte> &data = _world.mapTroopIconData();
+	return offset >= 0x169b && (uint)(offset - 0x169b) < data.size() ? data[offset - 0x169b] : 0;
+}
+
+uint16 MapScreen::iconScript(uint id, const byte *r) const {
+	// CS:750a. These are native FLOPPY pointers, not CD offsets plus a
+	// guessed global delta. The scripts come from the user's executable.
+	auto word = [&](uint16 at) -> uint16 { return iconData(at) | (iconData(at + 1) << 8); };
+	const byte occ = r[3], equipment = r[0x19] & 0xc0;
+	const int place = _world.troopPlace(id);
+	const byte status = place >= 0 ? _world.location((uint)place).status : 0;
+	if (r[0x10] & 0x10)
+		return 0;
+	if (!(r[0x10] & 0x80) && (occ & 0x80))
+		return status & 0x10 ? 0x1848 : 0;
+	if (occ & 0x40) {
+		// CS:75c1: face the dominant destination-minus-GPS axis.
+		if (place < 0)
+			return 0;
+		const Location l = _world.location((uint)place);
+		const int dlng = (int16)(l.longitude - READ_LE_UINT16(r + 6)) >> 8;
+		const int dlat = (int16)(l.latitude - (int16)READ_LE_UINT16(r + 8));
+		const bool horizontal = ABS(dlng) >= ABS(dlat);
+		uint facing = horizontal ? 1 : 2;
+		if ((horizontal ? dlng : dlat) < 0)
+			facing ^= 2;
+		return word(0x18e8 + 2 * (facing + (occ & 0x0c)));
+	}
+	const uint job = occ & 0x0f;
+	if (occ & 0x30) {
+		if (!job && equipment)
+			return equipment == 0x80 ? 0x183c : equipment == 0x40 ? 0x1840 : 0x1844;
+		return word(0x16df + 2 * job);
+	}
+	if (!job && equipment)
+		return equipment == 0x80 ? 0x17e5 : equipment == 0x40 ? 0x17f2 : 0x182f;
+	uint16 script = word(0x17c5 + 2 * job);
+	if (script == 0x175b) {
+		if (status & 2)
+			return 0x16d3;
+	} else if (script != 0x179d) {
+		return script;
+	}
+	const uint slot = (r[2] - 1) & 7;
+	return script + (slot < 3 ? 0 : slot == 3 ? 10 : slot == 4 ? 20 : 30);
+}
+
+void MapScreen::drawTroopIcons(Graphics::ManagedSurface &surface) {
+	if (!_icons || !_renderer || _world.mapTroopIconData().empty()) {
+		_troopIcons.clear();
+		return;
+	}
+	Common::Array<TroopIcon> icons;
+	auto spawn = [&](uint id, const byte *r, int x, int y) {
+		const uint16 script = iconScript(id, r);
+		const uint16 sprite = iconData(script);
+		uint16 w = 0, h = 0;
+		if (script < 0x169b || script + 3 >= 0x195f || !_icons->frameSize(sprite, w, h) || !w || !h)
+			return;
+		const int left = x - w / 2, top = y - h / 2;
+		for (uint i = 0; i < _troopIcons.size(); ++i) {
+			const TroopIcon &old = _troopIcons[i];
+			if (old.id == id && old.script == script) {
+				TroopIcon kept = old;
+				kept.left += left - kept.anchorLeft;
+				kept.top += top - kept.anchorTop;
+				kept.anchorLeft = left;
+				kept.anchorTop = top;
+				icons.push_back(kept);
+				return;
+			}
+		}
+		TroopIcon icon;
+		icon.id = id;
+		icon.script = icon.cursor = script;
+		icon.sprite = sprite;
+		icon.left = icon.anchorLeft = left;
+		icon.top = icon.anchorTop = top;
+		icon.width = w;
+		icon.height = h;
+		// CS:c4b3 keeps the first sprite but randomizes the script cursor.
+		// Use a separate animation seed so opening a map cannot reroll combat.
+		if (iconData(script + 3)) {
+			uint extra = 0;
+			while (extra < 64 && iconData(script + 3 + 3 * extra))
+				++extra;
+			if (extra < 64) {
+				uint16 mask = 0;
+				for (uint v = extra; v; v >>= 1)
+					mask = (mask << 1) | 1;
+				uint step;
+				do {
+					const uint32 product = (uint32)_iconSeed * 0xcbd1;
+					_iconSeed = (uint16)(product + 1);
+					step = (((product >> 16) << 8) | (_iconSeed >> 8)) & mask;
+				} while (step > extra);
+				icon.cursor += 3 * step;
+				icon.animated = true;
+			}
+		}
+		icons.push_back(icon);
+	};
+	// CS:74af walks visible markers' troop chains, then moving troops.
+	for (uint i = 0; i < _world.locationCount(); ++i) {
+		const Location l = _world.location(i);
+		int x, y;
+		if (l.hidden() || !_renderer->project(_latitude, _longitude, l.latitude, l.longitude, x, y, true) ||
+				x < 4 || x >= 316 || y < 4 || y >= 148)
+			continue;
+		uint id = l.troop;
+		for (uint guard = 0; id && id <= World::kTroops && guard < World::kTroops; ++guard) {
+			byte r[World::kTroopSize] = {};
+			_world.saveTroopRecord(id, r);
+			if (!(r[3] & 0x40)) {
+				const uint slot = ((r[2] - 1) ^ ((l.status & 2) ? 8 : 0)) & 15;
+				spawn(id, r, x + (int8)iconData(0x169b + 2 * slot), y + (int8)iconData(0x169c + 2 * slot));
+			}
+			id = r[1];
+		}
+	}
+	for (uint id = 1; id <= World::kTroops; ++id) {
+		byte r[World::kTroopSize] = {};
+		_world.saveTroopRecord(id, r);
+		if (!r[0] || (r[0x10] & 0x10) || !(r[3] & 0x40))
+			continue;
+		int x, y;
+		if (_renderer->project(_latitude, _longitude, (int16)READ_LE_UINT16(r + 8), READ_LE_UINT16(r + 6), x, y, true))
+			spawn(id, r, x, y);
+	}
+	_troopIcons = icons;
+	Common::Array<uint> order;
+	for (uint i = 0; i < icons.size(); ++i)
+		order.push_back(i);
+	// CS:c71b compares unsigned right+bottom; ties pick the LATER entry.
+	Common::sort(order.begin(), order.end(), [&](uint a, uint b) {
+		const TroopIcon &ia = icons[a], &ib = icons[b];
+		const uint16 da = ia.left + ia.width + ia.top + ia.height;
+		const uint16 db = ib.left + ib.width + ib.top + ib.height;
+		return da < db || (da == db && a > b);
+	});
+	Graphics::Surface view = surface.surfacePtr()->getSubArea(Common::Rect(4, 4, 316, 148));
+	for (uint i = 0; i < order.size(); ++i) {
+		const TroopIcon &icon = icons[order[i]];
+		_icons->drawFrame(icon.sprite, &view, icon.left - 4, icon.top - 4);
+	}
+	if (isDuneHarnessRun())
+		for (uint i = 0; i < icons.size(); ++i) {
+			const TroopIcon &ic = icons[i];
+			_log.line(Common::String::format("Map icon: troop %u script %04x sprite %u rect %d,%d,%d,%d",
+				ic.id, ic.script, ic.sprite, ic.left, ic.top, ic.left + ic.width, ic.top + ic.height));
+		}
+}
+
+bool MapScreen::hasTroopIcon(uint id) const {
+	for (uint i = 0; i < _troopIcons.size(); ++i)
+		if (_troopIcons[i].id == id)
+			return true;
+	return false;
+}
+
+uint MapScreen::hitTroop(int x, int y) const {
+	if (_mode != kFlat || _selecting || x < 4 || x >= 316 || y < 4 || y >= 148 || _placePopup.contains(x, y))
+		return 0;
+	if (_density && Common::Rect(_densityX, _densityY, _densityX + 170, _densityY + 108).contains(x, y))
+		return 0;
+	// CS:76e0: reverse insertion order and strict inequalities, not alpha.
+	for (uint i = _troopIcons.size(); i > 0; --i) {
+		const TroopIcon &ic = _troopIcons[i - 1];
+		if (x > ic.left && x < ic.left + ic.width && y > ic.top && y < ic.top + ic.height)
+			return _world.troop(ic.id).hired() ? ic.id : 0;
+	}
+	return 0;
+}
+
+bool MapScreen::tickTroopIcons(uint32 now) {
+	if (_mode != kFlat || _troopIcons.empty())
+		return false;
+	if (!_troopIconsAt || now - _troopIconsAt > 1000)
+		_troopIconsAt = now;
+	bool changed = false;
+	while (now - _troopIconsAt >= 75) {
+		_troopIconsAt += 75;
+		if (++_troopIconPhase & 3)
+			continue;
+		for (uint i = 0; i < _troopIcons.size(); ++i) {
+			TroopIcon &ic = _troopIcons[i];
+			if (!ic.animated)
+				continue;
+			uint16 cursor = ic.cursor;
+			if (!iconData(cursor))
+				cursor = ic.script;
+			const byte sprite = iconData(cursor);
+			uint16 w = 0, h = 0;
+			if (!sprite || !_icons->frameSize(sprite, w, h))
+				continue;
+			ic.sprite = sprite;
+			ic.left += (int8)iconData(cursor + 1);
+			ic.top += (int8)iconData(cursor + 2);
+			ic.width = w;
+			ic.height = h;
+			ic.cursor = cursor + 3;
+			changed = true;
+		}
+	}
+	return changed;
 }
 
 // ---- The zoomed window (map_draw_zoomed_globe's windowed mode) ------------------
@@ -744,7 +968,9 @@ int MapScreen::densityHit(int x, int y) const {
 void MapScreen::drawRoute(Graphics::ManagedSurface &surface, const Common::Rect &window, int16 centreLatitude) {
 	// sub_AD0A: each point projected (sub_D414), then a line per pair in
 	// colour 0x0C with the pattern 0x5555, clipped to the window. A pair more
-	// than 0x50 pixels apart across the date line is joined the short way.
+	// than 0x50 pixels apart across the map seam is pushed 0x190 px past it
+	// in the original (81a3-81be; not built). The line routine is the
+	// original's (drawVgaLine).
 	Common::Array<Common::Point> screen;
 	for (uint i = 0; i < _route.size(); ++i) {
 		int x = -10000, y = -10000;
@@ -753,29 +979,8 @@ void MapScreen::drawRoute(Graphics::ManagedSurface &surface, const Common::Rect 
 			continue;
 		screen.push_back(Common::Point(x, y));
 	}
-	for (uint i = 1; i < screen.size(); ++i) {
-		int x0 = screen[i - 1].x, y0 = screen[i - 1].y;
-		const int x1 = screen[i].x, y1 = screen[i].y;
-		const int dx = ABS(x1 - x0), dy = ABS(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
-		int err = dx - dy;
-		uint16 pattern = 0x5555;
-		for (;;) {
-			pattern = (uint16)((pattern << 1) | (pattern >> 15));
-			if ((pattern & 1) && window.contains(x0, y0))
-				*(byte *)surface.getBasePtr(x0, y0) = 0x0c;
-			if (x0 == x1 && y0 == y1)
-				break;
-			const int e2 = 2 * err;
-			if (e2 > -dy) {
-				err -= dy;
-				x0 += sx;
-			}
-			if (e2 < dx) {
-				err += dx;
-				y0 += sy;
-			}
-		}
-	}
+	for (uint i = 1; i < screen.size(); ++i)
+		drawVgaLine(*surface.surfacePtr(), screen[i - 1].x, screen[i - 1].y, screen[i].x, screen[i].y, 0x0c, 0x5555, window);
 }
 
 void MapScreen::drawDensityOverlay(Graphics::ManagedSurface &surface, const Panel &panel) {
@@ -946,6 +1151,7 @@ void MapScreen::drawLocationPopup(Graphics::ManagedSurface &surface, const Panel
 	x = CLIP(x, 4, 316 - 106);
 	const int y = CLIP(my - height / 2, 4, 148 - height);
 	const Common::Rect box(x, y, x + 106, y + height);
+	_placePopup = box;
 	surface.fillRect(box, 0);
 	surface.frameRect(box, green);
 	panel.drawText(surface, kindText.c_str(), x + 10, y + 5, yellow, false);
@@ -1101,7 +1307,9 @@ void MapScreen::draw(Graphics::ManagedSurface &surface, const Panel &panel, cons
 	if (_mode == kFlat) {
 		drawVegetation(surface, panel);
 		drawIcons(surface);
+		drawTroopIcons(surface);
 	}
+	_placePopup = Common::Rect();
 	drawFlight(surface, panel);
 	if (_mode == kFlat && _destination == -2 && _renderer) {
 		int x, y;

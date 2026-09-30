@@ -250,6 +250,7 @@ void World::runEcologyJob(uint id, uint index) {
 			spreadVegetation(index);
 			return;
 		}
+		troopNewDay(id, index); // 76cb call 6e20 (floppy 842f)
 		// The ecology skill / 4 (at least 1) fills the progress byte; each
 		// wrap raises the skill, spends 12 water, widens the disc (up to 12)
 		// and moves it 2 north (not past -82).

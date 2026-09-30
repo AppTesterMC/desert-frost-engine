@@ -25,8 +25,15 @@
 #include "base/plugins.h"
 
 #include "common/translation.h"
+#include "common/config-manager.h"
+#include "common/platform.h"
+#include "backends/keymapper/action.h"
+#include "backends/keymapper/keymap.h"
+#include "backends/keymapper/standard-actions.h"
+#include "dune/options.h"
 
 #include "engines/advancedDetector.h"
+#include "engines/dialogs.h"
 
 #include "dune/detection.h"
 #include "dune/dune.h"
@@ -69,6 +76,51 @@ public:
 
 	const ADExtraGuiOptionsMap *getAdvancedExtraGuiOptions() const override {
 		return optionsList;
+	}
+
+	GUI::OptionsContainerWidget *buildEngineOptionsWidget(GUI::GuiObject *boss, const Common::String &name, const Common::String &target) const override {
+		// Older Amiga targets have no engine GUI flags. Their stored platform
+		// still identifies them before they are run and detected again.
+		if (Common::checkGameGUIOption(GAMEOPTION_AMIGA_OPTIONS, ConfMan.get("guioptions", target)) ||
+			Common::parsePlatform(ConfMan.get("platform", target)) == Common::kPlatformAmiga) {
+			ExtraGuiOptions options;
+			options.push_back(optionsList[0].option);
+			options.push_back(optionsList[1].option);
+			return new GUI::ExtraGuiOptionsWidget(boss, name, target, options);
+		}
+		if (Common::checkGameGUIOption(GAMEOPTION_ORIGINAL_OPTIONS, ConfMan.get("guioptions", target)) ||
+			Common::checkGameGUIOption(GAMEOPTION_FIX_LETO_LOOP, ConfMan.get("guioptions", target)))
+			return new Dune::OriginalOptionsWidget(boss, name, target);
+		return AdvancedMetaEngine::buildEngineOptionsWidget(boss, name, target);
+	}
+
+	Common::KeymapArray initKeymaps(const char *target) const override {
+		using namespace Common;
+		Keymap *map = new Keymap(Keymap::kKeymapTypeGame, "dune", _("Dune controls"));
+		map->setPartialMatchAllowed(false);
+		Action *action = new Action(kStandardActionLeftClick, _("Select / Interact"));
+		action->setLeftClickEvent();
+		action->addDefaultInputMapping("MOUSE_LEFT");
+		action->addDefaultInputMapping("JOY_A");
+		map->addAction(action);
+		action = new Action(kStandardActionSkip, _("Cancel / Skip"));
+		action->setKeyEvent(KeyState(KEYCODE_ESCAPE, ASCII_ESCAPE));
+		action->addDefaultInputMapping("ESCAPE");
+		action->addDefaultInputMapping("JOY_B");
+		map->addAction(action);
+		const char *ids[] = { kStandardActionMoveUp, kStandardActionMoveRight, kStandardActionMoveDown, kStandardActionMoveLeft };
+		const char *labels[] = { _s("Up"), _s("Right"), _s("Down"), _s("Left") };
+		const char *keys[] = { "UP", "RIGHT", "DOWN", "LEFT" };
+		const char *buttons[] = { "JOY_UP", "JOY_RIGHT", "JOY_DOWN", "JOY_LEFT" };
+		const KeyCode codes[] = { KEYCODE_UP, KEYCODE_RIGHT, KEYCODE_DOWN, KEYCODE_LEFT };
+		for (uint i = 0; i < 4; ++i) {
+			action = new Action(ids[i], _(labels[i]));
+			action->setKeyEvent(codes[i]);
+			action->addDefaultInputMapping(keys[i]);
+			action->addDefaultInputMapping(buttons[i]);
+			map->addAction(action);
+		}
+		return Keymap::arrayOf(map);
 	}
 
 	bool hasFeature(MetaEngineFeature feature) const override {

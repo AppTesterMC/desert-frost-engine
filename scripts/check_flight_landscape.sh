@@ -16,7 +16,7 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 data="${DUNE_DATA_FLOPPY:-$repo_root/data/floppy}"
 expected="$repo_root/tests/regression/flight-seeds-floppy.txt"
-local_root="${DUNE_LOCAL_BUILD_ROOT:-/private/tmp/dune-scummvm-native-build}"
+local_root="${DUNE_LOCAL_BUILD_ROOT:-${TMPDIR:-/tmp}/dune-scummvm-native-build}"
 
 SDL_AUDIODRIVER=dummy DUNE_DATA="$data" "$script_dir/test_dune_scummvm_sdl.sh" build >/dev/null 2>&1 || {
 	echo "FAIL flight landscape: build failed; run scripts/test_dune_scummvm_sdl.sh dump to see why"

@@ -40,11 +40,13 @@ SaveGame::SaveGame(World &world, Dialogue &dialogue, Resource &resources, Startu
 		_world(world), _dialogue(dialogue), _resources(resources), _log(log) {
 }
 
-Common::String SaveGame::fileName(uint slot, bool floppy) {
+Common::String SaveGame::fileName(uint slot, bool floppy, bool amiga) {
 	// The original's files: Log 1 is DUNE21S1.SAV, Log 2 S2, "last entering
 	// into a place" S3 and "last entering new sietch" S4 (checked by saving
 	// in the floppy DUNEPRG.EXE on Spice86); S0 is not one of the four logs.
-	return Common::String::format(floppy ? "DUNE21S%u.SAV" : "DUNE37S%u.SAV", slot + 1);
+	// Engine Amiga saves use a separate namespace; they are not native
+	// Amiga DUNE10 saves and must never overwrite the DOS CD logs.
+	return Common::String::format(amiga ? "DUNEAMS%u.SAV" : floppy ? "DUNE21S%u.SAV" : "DUNE37S%u.SAV", slot + 1);
 }
 
 bool SaveGame::loadMap() {
@@ -56,22 +58,76 @@ const Common::Array<byte> &SaveGame::map() {
 	return _world.map();
 }
 
-void SaveGame::unpack(const Common::Array<byte> &packed, Common::Array<byte> &body) const {
+bool SaveGame::unpack(const Common::Array<byte> &packed, Common::Array<byte> &body) const {
 	body.clear();
-	if (packed.size() < 6)
-		return;
-	const byte marker = packed[2];
+	// DOS files have 00/02 in the high marker byte. New engine Amiga
+	// files are tagged A1, so a renamed file cannot become a DOS save.
+	if (packed.size() < 6 || packed.size() > 0x10001 || packed[2] != kRleMarker ||
+			READ_LE_UINT16(packed.data() + 4) != packed.size() - 2 ||
+			(packed[3] != 0 && packed[3] != 2 && !(_world.amiga() && packed[3] == kAmigaSaveTag)))
+		return false;
+	const uint maximum = kMapFlagBytes + kExtraSize + _dialogue.data().size() +
+		(_world.layoutShift() ? (uint)kDialogueSlack : (uint)kDialogueSlackCd) + _world.savedSize();
 	for (uint i = 6; i < packed.size();) {
 		const byte b = packed[i++];
-		if (b == marker && i + 1 < packed.size()) {
-			const byte count = packed[i++];
-			const byte value = packed[i++];
-			for (uint k = 0; k < count; ++k)
-				body.push_back(value);
-		} else {
-			body.push_back(b);
+		uint count = 1;
+		byte value = b;
+		if (b == kRleMarker) {
+			if (i + 1 >= packed.size())
+				return false;
+			count = packed[i++];
+			value = packed[i++];
+			if (!count)
+				return false;
 		}
+		if (count > maximum - body.size())
+			return false;
+		for (uint k = 0; k < count; ++k)
+			body.push_back(value);
 	}
+	return true;
+}
+
+bool SaveGame::dialogueHeaderMatches(const Common::Array<byte> &body, uint offset, uint16 base) const {
+	const Common::Array<byte> &dialogue = _dialogue.data();
+	if (dialogue.size() < 2)
+		return false;
+	const uint header = READ_LE_UINT16(dialogue.data());
+	if (header < 2 || (header & 1) || header > dialogue.size() || offset + header > body.size())
+		return false;
+	for (uint i = 0; i < header; i += 2)
+		if (READ_LE_UINT16(body.data() + offset + i) != (uint16)(READ_LE_UINT16(dialogue.data() + i) + base))
+			return false;
+	return true;
+}
+
+bool SaveGame::decode(const Common::Array<byte> &packed, Common::Array<byte> &body, uint &extraSize, uint &slack) const {
+	if (!unpack(packed, body))
+		return false;
+	const bool floppy = _world.layoutShift() != 0;
+	extraSize = kExtraSize;
+	slack = floppy ? (uint)kDialogueSlack : (uint)kDialogueSlackCd;
+	const uint dialogueSize = _dialogue.data().size();
+	const uint canonical = kMapFlagBytes + extraSize + dialogueSize + slack + _world.savedSize();
+	const uint16 pointerBase = floppy ? kDialoguePointerBase : kDialoguePointerBaseCd;
+	if (body.size() == canonical && dialogueHeaderMatches(body, kMapFlagBytes + extraSize, pointerBase))
+		return true;
+	// Recognize only the two historical engine layouts. Exact sizes and
+	// the complete immutable list header distinguish them from another
+	// release's save; an arbitrary shorter body is never a "no gap" save.
+	if (floppy && body.size() == canonical &&
+			dialogueHeaderMatches(body, kMapFlagBytes + kExtraSize + kDialogueSlack, 0)) {
+		extraSize += kDialogueSlack;
+		slack = 0;
+		return true;
+	}
+	if (!floppy && !_world.amiga() && body.size() == canonical - kDialogueSlackCd &&
+			(dialogueHeaderMatches(body, kMapFlagBytes + extraSize, pointerBase) ||
+			 dialogueHeaderMatches(body, kMapFlagBytes + extraSize, 0))) {
+		slack = 0;
+		return true;
+	}
+	return false;
 }
 
 void SaveGame::pack(const Common::Array<byte> &body, Common::Array<byte> &packed) const {
@@ -93,37 +149,57 @@ void SaveGame::pack(const Common::Array<byte> &body, Common::Array<byte> &packed
 	}
 }
 
-bool SaveGame::readFile(uint slot, Common::Array<byte> &packed) const {
-	const bool floppy = _world.layoutShift() != 0;
-	const Common::String name = fileName(slot, floppy);
-	// Raw: a save begins with the game time, and a time such as 0x0178
-	// writes 78 01, a zlib header, which openForLoading() would try to
-	// inflate (the speedrun check found it at game time 376).
+static Common::SeekableReadStream *openSave(const Common::String &name) {
+	// Raw: time 0x0178 starts with a zlib header, but these files are RLE.
 	Common::SeekableReadStream *stream = g_system->getSavefileManager()->openRawFile(name);
-	if (!stream) {
-		// A save of the DOS game in the game directory works too.
-		Common::File *file = new Common::File();
-		if (!file->open(Common::Path(name))) {
-			delete file;
-			return false;
-		}
-		stream = file;
+	if (stream)
+		return stream;
+	// Explicit original DOS saves or matching engine fixtures in game data.
+	Common::File *file = new Common::File();
+	if (file->open(Common::Path(name)))
+		return file;
+	delete file;
+	return nullptr;
+}
+
+bool SaveGame::readFile(uint slot, Common::Array<byte> &packed) const {
+	if (slot >= kSlots)
+		return false;
+	const bool floppy = _world.layoutShift() != 0;
+	Common::SeekableReadStream *stream = openSave(fileName(slot, floppy, _world.amiga()));
+	if (!stream && _world.amiga()) {
+		// Earlier engine Amiga builds shared CD names. Import only when
+		// the new slot is absent; decode() must confirm the Amiga layout.
+		// Reading never renames, deletes or rewrites the legacy file.
+		stream = openSave(fileName(slot, false));
 	}
-	packed.resize(stream->size());
+	if (!stream)
+		return false;
+	const int64 size = stream->size();
+	if (size < 6 || size > 0x10001) {
+		delete stream;
+		return false;
+	}
+	packed.resize((uint)size);
 	const bool ok = stream->read(packed.data(), packed.size()) == packed.size();
 	delete stream;
 	return ok;
 }
 
 int SaveGame::slotTime(uint slot) const {
-	Common::Array<byte> packed;
-	if (!readFile(slot, packed) || packed.size() < 6)
+	Common::Array<byte> packed, body;
+	uint extraSize, slack;
+	if (!readFile(slot, packed))
 		return -1;
+	if (!decode(packed, body, extraSize, slack)) {
+		_log.line(Common::String::format("Saves: slot %u is incompatible or damaged", slot));
+		return -1;
+	}
 	return READ_LE_UINT16(packed.data());
 }
 
 bool SaveGame::save(uint slot) {
-	if (!loadMap())
+	if (slot >= kSlots || !loadMap())
 		return false;
 	const bool floppy = _world.layoutShift() != 0;
 	const uint extraSize = kExtraSize;
@@ -163,11 +239,11 @@ bool SaveGame::save(uint slot) {
 	Common::Array<byte> packed;
 	packed.resize(6);
 	WRITE_LE_UINT16(packed.data(), state.w(GameState::kGameTime));
-	WRITE_LE_UINT16(packed.data() + 2, floppy ? 0x02f7 : 0x00f7);
+	WRITE_LE_UINT16(packed.data() + 2, _world.amiga() ? (kAmigaSaveTag << 8) | kRleMarker : floppy ? 0x02f7 : 0x00f7);
 	pack(body, packed);
 	WRITE_LE_UINT16(packed.data() + 4, (uint16)(packed.size() - 2));
 
-	const Common::String name = fileName(slot, floppy);
+	const Common::String name = fileName(slot, floppy, _world.amiga());
 	Common::OutSaveFile *out = g_system->getSavefileManager()->openForSaving(name, false);
 	if (!out) {
 		_log.line(Common::String::format("Saves: cannot write %s", name.c_str()));
@@ -182,37 +258,21 @@ bool SaveGame::save(uint slot) {
 }
 
 bool SaveGame::load(uint slot) {
-	if (!loadMap())
+	if (slot >= kSlots || !loadMap())
 		return false;
 	Common::Array<byte> packed, body;
 	if (!readFile(slot, packed)) {
 		_log.line(Common::String::format("Saves: slot %u is empty", slot));
 		return false;
 	}
-	unpack(packed, body);
-	const bool floppy = _world.layoutShift() != 0;
-	const uint dialogueSize = _dialogue.data().size();
-	const uint header = dialogueSize >= 2 ? READ_LE_UINT16(_dialogue.data().data()) : 0;
-	// The original's layout (checked on its own saves): extra 0xA2, the
-	// dialogue table, its buffer's slack (floppy 36 bytes, CD 104), the data
-	// segment. The engine's
-	// earlier floppy saves put the slack before the table instead (extra
-	// 0xC6); they are told apart by the raw list header (its first word is
-	// the file offset, where the original's is a pointer).
-	uint extraSize = kExtraSize, slack = floppy ? (uint)kDialogueSlack : (uint)kDialogueSlackCd;
-	if (floppy && body.size() > kMapFlagBytes + kExtraSize + kDialogueSlack + 1 &&
-			READ_LE_UINT16(body.data() + kMapFlagBytes + kExtraSize + kDialogueSlack) == header) {
-		extraSize = kExtraSize + kDialogueSlack;
-		slack = 0;
-	} else if (!floppy && body.size() < kMapFlagBytes + kExtraSize + dialogueSize + slack + _world.savedSize()) {
-		slack = 0; // the engine's earlier CD saves had no gap
-	}
-	const uint expected = kMapFlagBytes + extraSize + dialogueSize + slack + _world.savedSize();
-	if (body.size() < expected) {
-		_log.line(Common::String::format("Saves: slot %u holds %u bytes (%u packed), %u expected", slot, body.size(),
-				packed.size(), expected));
+	uint extraSize, slack;
+	if (!decode(packed, body, extraSize, slack)) {
+		_log.line(Common::String::format("Saves: slot %u is incompatible or damaged", slot));
 		return false;
 	}
+	const uint dialogueSize = _dialogue.data().size();
+	const uint header = READ_LE_UINT16(_dialogue.data().data());
+	// All format checks finish before changing the map, dialogue or state.
 	for (uint i = 0; i < kMapFlagBytes; ++i)
 		for (uint k = 0; k < 4; ++k) {
 			const uint pixel = 4 * i + k;

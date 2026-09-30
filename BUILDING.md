@@ -87,10 +87,26 @@ Notes:
 - The game writes a log to `dune-ios.log` in ScummVM's save directory. Every
   room it draws is logged, and a problem shows up there first.
 
+### Game options and saves
+
+Open **Game Options > Game** for DOS language/music/sampled-sound controls or
+the two optional story fixes available on DOS and Amiga. Amiga uses fixed
+English resources; Paula music and sound playback are not implemented.
+**Keymaps** configures controller bindings and **Paths > Save path** selects
+per-game storage. A generic audio-device choice cannot enable Amiga audio.
+
+DOS saves retain `DUNE21S1.SAV`–`DUNE21S4.SAV` (floppy) and
+`DUNE37S1.SAV`–`DUNE37S4.SAV` (CD). Engine Amiga uses `DUNEAMS1.SAV`–`DUNEAMS4.SAV`.
+Matching legacy engine Amiga `DUNE37S` saves are read only when the new slot
+is absent; loading never rewrites them. Foreign/damaged layouts are rejected
+before state changes. Native Amiga `DUNE10S` saves are not supported. Separate
+Save paths can also isolate multiple targets using the same release. See
+[save compatibility](third_party/scummvm/engines/dune/SAVES.md).
+
 ## 3. Build with the scripts (macOS)
 
-The scripts stage the ScummVM tree and the build outside the checkout, under
-`/private/tmp/dune-scummvm-*` (override with `DUNE_LOCAL_BUILD_ROOT`). They copy
+The scripts stage the ScummVM tree and the build under `$TMPDIR/dune-scummvm-*`
+(override with `DUNE_LOCAL_BUILD_ROOT`). They copy
 the engine in with rsync before every build, so you edit only this repository.
 The scripts get the ScummVM source from `third_party/scummvm-source.tar` if it
 exists. Otherwise they fetch the pinned commit from GitHub once (override with
@@ -124,8 +140,8 @@ The reference images are frames of the original game and are **not**
 distributed. Create your own once from your data:
 
 ```sh
-export DUNE_DATA_CD=/path/to/cd-data          # defaults: /private/tmp/dune-data
-export DUNE_DATA_FLOPPY=/path/to/floppy-data  #           /private/tmp/dune-data/floppy
+export DUNE_DATA_CD=/path/to/cd-data          # default: $TMPDIR/dune-data
+export DUNE_DATA_FLOPPY=/path/to/floppy-data  #         $TMPDIR/dune-data/floppy
 make init-golden          # runs every scenario and seeds golden/ (refuses if it exists)
 # look at the seeded PNGs in golden/ before you trust them
 make verify               # now it should pass
@@ -136,16 +152,45 @@ the new ones. When a change is meant to alter a picture, review the diff in the
 report. Then accept that one checkpoint with
 `python3 scripts/dune_accept_golden.py cd/<checkpoint>`.
 
-`./scripts/check_speedrun.sh [campaign|full] [seed...]` has a bot play the PC
-speedrun route on both releases (uses `DUNE_DATA_FLOPPY` and `DUNE_DATA_CD`).
-It prints PASS when the Emperor's throne room is reached. `campaign` starts
-after Leto's death; `full` plays from a new game to the ending, and completes on
-both releases with seed 1. `scripts/watch_speedrun.sh [campaign|full] [--cd]
-[--seed N]` shows the same bot playing in a window, slowed down so it can be
-followed; the game stays playable where it stops.
-The bot reacts to the exact game timing, so a seed can occasionally stop before
-the end. A FAIL names the stage where it stopped; check another seed before
-suspecting the engine.
+`./scripts/check_speedrun.sh [campaign|full] [seed...]` checks the PC speedrun
+route through scripted engine actions. It uses `DUNE_DATA_FLOPPY` and
+`DUNE_DATA_CD` by default; `campaign` starts after Leto's death and `full`
+starts a new game. Set `DUNE_SPEEDRUN_RELEASES` to select releases, including
+Amiga when its data is available. A passing result is assisted engine-logic
+coverage, not a player-controlled UI run or an uninterrupted campaign; the
+evidence report records setup, reloads and other assistance. The bot follows
+game timing, so a seed can occasionally stop before the end. A FAIL names the
+stage where it stopped; check the evidence before treating it as an engine
+regression. `scripts/watch_speedrun.sh [campaign|full] [--cd] [--seed N]`
+shows the bot in a window.
+
+The bot uses direct campaign calls and battle save/load retries. Full runs
+reject forced progression and logged order overrides; seeded campaigns allow
+only their two declared setup shortcuts and do not establish new-game
+progression. The gate writes `evidence.json` with its coverage classification
+and binary hash; `DUNE_SPEEDRUN_REQUIRE_PLAYER_UI=1` deliberately fails this
+assisted coverage. Results do not certify another build or an untested IPA.
+To test all three bot releases, use `DUNE_SPEEDRUN_RELEASES="floppy cd amiga"`
+and provide `DUNE_DATA_AMIGA`; Sega CD has no completion bot.
+
+`scripts/check_speedrun_orders.sh` checks menu-issued orders and state safety.
+The speedrun checks use synthetic evidence tests; no captured run is needed.
+
+`scripts/check_map_troops.sh` checks troop icons, selection, orders, marching
+animation and arrival. It needs installed floppy data and a compatible
+chapter-20 floppy save supplied through `DUNE_MAP_TROOPS_SAVE`; this external
+fixture is not distributed. The script does not need or include golden images.
+
+`scripts/check_amiga_arrival.sh` checks the Amiga arrival-room conversion.
+`scripts/check_original_options.sh` checks DOS language/audio options, while
+`scripts/check_amiga_options.sh` checks the applicable Amiga story options.
+`scripts/check_save_compatibility.sh` exercises the isolated DOS and Amiga save
+namespaces and matching legacy-save reads. Set `DUNE_DATA_AMIGA` for these
+Amiga checks.
+
+The save-compatibility gate requires installed DOS floppy/CD and Amiga data.
+Its original-save reference cases are optional when the private fixtures are
+absent; no game saves are distributed.
 
 `./scripts/check_flight_landscape.sh` flies from the palace to Carthag-Tuek on
 the floppy data (`DUNE_DATA_FLOPPY`) and checks that every row of the flight
@@ -168,6 +213,12 @@ missing; like the DOS references, seed them from your own data with
 six minutes without the full speedrun; `--no-speedrun` or `--no-full` shorten it).
 Each check's log goes to `$DUNE_LOCAL_BUILD_ROOT/check-all/`. Like `make verify`,
 it needs your own references in `golden/` (see above).
+
+`./scripts/check_cockpit.sh` checks the Amiga ornithopter dashboard and
+destination controls with the desktop pointer and button paths. It requires
+your extracted Amiga game data in `DUNE_DATA_AMIGA` and checks hover labels,
+map scrolling and recentering, cancel, destination changes during flight, and
+arrival. It uses generated screenshots rather than original-game captures.
 
 `scripts/check_saboteurs.sh`, `check_epidemic.sh`, `check_chani.sh` and
 `check_head.sh` check the Harkonnen saboteurs and worm attacks on harvesters, the
@@ -230,9 +281,11 @@ are documented in `engines/dune/debug.h`:
 | `dune_record=<dir>` | save every shown frame as a BMP with its duration, to make a video of a run |
 | `dune_speedrun_watch=1` | show the speedrun bot's run on screen and leave the game playable afterwards |
 | `dune_test_cockpit=<n>` | open the ornithopter cockpit for a scripted real-time test |
+| `dune_no_raids=1` | suppress Harkonnen raids in deterministic test setups |
+| `dune_room_scans=1` | keep room-entry and room-leave dialogue scans enabled during scripted runs |
 | `dune_cd_voice_mode=<0\|1\|2>` | CD: the voice mode the original keeps in ds:28E8 (0 text, 2 digital voices); in text mode Paul's head turns away during a character's line |
 | `dune_room_rotations=<n,n,...>` | replay given room-rotation bytes, one per landing, instead of random ones (for comparing with a run of the original) |
-| `dune_setup_save=1` | with a story setup, save that state as Log 1 so it can be loaded in the original |
+| `dune_setup_save=1` | with a story setup, save that state as Log 1 (DOS files can be loaded in the matching original; engine Amiga files cannot) |
 | `dune_globe_dump=<dir>` | write every globe frame's palette indices, live map and tilt to `<dir>` (read by `scripts/globe_ref.py`) |
 | `dune_real_time=true` | keep a scripted (harness) run at the original's speed instead of as fast as possible |
 | `dune_hnm_dump_frame=<n>` | on a dump run, the video frame at which each intro video is screenshotted (default 40) |

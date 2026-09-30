@@ -74,7 +74,8 @@ public:
 	/** Draw the map around (latitude, longitude): latitude -75..75, longitude 0..65535. */
 	void draw(Graphics::Surface &view, int16 latitude, uint16 longitude);
 	/** Where a place appears in the view for the same window, or false when off-screen. */
-	bool project(int16 latitude, uint16 longitude, int16 placeLatitude, uint16 placeLongitude, int &x, int &y) const;
+	bool project(int16 latitude, uint16 longitude, int16 placeLatitude, uint16 placeLongitude, int &x, int &y,
+			bool troopMargin = false) const;
 	/** The inverse of project(): the map position under a view pixel. */
 	bool unproject(int16 latitude, uint16 longitude, int x, int y, int16 &placeLatitude, uint16 &placeLongitude) const;
 
@@ -178,6 +179,11 @@ public:
 	void rotate(int deltaPhase, int deltaTilt);
 	/** Place under a view position (0-151 rows), or -1. */
 	int hitLocation(int x, int y) const;
+	/** A hired troop under the pointer, using the displayed icon bounds, or 0. */
+	uint hitTroop(int x, int y) const;
+	/** Floppy CS:78ce: every fourth 15-tick task advances the troop scripts. */
+	bool tickTroopIcons(uint32 now);
+	bool hasTroopIcon(uint id) const;
 	void select(int locationIndex) { _destination = locationIndex; }
 	/** Pick a desert point (arm_pending_travel's desert case): destination -2, its position kept. */
 	bool selectPoint(int x, int y);
@@ -275,6 +281,9 @@ private:
 	bool loadFlat();
 	bool loadGlobe();
 	void drawIcons(Graphics::ManagedSurface &surface);
+	void drawTroopIcons(Graphics::ManagedSurface &surface);
+	byte iconData(uint16 offset) const;
+	uint16 iconScript(uint id, const byte *record) const;
 	bool placeOnScreen(const Location &l, int &x, int &y) const;
 	void drawFlight(Graphics::ManagedSurface &surface, const Panel &panel);
 	void drawVegetation(Graphics::ManagedSurface &surface, const Panel &panel);
@@ -327,6 +336,18 @@ private:
 	uint _results;
 	bool _resultsColours = false;
 	uint32 _creepStart = 0;
+	struct TroopIcon {
+		uint id = 0;
+		uint16 script = 0, cursor = 0, sprite = 0;
+		int left = 0, top = 0, anchorLeft = 0, anchorTop = 0;
+		uint16 width = 0, height = 0;
+		bool animated = false;
+	};
+	Common::Array<TroopIcon> _troopIcons;
+	uint32 _troopIconsAt = 0;
+	byte _troopIconPhase = 0;
+	uint16 _iconSeed = 1; ///< local animation phases, independent of gameplay RNG
+	Common::Rect _placePopup;
 	byte _index[320 * 152];
 };
 

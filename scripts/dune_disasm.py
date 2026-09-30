@@ -6,10 +6,10 @@ The OpenRakis listing drops some instructions (seen at seg000:2595, where the
 Usage: dune_disasm.py START END [exe]   (hex seg000 offsets; header is 512 bytes)
 Requires `pip install capstone`.
 """
-import struct, sys
+import os, struct, sys
 import capstone
 start, end = int(sys.argv[1], 16), int(sys.argv[2], 16)
-exe = sys.argv[3] if len(sys.argv) > 3 else '/private/tmp/dune-data/DNCDPRG.EXE'
+exe = sys.argv[3] if len(sys.argv) > 3 else os.path.join(os.environ.get("TMPDIR", "/tmp"), "dune-data", "DNCDPRG.EXE")
 d = open(exe, 'rb').read()
 hdr = struct.unpack_from('<H', d, 8)[0] * 16
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_16)

@@ -48,9 +48,11 @@ class World;
  *   RLE   marker, count, value = a run; other bytes literal
  *
  * Unpacked, the body is: the two flag bits of every MAP.HSQ pixel packed
- * four to a byte (the spice fields change as they are mined), 162 (CD) or
- * 198 (floppy) bytes of the executable's own variables, DIALOGUE.HSQ with
- * its said flags, and the data segment (4705 or 4718 bytes).
+ * four to a byte (the spice fields change as they are mined), 162 bytes of
+ * the executable's own variables, DIALOGUE.HSQ with
+ * its said flags, 104 (CD) or 36 (floppy) buffer bytes, and the data segment
+ * (4705 CD or 4718 floppy bytes). Engine Amiga saves use DUNEAMS<n>.SAV
+ * with a tagged header and the Amiga dialogue table, not native DUNE10 saves.
  */
 class SaveGame {
 public:
@@ -63,17 +65,18 @@ public:
 		kDialogueSlackCd = 0x68,      ///< the CD's: 104 bytes, the first 64 zero (checked on DUNE37S0 by the SwiftDune session)
 		kDialoguePointerBase = 0xcfe9, ///< the floppy's list header in a save: file offset + this
 		kDialoguePointerBaseCd = 0xaa76,
+		kAmigaSaveTag = 0xa1,         ///< high marker byte identifies the engine Amiga layout
 		kRleMarker = 0xf7
 	};
 
 	SaveGame(World &world, Dialogue &dialogue, Resource &resources, StartupLog &log);
 
-	/** The DOS file name of a slot, also used in ScummVM's save directory. */
-	static Common::String fileName(uint slot, bool floppy);
+	/** Separate Amiga engine namespace; original names retained for DOS. */
+	static Common::String fileName(uint slot, bool floppy, bool amiga = false);
 
 	bool save(uint slot);
 	bool load(uint slot);
-	/** The game time stored in a slot, or -1 when it holds nothing. */
+	/** The game time stored in a slot, or -1 for empty, damaged or incompatible slots. */
 	int slotTime(uint slot) const;
 
 	/** The map with the flags of the last loaded save (or MAP.HSQ). */
@@ -81,7 +84,9 @@ public:
 
 private:
 	bool loadMap();
-	void unpack(const Common::Array<byte> &packed, Common::Array<byte> &body) const;
+	bool unpack(const Common::Array<byte> &packed, Common::Array<byte> &body) const;
+	bool dialogueHeaderMatches(const Common::Array<byte> &body, uint offset, uint16 base) const;
+	bool decode(const Common::Array<byte> &packed, Common::Array<byte> &body, uint &extraSize, uint &slack) const;
 	void pack(const Common::Array<byte> &body, Common::Array<byte> &packed) const;
 	bool readFile(uint slot, Common::Array<byte> &packed) const;
 

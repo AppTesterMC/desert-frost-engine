@@ -1,0 +1,24 @@
+# Real-time flight exercises the nested CHANGE DESTINATION event loop.
+# Setup dune_test_cockpit=1; no scripted world mutations after setup.
+wait 500
+move 181 102
+wait 500
+click left 181 102
+wait 6000              # the takeoff ends and the flight controls are live
+checkpoint flight-before-change
+click left 160 171     # CHANGE DESTINATION
+wait 1000
+checkpoint flight-changing
+move 160 89
+wait 500
+checkpoint flight-hover
+click left 160 163     # Cancel resumes the existing flight
+wait 1000
+checkpoint flight-change-cancelled
+click left 160 163     # SKIP TO DESTINATION
+wait 12000
+checkpoint flight-arrived
+click left 275 164
+wait 1000
+checkpoint flight-sietch
+quit

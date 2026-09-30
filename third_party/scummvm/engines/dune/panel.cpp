@@ -46,22 +46,31 @@ Panel::Panel(OSystem *system, Resource &resources) : _system(system), _leftPanel
 	if (!resources.load("DNCHAR.BIN", _font))
 		resources.load("DUNECHAR.HSQ", _font);
 
-	Common::Array<byte> commands;
-	if (resources.load("COMMAND1.HSQ", commands) && commands.size() >= 2) {
-		const uint count = READ_LE_UINT16(commands.data()) / 2;
-		if (count <= 512 && (uint32)count * 2 <= commands.size()) {
-			_commandStrings.resize(count);
-			for (uint i = 0; i < count; ++i) {
-				const uint32 start = READ_LE_UINT16(commands.data() + i * 2);
-				if (start >= commands.size())
-					continue;
-				uint32 end = start;
-				while (end < commands.size() && commands[end] != 0xff)
-					++end;
-				_commandStrings[i] = Common::String((const char *)commands.data() + start, end - start);
-			}
+	auto readCommands = [](const Common::Array<byte> &data, Common::Array<Common::String> &strings) {
+		if (data.size() < 2)
+			return;
+		const uint count = READ_LE_UINT16(data.data()) / 2;
+		if (count > 512 || (uint32)count * 2 > data.size())
+			return;
+		strings.resize(count);
+		for (uint i = 0; i < count; ++i) {
+			const uint32 start = READ_LE_UINT16(data.data() + i * 2);
+			if (start >= data.size())
+				continue;
+			uint32 end = start;
+			while (end < data.size() && data[end] != 0xff)
+				++end;
+			strings[i] = Common::String((const char *)data.data() + start, end - start);
 		}
-	}
+	};
+	Common::Array<byte> commands;
+	if (resources.load("COMMAND1.HSQ", commands))
+		readCommands(commands, _commandStrings);
+	// Engine callers currently identify a command by its English wording.
+	// Its index is the same in every language: translate the display, not
+	// the identifier, or non-English map/save/troop rows disappear.
+	if (resources.language() != 1 && resources.loadUntranslated("COMMAND1.HSQ", commands))
+		readCommands(commands, _commandKeys);
 }
 
 void Panel::applyPalette() {
@@ -101,13 +110,14 @@ const char *Panel::commandText(uint row) const {
 uint16 Panel::findCommand(const char *text, bool prefix) const {
 	if (!text)
 		return 0xffff;
+	const Common::Array<Common::String> &keys = _commandKeys.empty() ? _commandStrings : _commandKeys;
 	const uint length = strlen(text);
-	for (uint i = 0; i < _commandStrings.size(); ++i) {
-		if (_commandStrings[i].equalsIgnoreCase(text))
+	for (uint i = 0; i < keys.size(); ++i) {
+		if (keys[i].equalsIgnoreCase(text))
 			return i;
 		if (prefix) {
 			// Records may start with padding spaces (the map box's title).
-			const char *s = _commandStrings[i].c_str();
+			const char *s = keys[i].c_str();
 			while (*s == ' ')
 				++s;
 			if (scumm_strnicmp(s, text, length) == 0)

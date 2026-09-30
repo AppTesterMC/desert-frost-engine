@@ -18,7 +18,11 @@ stage_scummvm_source() {
 	dest=$1
 	mkdir -p "$dest"
 	if [ -f "$repo_root/third_party/scummvm-source.tar" ]; then
-		tar -xf "$repo_root/third_party/scummvm-source.tar" -C "$dest"
+		# Older offline archives include a prototype engine. Preserve the
+		# authoritative tree, just as the git fallback below does. Archives
+		# may spell member paths with or without a leading ./.
+		tar --exclude 'engines/dune' --exclude './engines/dune' \
+			-xf "$repo_root/third_party/scummvm-source.tar" -C "$dest"
 		return
 	fi
 	upstream="$local_root/scummvm-upstream"

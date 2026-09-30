@@ -2,8 +2,9 @@
 
 A from-scratch ScummVM engine for Cryo's *Dune* (1992, DOS; CD and floppy
 releases), written so the game can run natively on iOS through ScummVM's iOS
-backend. It is a bring-up in progress: the data formats are decoded and the
-first screens work; the game logic is not there yet.
+backend. It remains in development. Engine-assisted new-game-to-ending
+checks cover DOS floppy, CD and Amiga; a complete player-input playthrough
+remains unverified.
 
 This file is the map for contributors. Format details and the reasoning behind
 decisions live in [FINDINGS.md](FINDINGS.md); the projects and people this work
@@ -31,16 +32,23 @@ or learn something.
 | Dialogue | the original's engine: DIALOGUE/CONDIT/PHRASE data, conditions, actions, portrait with talking animation, lines in the command box, a tap per page (`dialogue.cpp`, `text.cpp`); only Duke Leto is selectable so far |
 | The book | cover, topics, encyclopedia paragraphs and recorded lines with drop capitals (`book.cpp`); pagination is ours |
 | Map screen and globe | flat map from MAP/TABLAT with the places' icons, scrolling, picking a destination and flying there; the original's DUNE MAP title popup, map menu (contact range, greyed rows) and planet panel; the globe with the game menu (`map.cpp`) |
-| Saves | the original's four logs in their own format, save and load from the globe menu (`saves.cpp`) |
-| Options | music on/off, restart, exit with confirmation | done |
+| Saves | original DOS `DUNE21S`/`DUNE37S` logs; isolated engine Amiga `DUNEAMS` logs; exact layout validation and nondestructive matching legacy import ([SAVES.md](SAVES.md)) |
+| Options | in-game music, restart and exit; DOS per-game text language, music and sampled-sound controls; standard volume, controller bindings and save path ([original argument mapping](ORIGINAL-OPTIONS.md)) |
 | Sega CD / Mega CD release | detected (extracted `DUNE.DAT` or the data-track image); the disc's index, text, tile screens and the initial game data (converted to the PC layout); the original room screens from the room tables; the original panel (book, day, companions, commands, exit pad; place tints); conversations with measured portraits, close-up backdrops and the text box; the map (zoomed terrain, markers, travel); no verbs, videos, sound, flight or battles yet (`segacd_*.cpp`, FINDINGS.md "Sega CD / Mega CD release") |
 | Characters and troops | who stands on which marker as the executable decides; sietch Fremen and chiefs; hiring by talking to the Fremen; troop orders (occupations) | done; hiring and harvest rules are ours (`world.cpp`) |
 | Clock, flight, spice, rallying, results | the executable's rules: clock rate, flight steps, harvest and prospecting formulas, charisma check, results layout (`world.cpp`, `notes/research/gameplay-rules.md`) | done for those; story phases and callbacks, Jessica's contact-range lessons, the Emperor's shipments bargained with Duncan, the COMM room, visions, the first vision in the desert, the scripted scenes, Stilgar's Water of Life, the ecology route (wind traps, bulbs, irrigation, vegetation, fortresses taken, MODIFY EQUIPMENT), the Harkonnen zone, arrival deaths and the final scene run; troop marches, espionage, fort battles (MASSIVE ATTACK, FIGHT FOR A WHOLE DAY), the Harkonnen captain, worm riding and the final attack on the Harkonnen palace run (`troops.cpp`, `battle.cpp`); the smugglers' village and chapter run, their trade, Harkonnen raids and GO & SEARCH FOR EQUIPMENT not yet |
+
+Completion checks use direct campaign actions and battle save/load retries.
+Full runs reject forced progression and logged order overrides; seeded campaigns
+allow only declared setup shortcuts and are separate from new-game evidence.
+A PASS does not certify every player UI path, no-reload completion or an untested
+IPA. See `scripts/check_speedrun.sh` and its per-run `evidence.json`.
 
 ## Source map
 
 | File | Responsibility |
 | --- | --- |
+| `options.cpp/.h` | Per-game installed language selection and audio toggles; [original CLI mapping](ORIGINAL-OPTIONS.md) |
 | `detection.cpp`, `metaengine.cpp` | ScummVM glue: recognise the CD (`DUNE.DAT`), floppy (`DUNES.HSQ`), Amiga (`dune`, `dunechar.hsq`) and Sega CD (`DUNE.DAT` or the data-track image) releases |
 | `amiga.cpp/.h`, `amiga_ds_table.h` | The Amiga release: file names, sheet/room/picture conversion to the DOS layouts, the executable's hunks and its data segment converted to the CD layout |
 | `amiga_gfx.cpp` | Amiga screen effects: the time-of-day records, the copper's sky gradient in colour 1, the interface colours |
@@ -51,7 +59,7 @@ or learn something.
 | `palace.cpp/.h` | The palace's room labels for the dump names and the debug overlay |
 | `world.cpp/.h` | The data segment read from the player's executable (LZEXE unpacking for the floppy): locations, room tables, characters, the player's position, the release's sheet slots |
 | `map.cpp/.h` | The flat map renderer (MAP.HSQ + TABLAT.BIN) and the map/globe screen with its icons and panel extras |
-| `saves.cpp/.h` | DUNE21S/DUNE37S save files: RLE, map flags, dialogue table, data segment |
+| `saves.cpp/.h` | DOS DUNE21S/DUNE37S and engine Amiga DUNEAMS saves: bounded RLE, release validation, map flags, dialogue table, data segment |
 | `panel.cpp/.h` | The control panel below the view: drawing, game font, COMMAND1 strings, hit testing |
 | `scene.cpp/.h` | `GameScreen`: room view of any place (floppy sheets or the CD's arrival-video backdrop), conversations, the book, map and globe, the game menu, input; the globe renderer |
 | `text.cpp/.h` | `SentenceBank`: COMMAND/PHRASE files and their inline codes |
@@ -161,10 +169,25 @@ there before it is ported to C++.
 
 ## Game options
 
-Options that change the original's behaviour are off by default, so the
-engine plays as the original does. Turn them on per game in ScummVM's
-**Options > Engine** tab (desktop and iOS), or in `scummvm.ini` under the
-game's section:
+Select a DOS game in the launcher and open **Game Options > Game** (desktop
+and iOS). Scroll down to the text-language and audio controls. Only installed
+languages appear; the selection applies on the next game start. Audio is enabled
+by default. The two optional original-bug fixes below are off by default.
+Settings are stored under the game's section in `scummvm.ini`:
+
+| Option (GUI) | `scummvm.ini` key | What it does |
+|---|---|---|
+| Text language | `dune_language=1` | Select the installed original command, dialogue, book and intro text bank. See the [original argument mapping](ORIGINAL-OPTIONS.md) for all seven CD banks and the three floppy banks. |
+| AdLib music | `dune_no_music=false` | Enable the original AdLib music through the OPL emulator. Set `true` to disable it. The standard Volume tab's Music slider also applies. |
+| Sampled sounds | `dune_no_sound=false` | Enable effects and CD video soundtracks. Set `true` to mute them while preserving video timing. |
+
+The same two optional fixes are also available for Amiga targets. Their
+English text bank is fixed, and Paula audio is not implemented, so Amiga
+does not show the DOS language or AdLib controls. Controller bindings and
+Save path work through the standard Keymaps and Paths tabs. See the
+[Amiga applicability and original evidence](ORIGINAL-OPTIONS.md#amiga-applicability).
+
+Optional fixes:
 
 | Option (GUI) | `scummvm.ini` key | What it does |
 |---|---|---|
@@ -183,7 +206,7 @@ keeps that behaviour, to stay faithful to the original.
 
 **How to turn the fix on** (off by default):
 
-- In ScummVM: the Dune game's **Options > Engine**, tick **Fix the Leto loop**.
+- In ScummVM: the Dune game's **Game Options > Game**, tick **Fix the Leto loop**.
   It is the same on desktop and iPhone.
 - Or add `dune_fix_leto_loop=true` under the game's section in `scummvm.ini`.
   There is no command-line switch, because ScummVM's command line cannot pass
@@ -203,7 +226,7 @@ that behaviour.
 
 **How to turn the fix on** (off by default):
 
-- In ScummVM: the Dune game's **Options > Engine**, tick **Fix Celimyn-Tuek**.
+- In ScummVM: the Dune game's **Game Options > Game**, tick **Fix Celimyn-Tuek**.
 - Or add `dune_fix_celimyn_tuek=true` under the game's section in `scummvm.ini`.
 
 The fix is the community's save patch (0xff to 0x58), done in memory at new
@@ -243,8 +266,10 @@ CD release" and "Amiga release"):
 | Amiga (3 disks) | `Dune 1 (Cryo + Virgin) A/B/C.adf`, extracted by `scripts/dune_amiga_extract.py` | Plays on the shared engine: its files, sheets, rooms, palettes and data segment are converted to the DOS layouts on load (`amiga.cpp`, `amiga_gfx.cpp`). Rooms, dialogue, map, globe, book, mirror, flights and the story screens work. Not ported: the intro (the game opens in the throne room), music and sound, the desert landscape |
 | Sega CD / Mega CD | `Dune (USA)/*.bin+cue` (or an extracted `DUNE.DAT`) | Its own host (`segacd_*.cpp`): the disc's index, text, tile screens and initial game data (rebuilt in the PC layout); the original room screens, panel, conversations with portraits, and the map with travel. Not yet: verbs, videos, sound, flight, battles. The Mega CD (Europe) entry is detected but untested |
 
-The game options (the Leto loop, Celimyn-Tuek) are offered on the DOS
-releases only.
+The Leto-loop and Celimyn-Tuek options are available on DOS and Amiga.
+Amiga uses fixed English resources and has no Paula music/sound playback.
+Its engine saves use the separate `DUNEAMS` namespace; native `DUNE10S` saves
+remain unsupported. See [save compatibility](SAVES.md).
 
 How the code is meant to absorb them:
 

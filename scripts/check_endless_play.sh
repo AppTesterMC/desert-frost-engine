@@ -17,12 +17,13 @@
 # Silent and headless, about a minute per run.
 #
 # Usage: scripts/check_endless_play.sh
+# Set DUNE_ENDING_RELEASES="floppy cd amiga" to include the Amiga release.
 
 set -u
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
-local_root="${DUNE_LOCAL_BUILD_ROOT:-/private/tmp/dune-scummvm-native-build}"
+local_root="${DUNE_LOCAL_BUILD_ROOT:-${TMPDIR:-/tmp}/dune-scummvm-native-build}"
 status=0
 
 SDL_AUDIODRIVER=dummy DUNE_DATA="${DUNE_DATA_FLOPPY:-$repo_root/data/floppy}" "$script_dir/test_dune_scummvm_sdl.sh" build >/dev/null 2>&1 || {
@@ -30,19 +31,26 @@ SDL_AUDIODRIVER=dummy DUNE_DATA="${DUNE_DATA_FLOPPY:-$repo_root/data/floppy}" "$
 	exit 1
 }
 
-for release in floppy cd; do
+for release in ${DUNE_ENDING_RELEASES:-floppy cd}; do
 	data="${DUNE_DATA_FLOPPY:-$repo_root/data/floppy}"
-	[ "$release" = cd ] && data="${DUNE_DATA_CD:-$repo_root/data}"
-	run_root="$local_root/sdl-run/final-battle-$release"
+	case "$release" in
+		floppy) ;;
+		cd) data="${DUNE_DATA_CD:-$repo_root/data}" ;;
+		amiga) data="${DUNE_DATA_AMIGA:-$HOME/dune-amiga-data/game}" ;;
+		*) echo "FAIL ending: unsupported release $release"; exit 2 ;;
+	esac
+	run_root="${DUNE_RUN_ROOT:-$local_root/sdl-run}/final-battle-$release"
 	rm -rf "$run_root"
 	mkdir -p "$run_root/saves" "$run_root/frames"
 	config="$run_root/final-battle.ini"
 	printf '[scummvm]\nsavepath=%s\ndune_input=%s\ndune_checkpoint_dir=%s\ndune_floppy_start=99\ndune_no_music=1\ndune_rng_seed=1\ndune_story_setup=final-battle\n' \
 		"$run_root/saves" "$repo_root/tests/regression/endless-play.script" "$run_root/frames" > "$config"
+	run_status=0
 	(cd "$local_root/build-sdl-dune" && SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy perl -e 'alarm 120; exec @ARGV' -- \
-		./scummvm -c "$config" --gfx-mode=surface --no-fullscreen --path="$data" dune >/dev/null 2>&1)
+		./scummvm -c "$config" --gfx-mode=surface --no-fullscreen --path="$data" dune >/dev/null 2>&1) || run_status=$?
 	log="$run_root/saves/dune-ios.log"
 	missing=""
+	[ "$run_status" = 0 ] || missing=" [engine exited $run_status]"
 	set -- "Battle: the Harkonnen palace falls, final attack stage 7" "two days later, stage 7, place 1 type 0x30" "Story: Paul enters the Baron's hall, the end"
 	[ "$release" = floppy ] && set -- "$@" 
 	[ "$release" = cd ] && set -- "$@" 
@@ -56,19 +64,26 @@ for release in floppy cd; do
 		status=1
 	fi
 done
-for release in floppy cd; do
+for release in ${DUNE_ENDING_RELEASES:-floppy cd}; do
 	data="${DUNE_DATA_FLOPPY:-$repo_root/data/floppy}"
-	[ "$release" = cd ] && data="${DUNE_DATA_CD:-$repo_root/data}"
-	run_root="$local_root/sdl-run/endless-play-$release"
+	case "$release" in
+		floppy) ;;
+		cd) data="${DUNE_DATA_CD:-$repo_root/data}" ;;
+		amiga) data="${DUNE_DATA_AMIGA:-$HOME/dune-amiga-data/game}" ;;
+		*) echo "FAIL ending: unsupported release $release"; exit 2 ;;
+	esac
+	run_root="${DUNE_RUN_ROOT:-$local_root/sdl-run}/endless-play-$release"
 	rm -rf "$run_root"
 	mkdir -p "$run_root/saves" "$run_root/frames"
 	config="$run_root/endless-play.ini"
 	printf '[scummvm]\nsavepath=%s\ndune_input=%s\ndune_checkpoint_dir=%s\ndune_floppy_start=99\ndune_no_music=1\ndune_rng_seed=1\ndune_story_setup=endless-play\n' \
 		"$run_root/saves" "$repo_root/tests/regression/endless-play.script" "$run_root/frames" > "$config"
+	run_status=0
 	(cd "$local_root/build-sdl-dune" && SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy perl -e 'alarm 120; exec @ARGV' -- \
-		./scummvm -c "$config" --gfx-mode=surface --no-fullscreen --path="$data" dune >/dev/null 2>&1)
+		./scummvm -c "$config" --gfx-mode=surface --no-fullscreen --path="$data" dune >/dev/null 2>&1) || run_status=$?
 	log="$run_root/saves/dune-ios.log"
 	missing=""
+	[ "$run_status" = 0 ] || missing=" [engine exited $run_status]"
 	set -- "Arrival: place 1 is in battle, Paul joins it" "MASSIVE ATTACK 1: won" "Battle: 0 Harkonnen place(s) left, final attack stage 6 -> 1" "Battle: fortress 1 becomes a sietch" "character 9 record 02 00 80 02" "character 11 record 02 00 80 02" "in room 2 of the palace, phase 0x58, people: 6 9 10 11" "9 says \"I've nothing to say.\"" "COME WITH ME to 10: stays" "COME WITH ME to 11: stays" "COME WITH ME to 6: comes" "a day later, demands 1 -> 1, stage 1"
 	[ "$release" = floppy ] && set -- "$@" 
 	[ "$release" = cd ] && set -- "$@" "6 answers \"OK!\""

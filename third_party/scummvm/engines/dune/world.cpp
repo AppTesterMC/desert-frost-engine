@@ -204,6 +204,7 @@ bool World::loadAmigaInitialData() {
 }
 
 bool World::loadInitialData() {
+	_mapTroopIconData.clear();
 	if (_resources.amiga())
 		return loadAmigaInitialData();
 	if (_segaCdProgram)
@@ -230,6 +231,13 @@ bool World::loadInitialData() {
 	}
 	const uint available = MIN<uint>(GameState::kSize, image.size() - found);
 	memcpy(_state.vars, image.data() + found, available);
+	// Floppy CS:750a/75c1 read these native DS pointers. They are beyond
+	// GameState::kSize (0x1500): keep the executable data, not save bytes.
+	// Other releases require their own verified layout and are left empty.
+	if (_floppy && found + 0x195f <= image.size()) {
+		_mapTroopIconData.resize(0x195f - 0x169b);
+		memcpy(_mapTroopIconData.data(), image.data() + found + 0x169b, _mapTroopIconData.size());
+	}
 	findSceneScripts(image);
 	_log.line(Common::String::format("World: initial data from %s at %u (%u bytes)", used, found, available));
 	return findTables();
@@ -545,10 +553,15 @@ void World::peopleInRoom(Common::Array<byte> &people) const {
 	for (uint c = 0; c < kCharacters; ++c)
 		if (c != kFremen && c != kFremenChief && (characterInRoom(c) || ((with >> c) & 1)))
 			people.push_back((byte)c);
-	// sub_13127: at a sietch, each Fremen troop of the place stands in room
-	// 2 (room 1 when ds:0x2B is set, not handled): a troop not hired yet
-	// through character 14's record, a hired one's chief through 15's.
-	if (placeType() <= Location::kSietchMax && room() == 2) {
+	// sub_13127 (classify, CD 316e-31ed): each Fremen troop of the place
+	// stands in room 2, or in room 1 while Paul is in a battle there (ds:2b,
+	// 3187, at any kind of place: the endless-play capture's four chiefs at
+	// the Harkonnen palace): a troop not hired yet through character 14's
+	// record, a hired one's chief through 15's. Outside a battle the engine
+	// keeps it to the sietches (the original's other places are not
+	// checked).
+	const bool battle = _state.b(0x2b) != 0;
+	if ((battle && room() == 1) || (!battle && placeType() <= Location::kSietchMax && room() == 2)) {
 		Common::Array<uint> ids;
 		troopsAt(currentLocation(), ids);
 		bool fremen = false;
@@ -659,6 +672,46 @@ void World::prepareCaptain() {
 		stageLocationForConditions((known - Location::kTableOffset) / Location::kRecordSize);
 	_log.line(Common::String::format("Story: the Harkonnen captain (troop %u) knows of place %u", id,
 			(known - Location::kTableOffset) / Location::kRecordSize));
+}
+
+void World::captainEnters() {
+	// seg000:31c9 (init_room_persons, the captain's slot): the record's flag
+	// 0x10 mirrors the troop's occupation bit 4 (overpowered), ds:ee (the
+	// speakers who threatened him) is cleared and ds:ed is 0xff when he is
+	// overpowered, else the troop's motivation.
+	const uint id = captainTroop(currentLocation());
+	if (!id || placeType() < Location::kFortressMin || placeType() > Location::kFortressMax || room() != 3)
+		return;
+	byte &flags = _state.vars[kCharacterTable + kCaptain * kCharacterSize + 0x0f];
+	const byte occ = troopByte(id, 3) & 0x10;
+	flags = (byte)((flags & 0xef) | occ);
+	_state.setW(0xee, 0);
+	_state.setB(0xed, occ ? 0xff : troopByte(id, 0x15));
+}
+
+bool World::overpowerCaptain(uint speaker) {
+	// seg000:9584 (floppy likewise): the first time for this speaker (ds:ee
+	// bit = its record's byte 0x0e), the captain's troop loses 0x29
+	// motivation and so does ds:ed; below 0 he is overpowered: the troop's
+	// occupation bit 4, his record's flag 0x10 (ds:10a7), which the lines
+	// read as ds:18 bit 4.
+	const uint id = captainTroop(currentLocation());
+	if (!id || speaker >= 16)
+		return false;
+	const uint16 bit = (uint16)(1u << (_state.vars[kCharacterTable + speaker * kCharacterSize + 0x0e] & 15));
+	if (_state.w(0xee) & bit)
+		return false;
+	_state.setW(0xee, (uint16)(_state.w(0xee) | bit));
+	troopByte(id, 0x15) = (byte)(troopByte(id, 0x15) - 0x29);
+	const byte ed = (byte)(_state.b(0xed) - 0x29);
+	_state.setB(0xed, ed);
+	_log.line(Common::String::format("Story: OVERPOWER THE PRISONER, ds:ed %#x", ed));
+	if (!(ed & 0x80))
+		return false;
+	troopByte(id, 3) |= 0x10;
+	_state.vars[kCharacterTable + kCaptain * kCharacterSize + 0x0f] |= 0x10;
+	_log.line(Common::String::format("Story: the Harkonnen captain (troop %u) is overpowered", id));
+	return true;
 }
 
 uint World::contactRange() const {
@@ -838,6 +891,110 @@ void World::settleCharacter(uint index) {
 	_state.vars[o + 1] = _state.b(GameState::kLocationAndRoom + 1);
 	_state.vars[o + 2] = _state.b(6);
 	_state.vars[o + 3] = _state.b(7);
+}
+
+void World::settleCharacterInDesert(uint index, uint16 longitude, int16 latitude, byte fine) {
+	const uint o = kCharacterTable + index * kCharacterSize;
+	if (index >= kCharacters)
+		return;
+	WRITE_LE_UINT16(&_state.vars[o], longitude);
+	WRITE_LE_UINT16(&_state.vars[o + 2], (uint16)((fine << 8) | (byte)latitude));
+	_log.line(Common::String::format("Characters: character %u stays in the desert at %04x/%d", index, longitude, latitude));
+}
+
+void World::arrivalShuffle(uint arrived) {
+	// CD 2170-21f9 (floppy 2488-2511, the same code), from the landing
+	// (4054): the first nine records, not travelling with Paul (flag 0x40).
+	const byte here = (byte)(arrived + 1);
+	for (uint c = 0; c < 9; ++c) {
+		byte *r = _state.vars + kCharacterTable + c * kCharacterSize;
+		if (r[0x0f] & 0x40)
+			continue;
+		const uint16 bx = READ_LE_UINT16(r + 2);
+		// 2184: Duncan (record ds:1008) at the palace goes to its room 4.
+		if (c == 3 && bx == 0x180)
+			r[0] = 4;
+		if ((bx & 0xff) == 0x80) {
+			const byte place = (byte)(bx >> 8);
+			if (r[0] == 1) {
+				// 2199-21da: waiting in room 1 of a sietch or the palace
+				// (type below 0x21), not where Paul lands, the place not in
+				// battle: one room further in; at the palace the record's
+				// own room (ds:144d by byte 0x0e, flag 4 cleared; room 6
+				// is room 10 before phase 0x24).
+				if (r[1] >= 0x21 || place == here || !place || place > locationCount() ||
+						(location((uint)place - 1).status & 2))
+					continue;
+				++r[0];
+				if (place == 1) {
+					const byte room = var(0x144d + (r[0x0e] & 0x0f));
+					r[0] = room;
+					r[0x0f] &= 0xfb;
+					if (room == 6 && _state.b(GameState::kPhase) < 0x24)
+						r[0] = 10;
+				}
+			} else if (c >= 5 && place == 1) {
+				// 21dc-21ea, 21fa: Stilgar and the later characters wander
+				// the palace: a room 2..12, not 3 before phase 0x54, nor 6
+				// or 11 before phase 0x24 (rand_iterated stands in).
+				byte room;
+				for (uint guard = 0; guard < 64; ++guard) {
+					room = (byte)(rollRandom(11) + 2);
+					const byte phase = _state.b(GameState::kPhase);
+					if (phase >= 0x54 || (room != 3 && (phase >= 0x24 || (room != 0x0b && room != 6))))
+						break;
+				}
+				r[0] = room;
+			}
+			continue;
+		}
+		// 221d: left in the desert (word 0 the longitude, word 2's low byte
+		// the latitude row): the nearest place (5344), its room 1 (40ae);
+		// flag 4 when that is where Paul lands.
+		const uint16 lng = READ_LE_UINT16(r);
+		const int8 lat = (int8)(bx & 0xff);
+		uint best = 0, bestDistance = 0xffff;
+		for (uint i = 0; i < locationCount(); ++i) {
+			const Location l = location(i);
+			if (l.hidden())
+				continue;
+			const uint dl = (uint)ABS((int16)(uint16)(l.longitude - lng)) >> 8;
+			const uint dt = (uint)ABS(l.latitude - lat);
+			const uint d = (byte)dl >= (byte)dt ? dl : dt;
+			if (d < bestDistance) {
+				bestDistance = d;
+				best = i;
+			}
+		}
+		r[0] = 1;
+		r[1] = location(best).type;
+		r[2] = 0x80;
+		r[3] = (byte)(best + 1);
+		if (best + 1 == here)
+			r[0x0f] |= 4;
+		_log.line(Common::String::format("Characters: character %u walks from the desert to place %u", c, best));
+	}
+}
+
+void World::dailyRoomFixup() {
+	// CD 1d66-1d9e (floppy 20a8-20e1), from the new-day hook (1c5c): each
+	// of the twelve records at a place (0x80, place + 1) whose place changed
+	// kind, or whose room is past the kind's room count (cs:1d35 / cs:2078),
+	// is put in room 1 of the place as it is now.
+	static const byte kRooms[0x31] = {
+		2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 5, 2, 2, 2, 2, 2, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4,
+		0x0c, 1, 1, 1, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3, 2 };
+	for (uint c = 0; c < 12; ++c) {
+		byte *r = _state.vars + kCharacterTable + c * kCharacterSize;
+		if (r[2] != 0x80 || r[3] == 0xff || !r[3] || r[3] > locationCount())
+			continue;
+		const byte type = location((uint)r[3] - 1).type;
+		if (r[1] == type && (type > 0x30 || r[0] <= kRooms[type]))
+			continue;
+		_log.line(Common::String::format("Characters: character %u to room 1 of place %u (was room %u of kind %#x)", c, r[3] - 1, r[0], r[1]));
+		r[1] = type;
+		r[0] = 1;
+	}
 }
 
 Troop World::troop(uint id) const {
@@ -1134,6 +1291,7 @@ void World::harvesterEvents(uint id, uint index) {
 void World::mineSpice(uint id, uint index) {
 	// callback_troop_location_for_troop_occupation_spice_mining, CD
 	// seg000:6fe5 (floppy 7d4e).
+	troopNewDay(id, index); // 6fe5 call 6e20
 	if (READ_LE_UINT16(&troopByte(id, 0x10)) & 0x200) {
 		// 705c: a damaged harvester mines nothing until the troop's daily
 		// slot comes round; then it is repaired (7068) and mines at once,
@@ -1222,8 +1380,10 @@ void World::runPeriod() {
 	const bool troopEvents = _state.b(kShipmentPaused) < 7;
 	// The new-day hook's illness picker (1c5f -> 1e43) runs before the
 	// stage-7 gate; Chani's cure (1d9f) after it, before the troops.
-	if (timeSlot() == 0)
+	if (timeSlot() == 0) {
+		dailyRoomFixup(); // 1c5c -> 1d66
 		illnessNewDay();
+	}
 	if (troopEvents)
 		chaniCurePeriod();
 	for (uint id = 1; troopEvents && id < kTroops; ++id) {
@@ -1232,30 +1392,36 @@ void World::runPeriod() {
 			continue;
 		// seg000:6c92-6ceb: a marching troop always travels; one sulking or
 		// refusing (speech 0x430) sits out, unless ds:fa clears its 0x30.
-		if (t.occupation & 0x40) {
-			if (!(t.occupation & 0xa0) || (READ_LE_UINT16(&troopByte(id, 0x12)) & 0x430))
+		// The floppy (79fa-7a62) has no march test in the 0x430 branch: a
+		// sulking troop on the march stops where it is until ds:fa.
+		const bool sulking = READ_LE_UINT16(&troopByte(id, 0x12)) & 0x430;
+		if ((t.occupation & 0x40) && !(floppy() && sulking)) {
+			if (!(t.occupation & 0xa0) || sulking)
 				troopTravelStep(id); // seg000:6ced -> 8308
 			continue;
 		}
-		if (READ_LE_UINT16(&troopByte(id, 0x12)) & 0x430) {
+		if (sulking) {
 			if (!_state.b(0xfa))
 				continue;
 			troopByte(id, 0x12) &= 0xcf;
 			if (READ_LE_UINT16(&troopByte(id, 0x12)) & 0x400)
 				continue;
+			if (t.occupation & 0x40) {
+				if (!(t.occupation & 0xa0))
+					troopTravelStep(id); // floppy 7a53 -> 7a00: the walk again
+				continue;
+			}
 		}
+		// 6c99: a troop under 20 (x 10 men) may merge into another (6d19).
+		if (t.population < 0x14 * 10 && mergeSmallTroop(id))
+			continue;
 		if (t.occupation & 0xa0)
 			continue;
 		const int index = (int)(t.location - Location::kTableOffset) / Location::kRecordSize;
 		if (index < 0 || (uint)index >= locationCount())
 			continue;
-		// The new-day routine (floppy sub_9A58, ds:423A set on the first
-		// period of a day) starts the spice (9C1E), army (9E28) and
-		// irrigation (A2C7) handlers; its fort conversion lives in
-		// militaryTraining, its north/south quarrel here.
-		const byte job = t.occupation & 0x0f;
-		if (timeSlot() == 0 && (job == Troop::kSpiceMining || job == Troop::kMilitaryTraining || job == Troop::kIrrigation))
-			fremenQuarrel(id, (uint)index);
+		// The new-day routine (troopNewDay, CD 6e20) starts the spice,
+		// army and irrigation handlers.
 		switch (t.occupation & 0x0f) {
 		case Troop::kMilitaryTraining:
 			if (!t.harkonnen())
@@ -1284,7 +1450,10 @@ void World::runPeriod() {
 		default:
 			break;
 		}
+		skillDecay(id); // 6cc0: after every job handler
 	}
+	if (troopEvents && timeSlot() == 4)
+		harkonnenRaid(); // actions_time_in_day_4 (CD 1f64, floppy 227c)
 	if (troopEvents && timeSlot() == 3) {
 		// actions_time_in_day_3 (seg000:20a4): the Emperor's shipments.
 		uint16 sighting = 0;

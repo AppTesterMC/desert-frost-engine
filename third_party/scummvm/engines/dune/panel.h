@@ -215,7 +215,8 @@ private:
 	Common::Array<byte> _icons;      ///< ICONES.HSQ
 	Common::Array<byte> _characters; ///< PERS.HSQ: characters and the interface palette
 	Common::Array<byte> _font;       ///< DNCHAR.BIN (CD) or DUNECHAR.HSQ (floppy)
-	Common::Array<Common::String> _commandStrings; ///< COMMAND1.HSQ, FF-terminated records
+	Common::Array<Common::String> _commandStrings; ///< Selected COMMAND bank, FF-terminated records
+	Common::Array<Common::String> _commandKeys; ///< Default-language lookup keys for stable command ids
 	uint16 _commandRows[kCommandRows];
 	Common::String _rowText[kCommandRows];
 	bool _rowDisabled[kCommandRows];

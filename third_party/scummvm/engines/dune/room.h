@@ -53,8 +53,21 @@ class Sprite;
  *
  * The layout and the polygon rasteriser follow madmoose's dune-rust, which was
  * derived from the original's sub_13B59. FINDINGS.md has the details,
- * including what is missing (line dithering, the sky).
+ * including what is missing (the sky).
  */
+/**
+ * vga_draw_line (segvga:1a07 / bresenham_line 1adc, the gfx vtable's line;
+ * the same code in both releases): a line from (x0, y0) to (x1, y1) through
+ * a 16-bit pattern that rotates left one bit a step, a pixel drawn where the
+ * rotated-out bit is set, each pixel clipped to @p clip. A horizontal or
+ * vertical line runs from its left or top end and draws both ends; any other
+ * line steps max(|dx|, |dy|) times from the start with the error seeded at
+ * half the major delta, never drawing the start pixel. Room lines use the
+ * pattern 0xffff (CD 13bdb), the map's route 0x5555 (CD 81c5).
+ */
+void drawVgaLine(Graphics::Surface &target, int x0, int y0, int x1, int y1, byte colour, uint16 pattern,
+		const Common::Rect &clip);
+
 class Room {
 public:
 	explicit Room(const Common::Array<byte> &data) : _data(data) {}

@@ -83,6 +83,13 @@ public:
 	/** The 0-based command string, or "" when it does not exist. */
 	Common::String command(uint index) const;
 
+	/**
+	 * sub_1d03c + sub_1e2e3 (floppy likewise): write @p value (at most 999)
+	 * as three right-aligned characters ending where the first run of
+	 * digits in command @p index ends, leading zeros as spaces.
+	 */
+	void patchCommandNumber(uint index, uint value);
+
 private:
 	static const byte *entry(const Common::Array<byte> &file, uint index, uint &length);
 	const byte *raw(uint16 id, bool secondPhraseFile, uint &length) const;

@@ -19,7 +19,7 @@ set -u
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
-local_root="${DUNE_LOCAL_BUILD_ROOT:-/private/tmp/dune-scummvm-native-build}"
+local_root="${DUNE_LOCAL_BUILD_ROOT:-${TMPDIR:-/tmp}/dune-scummvm-native-build}"
 jobs=$(( $(sysctl -n hw.ncpu) - 1 ))
 speedrun=1
 full=1
@@ -78,6 +78,10 @@ echo "=== results ($(( $(date +%s) - start )) s) ==="
 status=0
 while IFS='	' read -r name cmd; do
 	code=$(cat "$out/$name.exit" 2>/dev/null || echo "?")
+	if [ "$code" != 0 ]; then
+		echo "FAIL $name: process exited $code (see $out/$name.log)"
+		status=1
+	fi
 	lines=$(grep -E "^(PASS|FAIL)|VERIFY (PASSED|FAILED)" "$out/$name.log" 2>/dev/null)
 	if [ -z "$lines" ]; then
 		echo "?? $name: no PASS/FAIL line (exit $code, see $out/$name.log)"

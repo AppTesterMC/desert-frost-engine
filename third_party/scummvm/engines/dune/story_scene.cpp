@@ -44,6 +44,7 @@
 #include "dune/scene.h"
 #include "dune/sky.h"
 #include "dune/sprite.h"
+#include "dune/text.h"
 #include "dune/world.h"
 
 namespace Dune {
@@ -290,7 +291,7 @@ bool GameScreen::roomEntryScan(bool always) {
 	// person with no such line may deliver a queued vision message instead.
 	// Capture runs skip it (@p always: a story step that needs it, the
 	// Water of Life's wake-up).
-	if ((fastCapture() && !always) || _sceneActive || !loadDialogue())
+	if ((fastCapture() && !always && !ConfMan.hasKey("dune_room_scans")) || _sceneActive || !loadDialogue())
 		return false;
 	Common::Array<byte> people;
 	_world.peopleInRoom(people);
@@ -321,6 +322,7 @@ bool GameScreen::startCdFlightView() {
 	_flightVideo = new HnmPlayer(_system);
 	_mntClip = 0;
 	_mntNextFrame = 0;
+	_log.line(Common::String::format("Flight view: clip MNT1 at %u ms", _system->getMillis()));
 	return _flightVideo->begin(_mntData[0]);
 }
 
@@ -329,7 +331,10 @@ void GameScreen::drawCdFlightView(byte terrainAhead) {
 		return;
 	const uint32 now = _system->getMillis();
 	if (now >= _mntNextFrame) {
-		_mntNextFrame = now + 83; // the HNM frame time without a soundtrack
+		// A flight frame a game-loop pass (travel_pump 4f24): 16 ticks, as
+		// measured on the original (captures/cd-flight-long: MNT2 191 frames
+		// and MNT3 197 frames in about 15 s each), paced by the clock.
+		_mntNextFrame = (!_mntNextFrame || now - _mntNextFrame > 160) ? now + 80 : _mntNextFrame + 80;
 		if (!_flightVideo->step()) {
 			// The clip is over: the next one by the terrain ahead (seg000:4ec6).
 			const bool rock = terrainAhead >= 8;
@@ -339,6 +344,7 @@ void GameScreen::drawCdFlightView(byte terrainAhead) {
 			else
 				next = (_mntClip == 0 || _mntClip == 3) ? 1 : 2;
 			_mntClip = next;
+			_log.line(Common::String::format("Flight view: clip MNT%d at %u ms, after %u frames", next + 1, _system->getMillis(), _flightVideo->frameNumber()));
 			_flightVideo->begin(_mntData[next]);
 			_flightVideo->step();
 		}
@@ -516,6 +522,7 @@ void GameScreen::presentVision(bool dream) {
 	// 0x81/0x82 (2c20 -> 2e98: "There are saboteurs here in \x81-\x82!") and
 	// leaves the names so. In person the staged place is put back (2b25).
 	const int where = _world.placeIndex(location);
+	_linePlace = where; // ds:47e6: the message's place
 	if (where >= 0) {
 		_world.stageLocationForConditions((uint)where);
 		if (dream) {
@@ -635,6 +642,37 @@ void GameScreen::storySetup(const Common::String &what) {
 	if (!loadDialogue())
 		return;
 	_log.line(Common::String::format("Story setup: %s", what.c_str()));
+	if (what == "arrival-home-rooms") {
+		// Amiga hunk0 3332-33fc, CD 2170-21f9: characters left outside
+		// the palace go to their home rooms when Paul lands elsewhere.
+		// This checks live arrival behavior after data conversion, including
+		// Gurney's room-10 fallback before phase 24, not just table bytes.
+		const byte phases[] = { 0x23, 0x24, 0x2e };
+		_state.setW(GameState::kPersonsWith, 0);
+		for (uint p = 0; p < ARRAYSIZE(phases); ++p) {
+			_state.setB(GameState::kPhase, phases[p]);
+			_world.setPosition(0, 1);
+			for (uint c = 1; c <= 4; c += 3) {
+				byte *r = _state.vars + World::kCharacterTable + c * World::kCharacterSize;
+				r[0x0f] &= ~0x40;
+				_world.settleCharacter(c);
+			}
+			_world.setPosition(12, 1);
+			_world.arrivalShuffle(12);
+			const byte jessica = _state.vars[World::kCharacterTable + World::kCharacterSize];
+			const byte gurney = _state.vars[World::kCharacterTable + 4 * World::kCharacterSize];
+			_log.line(Common::String::format("Arrival home rooms: phase 0x%02x, Gurney room %u, Jessica room %u",
+					phases[p], gurney, jessica));
+		}
+		_world.setPosition(0, 1);
+		_world.settleCharacter(4);
+		byte *gurney = _state.vars + World::kCharacterTable + 4 * World::kCharacterSize;
+		gurney[0x0f] |= 0x40;
+		_world.setPosition(12, 1);
+		_world.arrivalShuffle(12);
+		_log.line(Common::String::format("Arrival home rooms: companion Gurney remains room %u", gurney[0]));
+		return;
+	}
 	if (what == "gathering") {
 		setGamePhase(0x0c);
 		_pendingScene = 0;
@@ -932,6 +970,322 @@ void GameScreen::storySetup(const Common::String &what) {
 		// Back at the village with the bill paid: a new offer.
 		showRoom(1);
 		talk(World::kSmuggler, {});
+		return;
+	}
+	if (what == "raid" || what == "raid-paul") {
+		// The Harkonnen raid (World::harkonnenRaid, CD 1f64 / 2017; the
+		// check is scripts/check_raids.sh): phase 0x3c; a hired troop at a
+		// sietch a fortress can reach; the day's slot 4 with the roll's bit
+		// set; then the battle to its end. With raid-paul Paul stands in
+		// the sietch's room 2 and the night battle starts.
+		_world.firstVision(); // the chiefs' messages need the first vision (29f0)
+		setGamePhase(0x3c);
+		while (_world.visionCount())
+			_world.dequeueVision();
+		uint id, place;
+		if (!_world.prepareSmallRulesTest(id, place)) {
+			_log.line("Story setup: no hired troop at a sietch");
+			return;
+		}
+		// The first exposed sietch north of every other exposed one: move the troop there.
+		int target = -1;
+		for (uint i = 0; i < _world.locationCount(); ++i) {
+			const Location l = _world.location(i);
+			if (!l.isSietch() || l.hidden() || (target >= 0 && _world.location((uint)target).latitude <= l.latitude))
+				continue;
+			if (_world.raidSource(i) >= 0)
+				target = (int)i;
+		}
+		if (target < 0) {
+			_log.line("Story setup: no sietch in reach of a fortress");
+			return;
+		}
+		_world.placeTroopForTest(id, (uint)target, Troop::kSpiceMining, 0);
+		_world.troopByteForTest(id, 0x14) = (byte)(_state.w(GameState::kGameTime) >> 4); // no decay in the test
+		_log.line(Common::String::format("Story setup: troop %u at sietch %d, raid source %d", id, target, _world.raidSource((uint)target)));
+		if (what == "raid-paul") {
+			_world.setPosition((uint)target, 2);
+			showRoom(2);
+		} else {
+			_world.setPosition(0, 10);
+			showRoom(10);
+		}
+		// Period by period until the raid (slot 4 of an even day), the roll's
+		// bit set and nothing to skip.
+		const byte raids = _state.b(0xc4);
+		for (uint k = 0; k < 64 && _state.b(0xc4) == raids; ++k) {
+			if (_world.timeSlot() == 3) {
+				_state.setW(0, (uint16)(_state.w(0) | 0x8000));
+				_state.vars[_world.raidSuppressOffset()] = 0;
+			}
+			passTime(1);
+		}
+		_log.line(Common::String::format("Story setup: after slot 4, sietch %d status %#x type %#x, ds:c4 %u, ds:2b %u, room %u, battle %d, ds:fd %#x",
+				target, _world.location((uint)target).status, _world.location((uint)target).type, _state.b(0xc4), _state.b(0x2b), _room, _battle ? 1 : 0,
+				_state.b(0xfd)));
+		if (what == "raid-paul") {
+			dumpScreen(_system, "raid-paul");
+			return;
+		}
+		for (uint k = 0; k < 64 && (_world.location((uint)target).status & 2); ++k)
+			passTime(1);
+		_log.line(Common::String::format("Story setup: after the battle, sietch %d status %#x type %#x", target,
+				_world.location((uint)target).status, _world.location((uint)target).type));
+		return;
+	}
+	if (what == "captain") {
+		// The Harkonnen captain (scripts/check_raids.sh): a defeated
+		// Harkonnen troop at a fortress stands in its room 3 (316e); its
+		// motivation 0x30, so one OVERPOWER THE PRISONER is not enough
+		// (ds:ed 0x30 - 0x29); then at 0x20 it is: his record's flag 0x10,
+		// and his lines about the fort he knows (cond 395, 435-438).
+		setGamePhase(0x50);
+		int fort = -1;
+		uint troopId = 0;
+		for (uint i = 2; i < _world.locationCount() && fort < 0; ++i) {
+			const Location l = _world.location(i);
+			if (l.type < Location::kFortressMin || l.type > Location::kFortressMax)
+				continue;
+			Common::Array<uint> ids;
+			_world.troopsAt(i, ids);
+			for (uint k = 0; k < ids.size() && !troopId; ++k)
+				if (_world.troop(ids[k]).harkonnen())
+					troopId = ids[k];
+			if (troopId)
+				fort = (int)i;
+		}
+		if (fort < 0) {
+			_log.line("Story setup: no Harkonnen troop at a fortress");
+			return;
+		}
+		_world.troopByteForTest(troopId, 0x03) |= 0x20; // defeated
+		for (uint attempt = 0; attempt < 2; ++attempt) {
+			_world.troopByteForTest(troopId, 0x15) = attempt ? 0x20 : 0x30;
+			_world.troopByteForTest(troopId, 0x03) &= ~0x10;
+			_world.setPosition((uint)fort, 3);
+			showRoom(3);
+			_log.line(Common::String::format("Story setup: captain troop %u at fort %d, ds:ed %#x, overpowered %d", troopId, fort,
+					_state.b(0xed), _world.captainOverpowered() ? 1 : 0));
+			startConversation(World::kCaptain);
+			for (uint g = 0; g < 4 && talking(); ++g)
+				advanceConversation();
+			bool clicked = false;
+			for (uint i = 0; i < Panel::kCommandRows && !clicked; ++i) {
+				if (_rowActions[i] != kRowOverpower)
+					continue;
+				Common::Event event;
+				event.type = Common::EVENT_LBUTTONDOWN;
+				event.mouse = Common::Point(160, 163 + 8 * (int)i);
+				handleEvent(event);
+				clicked = true;
+			}
+			_log.line(Common::String::format("Story setup: OVERPOWER clicked %d, ds:ed %#x, overpowered %d, line \"%s\"", clicked ? 1 : 0,
+					_state.b(0xed), _world.captainOverpowered() ? 1 : 0, _talkLastPage.c_str()));
+			if (inConversation())
+				endConversation();
+		}
+		talkThrough(World::kCaptain);
+		return;
+	}
+	if (what == "characters") {
+		// The characters' moves (scripts/check_raids.sh): CD 2170 on a
+		// landing (Gurney left in the desert walks to the nearest place,
+		// Duncan waiting in room 1 of a sietch goes into room 2), 1d66 a new
+		// day (a record past its place's room count goes to room 1).
+		byte *gurney = _state.vars + World::kCharacterTable + 4 * World::kCharacterSize;
+		byte *duncan = _state.vars + World::kCharacterTable + 3 * World::kCharacterSize;
+		byte *jessica = _state.vars + World::kCharacterTable + 1 * World::kCharacterSize;
+		gurney[0x0f] &= 0xbf;
+		duncan[0x0f] &= 0xbf;
+		jessica[0x0f] &= 0xbf;
+		const Location c12 = _world.location(12);
+		// Gurney in the desert, two cells east of place 12 (fine 0, row = its latitude).
+		_world.settleCharacterInDesert(4, (uint16)(c12.longitude + 0x200), c12.latitude, 0);
+		// Duncan in room 1 of place 13; Jessica in room 9 of place 14.
+		duncan[0] = 1; duncan[1] = _world.location(13).type; duncan[2] = 0x80; duncan[3] = 14;
+		jessica[0] = 9; jessica[1] = _world.location(14).type; jessica[2] = 0x80; jessica[3] = 15;
+		travelTo(12);
+		_log.line(Common::String::format("Story setup: after landing at 12, Gurney %02x %02x %02x %02x flags %#x, Duncan room %u",
+				gurney[0], gurney[1], gurney[2], gurney[3], gurney[0x0f], duncan[0]));
+		passTime((uint)(World::kSlotsPerDay - _world.timeSlot()));
+		_log.line(Common::String::format("Story setup: a new day, Jessica room %u", jessica[0]));
+		return;
+	}
+	if (what == "troop-rules") {
+		// The small-troop merge (6d19) and the skill decay (6d7b): two hired
+		// troops at one sietch, one of 150 men; then 64 periods.
+		setGamePhase(0x3c);
+		uint id, place;
+		if (!_world.prepareSmallRulesTest(id, place)) {
+			_log.line("Story setup: no hired troop at a sietch");
+			return;
+		}
+		uint other = 0;
+		for (uint t = 1; t <= World::kTroops && !other; ++t) {
+			const Troop tr = _world.troop(t);
+			if (t != id && t != World::kProspectorTroop && tr.id && !tr.harkonnen() && !(tr.occupation & 0x40))
+				other = t;
+		}
+		if (other && !_world.troop(other).hired())
+			_world.rallyTroop(other);
+		if (!other) {
+			_log.line("Story setup: no second hired troop");
+			return;
+		}
+		_world.placeTroopForTest(other, place, Troop::kSpiceMining, 0x40);
+		_world.troopByteForTest(id, 0x1a) = 15; // 150 men
+		_world.troopByteForTest(id, 0x19) = 0x80;
+		_world.troopByteForTest(other, 0x1a) = 100;
+		_world.troopByteForTest(id, 0x14) = _world.troopByteForTest(other, 0x14) = (byte)(_state.w(GameState::kGameTime) >> 4);
+		// The skills: a miner shows spice (0x2000), army (0x4000) and ecology (0x8000).
+		WRITE_LE_UINT16(&_world.troopByteForTest(other, 0x12), (uint16)(READ_LE_UINT16(&_world.troopByteForTest(other, 0x12)) | 0xe000));
+		_world.troopByteForTest(other, 0x16) = 20;
+		_world.troopByteForTest(other, 0x17) = 20;
+		_world.troopByteForTest(other, 0x18) = 20;
+		_log.line(Common::String::format("Story setup: troop %u (150 men) and troop %u (1000 men) at place %u", id, other, place));
+		passTime(1);
+		_log.line(Common::String::format("Story setup: after a period, troop %u occupation %#x men %u, troop %u men %u equipment %#x speech %#x",
+				id, _world.troop(id).occupation, _world.troop(id).population, other, _world.troop(other).population,
+				_world.troop(other).equipment, READ_LE_UINT16(&_world.troopByteForTest(other, 0x12))));
+		loadDialogue();
+		openMap(MapScreen::kFlat, false);
+		openTroop(other, true);
+		_log.line(Common::String::format("Story setup: troop %u says \"%s\"", other, _troopLine.c_str()));
+		for (uint g = 0; g < 4 && nextTroopLine(); ++g)
+			_log.line(Common::String::format("Story setup: troop %u says \"%s\"", other, _troopLine.c_str()));
+		leaveMap();
+		const uint16 now = _state.w(GameState::kGameTime);
+		passTime((uint)(0x40 - (now & 0x3f)));
+		_log.line(Common::String::format("Story setup: at a multiple of 64 periods, troop %u skills spice %u army %u ecology %u",
+				other, _world.troopByteForTest(other, 0x16), _world.troopByteForTest(other, 0x17), _world.troopByteForTest(other, 0x18)));
+		return;
+	}
+	if (what == "small-rules") {
+		// Queue item 9 (scripts/check_small_rules.sh): the daily decay and
+		// the sietch's ring (6e20), the map contact's day (7b89), the troop
+		// report's duration phrase (32c7) and the harvester left behind by
+		// SPECIALIZE IN ARMY (6abf).
+		setGamePhase(0x14);
+		_world.setPosition(0, 10);
+		uint id, place;
+		if (!_world.prepareSmallRulesTest(id, place)) {
+			_log.line("Story setup: no hired troop at a sietch");
+			return;
+		}
+		auto report = [&](const char *when) {
+			_log.line(Common::String::format("Story setup: %s, troop %u motivation %u occupation %#x speech %#x ring %u", when, id,
+					_world.troopByteForTest(id, 0x15), _world.troop(id).occupation, READ_LE_UINT16(&_world.troopByteForTest(id, 0x12)),
+					_world.location(place).discoverPhase));
+		};
+		auto nextDay = [&]() { _world.advanceTime(World::kSlotsPerDay - _world.timeSlot()); };
+		_log.line(Common::String::format("Story setup: troop %u at place %u", id, place));
+		report("start");
+		nextDay();
+		report("after a day");
+		_world.troopByteForTest(id, 0x15) = 5;
+		nextDay();
+		report("at 5, after a day");
+		// The map contact, closed (Escape): the day in byte 0x14; the next day no decay.
+		_world.troopByteForTest(id, 0x03) &= 0x0f;
+		_world.troopByteForTest(id, 0x15) = 50;
+		WRITE_LE_UINT16(&_world.troopByteForTest(id, 0x12), 0);
+		// The saboteurs' news bit (0x8000) and a merge's (word 0x12 0x200) for the close to clear (7b7c).
+		WRITE_LE_UINT16(&_world.troopByteForTest(id, 0x10), (uint16)(READ_LE_UINT16(&_world.troopByteForTest(id, 0x10)) | 0x8000));
+		WRITE_LE_UINT16(&_world.troopByteForTest(id, 0x12), 0x0200);
+		loadDialogue();
+		openMap(MapScreen::kFlat, false);
+		openTroop(id, true);
+		{
+			Common::Event event;
+			event.type = Common::EVENT_KEYDOWN;
+			event.kbd.keycode = Common::KEYCODE_ESCAPE;
+			handleEvent(event);
+		}
+		_log.line(Common::String::format("Story setup: contact closed, byte 0x14 %u, day %u, word 0x10 %#x, word 0x12 %#x", _world.troopByteForTest(id, 0x14),
+				(uint)(_state.w(GameState::kGameTime) >> 4) & 0xff, READ_LE_UINT16(&_world.troopByteForTest(id, 0x10)),
+				READ_LE_UINT16(&_world.troopByteForTest(id, 0x12))));
+		nextDay();
+		report("contacted, after a day");
+		// The duration phrase: 2, 15, 31 and 0x35 periods since the job began, then stopped.
+		static const uint kAges[4] = { 2, 15, 31, 0x35 };
+		for (uint k = 0; k <= 4; ++k) {
+			WRITE_LE_UINT16(&_world.troopByteForTest(id, 0x0a), (uint16)(_state.w(GameState::kGameTime) - kAges[k < 4 ? k : 0]));
+			if (k == 4)
+				_world.troopByteForTest(id, 0x03) |= Troop::kStopped;
+			stageTroopForConditions(id);
+			const Common::String text = _sentences->text(_state.w(_state.nameTable + 10), false, _state);
+			_log.line(Common::String::format("Story setup: duration %s: \"%s\" (ds:41 %u, ds:42 %u)",
+					k < 4 ? Common::String::format("%u periods", kAges[k]).c_str() : "stopped", text.c_str(), _state.b(0x41), _state.w(0x42)));
+		}
+		_world.troopByteForTest(id, 0x03) &= 0x0f;
+		// SPECIALIZE IN ARMY over the map contact.
+		_world.troopByteForTest(id, 0x19) |= 0x80;
+		_world.troopByteForTest(id, 0x15) = 90;
+		_state.setB(0x0a, (byte)(_state.b(0x0a) | 0x10)); // condition 650: the troops accept to fight
+		openTroop(id, true);
+		auto clickRow = [&](RowAction action, int argument) -> bool {
+			for (uint i = 0; i < Panel::kCommandRows; ++i) {
+				if (_rowActions[i] != action || (argument >= 0 && _rowArguments[i] != argument))
+					continue;
+				Common::Event event;
+				event.type = Common::EVENT_LBUTTONDOWN;
+				event.mouse = Common::Point(160, 163 + 8 * (int)i);
+				handleEvent(event);
+				return true;
+			}
+			_log.line("Story setup: no such row");
+			return false;
+		};
+		clickRow(kRowTroopOccupation, -1);
+		clickRow(kRowSetOccupation, Troop::kMilitaryTraining);
+		_log.line(Common::String::format("Story setup: after SPECIALIZE IN ARMY, troop %u occupation %#x equipment %#x, answer \"%s\"", id,
+				_world.troop(id).occupation, _world.troopByteForTest(id, 0x19), _troopLine.c_str()));
+		_mode = kMap;
+		leaveMap();
+		return;
+	}
+	if (what == "hostile-zone" || what == "hostile-zone-gurney") {
+		// The Harkonnen-zone warning (scripts/check_hostile_zone.sh): from
+		// the palace, a real-time flight to the Harkonnen place whose route
+		// enters Harkonnen land (cell stage 0x30) soonest, the same homing
+		// steps as flyToward; with Gurney aboard (ds:10, COME WITH ME) the
+		// companion's cabin line, else the cockpit's WARNING.
+		if (what == "hostile-zone-gurney") {
+			_world.addCompanion(4);
+			_world.setTravelling(4, true);
+		}
+		const Location home = _world.location(_world.currentLocation());
+		int best = -1;
+		uint bestStep = 0xffff;
+		for (uint i = 1; i < _world.locationCount(); ++i) {
+			if (_world.friendlyPlace(i))
+				continue;
+			const Location d = _world.location(i);
+			uint16 lng = home.longitude;
+			int16 lat = home.latitude;
+			byte fraction = 0x80, heading = 0;
+			for (uint step = 1; step < 200; ++step) {
+				byte aim;
+				if (World::compassAngle(lng, lat, d.longitude, d.latitude, aim))
+					heading = aim;
+				_world.travelStep(lng, lat, fraction, heading);
+				if (_world.mapCell(lng, lat) == _world.mapCell(d.longitude, d.latitude))
+					break;
+				if (_world.cellStage(lng, lat) == 0x30) {
+					if (step >= 2 && step < bestStep) {
+						bestStep = step;
+						best = (int)i;
+					}
+					break;
+				}
+			}
+		}
+		if (best < 0) {
+			_log.line("Story setup: no route into Harkonnen land");
+			return;
+		}
+		_log.line(Common::String::format("Story setup: flight to place %d, Harkonnen land from step %u", best, bestStep));
+		travelTo((uint)best);
 		return;
 	}
 	if (what == "search-equipment") {
@@ -1975,8 +2329,13 @@ void GameScreen::prepareEcologyTest(bool showMap) {
 	_world.setTroopOccupation(id, Troop::kIrrigation);
 	_log.line(Common::String::format("Ecology test: troop %u irrigates place %u (equipment %#x)", id, place,
 			_world.troop(id).equipment));
-	for (uint day = 0; day < 120; ++day)
+	for (uint day = 0; day < 120; ++day) {
+		// A player keeps in touch: a map contact a week (7b89), or the
+		// daily decay (6e4e) makes the troop sulk and stop.
+		if (day % 7 == 0)
+			_world.troopContacted(id);
 		_world.advanceTime(World::kSlotsPerDay);
+	}
 	_world.computeAreas();
 	uint sprouting = 0, atreides = 0;
 	for (uint i = 0; i < _world.map().size(); ++i) {

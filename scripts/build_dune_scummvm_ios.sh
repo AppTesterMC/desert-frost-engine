@@ -5,7 +5,7 @@ set -eu
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 repo_source_root="$repo_root/third_party/scummvm"
-local_root="${DUNE_LOCAL_BUILD_ROOT:-/private/tmp/dune-scummvm-ios-build}"
+local_root="${DUNE_LOCAL_BUILD_ROOT:-${TMPDIR:-/tmp}/dune-scummvm-ios-build}"
 . "$script_dir/scummvm_source.sh"
 source_root="$local_root/scummvm"
 ios_lib_root="$repo_root/third_party/scummvm-ios-libs"

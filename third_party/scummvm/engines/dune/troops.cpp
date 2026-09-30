@@ -134,6 +134,12 @@ uint World::linkTroop(uint id, uint index) {
 	// the troop joins the end of the chain.
 	Common::Array<uint> ids;
 	troopsAt(index, ids);
+	for (uint i = 0; i < ids.size(); ++i)
+		if (ids[i] == id) {
+			// Already in this chain: linking it again would loop the chain.
+			_log.line(Common::String::format("Troops: troop %u is already at place %u", id, index));
+			return troopByte(id, kTroopSlot);
+		}
 	const bool harkonnen = (troopByte(id, kTroopBits) & kHarkonnenBit) != 0;
 	uint slot = harkonnen ? 9 : 1;
 	for (bool clash = true; clash && slot < 31;) {
@@ -226,6 +232,36 @@ bool World::prepareQuarrelTest(uint &north, uint &south, uint &place) {
 		applyJob(pair[k], Troop::kSpiceMining);
 		troopByte(pair[k], kTroopMotivation) = 30;
 	}
+	return true;
+}
+
+bool World::prepareSmallRulesTest(uint &id, uint &place) {
+	id = 0;
+	for (uint t = 1; t <= kTroops && !id; ++t) {
+		const Troop tr = troop(t);
+		const int at = troopPlace(t);
+		if (tr.id && !tr.harkonnen() && t != kProspectorTroop && at >= 0 && (uint)at != currentLocation() &&
+				location((uint)at).isSietch())
+			id = t;
+	}
+	if (!id)
+		return false;
+	place = (uint)troopPlace(id);
+	// Alone at its sietch, so the ring grows by one a day.
+	Common::Array<uint> ids;
+	troopsAt(place, ids);
+	for (uint k = 0; k < ids.size(); ++k)
+		if (ids[k] != id && !troop(ids[k]).harkonnen()) {
+			unlinkTroop(ids[k]);
+			WRITE_LE_UINT16(&troopByte(ids[k], kTroopLocation), placeOffset(0));
+			linkTroop(ids[k], 0);
+		}
+	troopByte(id, kTroopOccupation) &= 0x0f; // hired
+	placeTroopForTest(id, place, Troop::kSpiceMining, 0x80);
+	troopByte(id, kTroopMotivation) = 50;
+	troopByte(id, 0x14) = (byte)((_state.w(GameState::kGameTime) >> 4) - 10);
+	locationByte(place, 10) &= ~0x01;
+	locationByte(place, 11) = 2;
 	return true;
 }
 
@@ -327,6 +363,266 @@ void World::finalBattleForTest(uint count, Common::Array<uint> &ids) {
 		ids.push_back(id);
 	}
 	locationByte(1, 10) |= 0x02; // the palace is in battle
+}
+
+void World::lowerMotivation(uint id, byte amount) {
+	// seg000:6f93 (floppy 7cfb): motivation - amount, not below 0; below 5
+	// it is 4, the troop stops (7085: occupation bit 4) and sulks (speech
+	// word | 0x20, the refusal the dispatcher skips, 6c92).
+	if (id < 1 || id > kTroops)
+		return;
+	byte &m = troopByte(id, kTroopMotivation);
+	m = (byte)(m >= amount ? m - amount : 0);
+	if (m < 5) {
+		m = 4;
+		troopByte(id, kTroopOccupation) |= Troop::kStopped;
+		WRITE_LE_UINT16(&troopByte(id, kTroopSpeech), READ_LE_UINT16(&troopByte(id, kTroopSpeech)) | 0x20);
+		_log.line(Common::String::format("Troops: troop %u sulks (motivation 4)", id));
+	}
+}
+
+void World::troopContacted(uint id) {
+	// map_close_troop_contact_popup (CD 7b86-7b89, floppy 88a4-88a7): the
+	// day of the last contact, which the daily decay counts from (6e4e).
+	// The ds:4c test before it (7b72) always reads 0: 7b65 has just
+	// cleared it.
+	if (id < 1 || id > kTroops)
+		return;
+	// 7b7c-7b81 (floppy 889a-889f): the contact's news are told: word 0x10
+	// keeps only 0x3f0 (the saboteurs' 0x8000 and the other event bits go,
+	// the damaged harvester's 0x200 stays), word 0x12 loses 0x1a00 (merged
+	// 0x200, cured 0x800, 0x1000). Checked on Spice86 (floppy, the
+	// saboteurs' patched save): troop 1's word 0x10 0x8300 -> 0x0300, byte
+	// 0x14 1 -> 5 (the day).
+	WRITE_LE_UINT16(&troopByte(id, kTroopBits), READ_LE_UINT16(&troopByte(id, kTroopBits)) & 0x3f0);
+	WRITE_LE_UINT16(&troopByte(id, kTroopSpeech), READ_LE_UINT16(&troopByte(id, kTroopSpeech)) & 0xe5ff);
+	troopByte(id, 0x14) = (byte)(_state.w(GameState::kGameTime) >> 4);
+}
+
+void World::dropHarvester(uint id) {
+	if (id < 1 || id > kTroops || !(troopByte(id, 0x19) & 0x80))
+		return;
+	troopByte(id, 0x19) &= 0x7f;
+	_log.line(Common::String::format("Troops: troop %u leaves its harvester", id));
+}
+
+bool World::mergeSmallTroop(uint id) {
+	// seg000:6d19, from the troop walk (6c99) for a troop under 0x14 (x 10
+	// men): not with occupation bits 0xe3 (moving, unhired, Harkonnen, jobs
+	// with bits 0-1: prospecting, espionage ...), not with bitfield bit 7,
+	// not the prospectors (0x8e0). The walk over the place's Fremen troops
+	// (661d via 6906: occupation below 0x80; 6d5f skips 0xa0 and the
+	// prospectors) picks the one with the fewest men that still fits in a
+	// byte, the last of equals. It gets the men, the equipment of both
+	// (the small troop keeps the common part), speech word 0x200 ("A small
+	// troop has merged with us.", condition 528), and the small troop leaves
+	// the game (66b1).
+	const byte occ = troopByte(id, kTroopOccupation);
+	if ((occ & 0xe3) || (troopByte(id, kTroopBits) & 0x80) || id == kProspectorTroop)
+		return false;
+	const int place = troopPlace(id);
+	if (place < 0)
+		return false;
+	const byte pop = troopByte(id, kTroopPopulation);
+	byte limit = (byte)~pop;
+	uint into = 0;
+	Common::Array<uint> ids;
+	troopsAt((uint)place, ids);
+	for (uint k = 0; k < ids.size(); ++k) {
+		const uint o = ids[k];
+		const byte oc = troopByte(o, kTroopOccupation);
+		if (oc >= 0x80 || (oc & 0xa0) || o == kProspectorTroop || o == id)
+			continue;
+		const byte op = troopByte(o, kTroopPopulation);
+		if (limit < op)
+			continue;
+		into = o;
+		limit = op;
+	}
+	if (!into)
+		return false;
+	troopByte(into, kTroopPopulation) = (byte)(troopByte(into, kTroopPopulation) + pop);
+	const byte eq = troopByte(id, kTroopEquipment);
+	troopByte(id, kTroopEquipment) = (byte)(eq & troopByte(into, kTroopEquipment));
+	troopByte(into, kTroopEquipment) |= eq;
+	WRITE_LE_UINT16(&troopByte(into, kTroopSpeech), READ_LE_UINT16(&troopByte(into, kTroopSpeech)) | 0x200);
+	_log.line(Common::String::format("Troops: troop %u (%u men) merges into troop %u at place %d", id, pop * 10, into, place));
+	const byte keep = troopByte(id, kTroopEquipment);
+	removeFromPlay(id);
+	troopByte(id, kTroopEquipment) = keep; // 66b1 leaves the record's equipment byte
+	return true;
+}
+
+void World::skillDecay(uint id) {
+	// seg000:6d7b, after every job handler (6cc0): when the clock word is a
+	// multiple of 64, ax = 0xc000 rotated left by the job's class (occupation
+	// >> 2), masked with the speech word; bit 15 takes 1 from the ecology
+	// skill (0x18), bit 14 from the army skill (0x17), bit 13 from the spice
+	// skill (0x16), none below 0. So a spice troop can lose army and ecology,
+	// an army troop only ecology, an ecology troop nothing.
+	if (_state.w(GameState::kGameTime) & 0x3f)
+		return;
+	const uint cls = (troopByte(id, kTroopOccupation) & 0x0f) >> 2;
+	const uint16 mask = (uint16)(((0xc000u << cls) | (0xc000u >> (16 - cls))) & 0xffff) & READ_LE_UINT16(&troopByte(id, kTroopSpeech));
+	static const uint kSkill[3] = { 0x18, 0x17, 0x16 };
+	for (uint k = 0; k < 3; ++k)
+		if ((mask & (0x8000 >> k)) && troopByte(id, kSkill[k]))
+			--troopByte(id, kSkill[k]);
+}
+
+int World::raidSource(uint index, bool stage) {
+	// harkonnen_pick_attack_target's source (CD 2047-2070, floppy 235f-2388):
+	// the nearest hidden fortress when it is within 30 (ds:e2/e4), else the
+	// nearest known one within 30 (ds:dc/de); not the Harkonnen palace;
+	// holding Harkonnen troops and no attacking Fremen. -1 when none.
+	if (stage)
+		stageLocationForConditions(index);
+	uint16 from;
+	if (_state.w(0xe2) < 0x1e)
+		from = _state.w(0xe4);
+	else if (_state.w(0xdc) < 0x1e)
+		from = _state.w(0xde);
+	else
+		return -1;
+	const int src = placeIndex(from);
+	if (src < 0 || src == 1)
+		return -1;
+	uint h, attacking;
+	countHostiles((uint)src, h, attacking);
+	return h && !attacking ? src : -1;
+}
+
+bool World::pickRaidTarget(uint &target, uint &source) {
+	// harkonnen_pick_attack_target (CD 2017, floppy 232f; the same code):
+	// among the sietches (type below 0x20) neither hidden nor in battle
+	// (status 0x82), without an ill troop (1e24: speech 0x400), north of the
+	// best so far (latitude below it, from 100): the place's figures are
+	// staged (331e); it needs Fremen troops other than prospectors (ds:60 -
+	// ds:63), a fortress within 30 (the nearest hidden one, ds:e2/e4, else
+	// the nearest known one, ds:dc/de), not the Harkonnen palace, holding
+	// Harkonnen troops and no attacking Fremen (5098). The northernmost
+	// wins, the first of equals.
+	int16 best = 100;
+	bool found = false;
+	for (uint i = 0; i < locationCount(); ++i) {
+		const Location l = location(i);
+		if (l.type >= 0x20 || (l.status & 0x82) || !(l.latitude < best))
+			continue;
+		if (illTroopAt(i)) // CD 2034 -> 1e24 (floppy 234c -> 2169: its first troop only)
+			continue;
+		stageLocationForConditions(i);
+		if (_state.b(0x60) == _state.b(0x63))
+			continue;
+		const int src = raidSource(i, false);
+		if (src < 0)
+			continue;
+		best = l.latitude;
+		target = i;
+		source = (uint)src;
+		found = true;
+	}
+	return found;
+}
+
+void World::harkonnenRaid() {
+	// actions_time_in_day_4 (CD 1f64, floppy 227c): from phase 0x3c, or 7
+	// days (0x70 periods) after Stilgar's stamp (ds:1154, phase 0x2c), on an
+	// even day, unless the byte an attack period sets says to skip once, and
+	// on the rolled-out bit 15 of ds:0 (rol: one time in two).
+	if (ConfMan.hasKey("dune_no_raids"))
+		return; // test setups about something else (the epidemic check)
+	if (_state.b(GameState::kPhase) < 0x3c) {
+		const uint16 stamp = READ_LE_UINT16(&var(0x1154));
+		const uint16 now = _state.w(GameState::kGameTime);
+		if (now < stamp || (uint16)(now - stamp) < 0x70)
+			return;
+	}
+	if (_state.w(GameState::kGameTime) & 0x10)
+		return;
+	const byte skip = _state.vars[raidSuppressOffset()];
+	_state.vars[raidSuppressOffset()] = 0;
+	if (skip)
+		return;
+	const uint16 r = _state.w(0);
+	_state.setW(0, (uint16)((r << 1) | (r >> 15)));
+	if (!(r & 0x8000))
+		return;
+	uint target, source;
+	if (!pickRaidTarget(target, source))
+		return;
+	_state.setB(0xc4, (byte)(_state.b(0xc4) + 1)); // sietches attacked
+	// 1f9b-1fc9: twice, the first Harkonnen troop (bitfield 0x80) of the
+	// fort's chain gets occupation 0x8d, marches to the sietch, is no longer
+	// hidden and arrives at once.
+	for (uint n = 0; n < 2; ++n) {
+		Common::Array<uint> ids;
+		troopsAt(source, ids);
+		uint raider = 0;
+		for (uint k = 0; k < ids.size() && !raider; ++k)
+			if (troopByte(ids[k], kTroopBits) & kHarkonnenBit)
+				raider = ids[k];
+		if (!raider)
+			break;
+		troopByte(raider, kTroopOccupation) = 0x8d;
+		issueMoveOrder(raider, target);
+		troopByte(raider, kTroopBits) &= ~kHiddenBit;
+		// 8357 lands it at once; the engine's march may already have (its
+		// first sub-steps), and a second link would loop the chain.
+		if (troopByte(raider, kTroopOccupation) & kMoving)
+			troopArrive(raider);
+		_log.line(Common::String::format("Raid: Harkonnen troop %u from place %u attacks sietch %u", raider, source, target));
+	}
+	locationByte(target, 10) |= 0x02; // in battle
+	startAttack(target);              // 83fd: the troops there defend it
+	// 140ae: the characters staying there (record word 2 = 0x80, place + 1)
+	// go to its room 1.
+	const uint16 here = (uint16)(((target + 1) << 8) | 0x80);
+	const uint16 room1 = (uint16)((location(target).type << 8) | 1);
+	for (uint c = 0; c < 9; ++c) {
+		byte *rec = _state.vars + kCharacterTable + c * kCharacterSize;
+		if (READ_LE_UINT16(rec + 2) == here)
+			WRITE_LE_UINT16(rec, room1);
+	}
+	// "The Harkonnens are attacking ...!" (0x0c), or the prospectors'
+	// warning when they are there (0x0d), from a troop chief (71b2).
+	const bool prospectors = troopPlace(kProspectorTroop) == (int)target;
+	queueVision(prospectors ? 0x0f0d : 0x0f0c, placeOffset(target));
+	_log.line(Common::String::format("Raid: the Harkonnens attack sietch %u (from place %u)", target, source));
+	if (_state.w(6) == here) {
+		// 2000-2010: Paul is there: room 1, and the night battle (ds:2b).
+		_state.setW(GameState::kLocationAndRoom, room1);
+		_state.setB(0x0b, 1);
+		_state.setB(0x2b, 1);
+		seedBattleGauge(target); // 2010 -> 6144
+		_log.line("Raid: Paul is in the attacked sietch");
+	}
+}
+
+void World::troopNewDay(uint id, uint index) {
+	// troop_location_do_stuff_upon_new_day (CD 6e20, floppy 7b88; the same
+	// code), called first by the spice (6fe5 / 7d4e), army (71ef / 7f58)
+	// and irrigation (76cb / 842f) handlers; it acts on the first period of
+	// a day (ds:46de / ds:423a).
+	if (timeSlot() != 0 || index >= locationCount())
+		return;
+	if (!fortressConversion(index))
+		return;
+	byte *l = &locationByte(index, 0);
+	// 6cfc (floppy 7a64): the ring round a sietch (type below 0x20) grows
+	// by one a day for each working troop there, up to 12, unless it is
+	// irrigated (status bit 0: byte 0x0b is the vegetation's disc then);
+	// the disc becomes Atreides land (644e, stage 0x20; vegetation cells
+	// keep theirs). The first troop rallied there set it to 2 (6704).
+	if (l[8] < 0x20 && l[11] < 12 && !(l[10] & 0x01)) {
+		++l[11];
+		paintArea(index, 0x20, l[11]);
+	}
+	// 6e4e (floppy 7bb6): more than 8 days since the troop's byte 0x14 (the
+	// day it rallied, 6701, or its last map contact, 7b89): motivation - 1.
+	const byte day = (byte)(_state.w(GameState::kGameTime) >> 4);
+	if ((byte)(day - troopByte(id, 0x14)) > 8)
+		lowerMotivation(id, 1);
+	fremenQuarrel(id, index);
 }
 
 void World::fremenQuarrel(uint id, uint index) {
@@ -445,16 +741,8 @@ bool World::issueMoveOrder(uint id, uint dest) {
 		WRITE_LE_UINT16(&troopByte(id, kTroopLongitude), f.longitude);
 		WRITE_LE_UINT16(&troopByte(id, kTroopLatitude), (uint16)f.latitude);
 	}
-	if (attacking && d.type < Location::kFortressMin) {
-		// seg000:6f93: motivation - 3; below 5 the troop sulks.
-		byte &m = troopByte(id, kTroopMotivation);
-		m = (byte)(m >= 3 ? m - 3 : 0);
-		if (m < 5) {
-			m = 4;
-			occ |= Troop::kStopped;
-			WRITE_LE_UINT16(&troopByte(id, kTroopSpeech), READ_LE_UINT16(&troopByte(id, kTroopSpeech)) | 0x20);
-		}
-	}
+	if (attacking && d.type < Location::kFortressMin)
+		lowerMotivation(id, 3); // seg000:84fe -> 6f93
 	WRITE_LE_UINT16(&troopByte(id, kTroopLocation), placeOffset(dest));
 	occ |= kMoving;
 	troopByte(id, kTroopSlot) = 0;
@@ -686,6 +974,12 @@ void World::troopArrive(uint id) {
 	linkTroop(id, index);
 	registerEquipment(id, index, +1);
 	const byte job = occ & 0x0f;
+	if ((occ & 0x80) && friendlyPlace(index) && !(d.status & 0x02)) {
+		// 83c9-83ce: an occupation with bit 7 (a raiding Harkonnen troop,
+		// 0x8d) keeps it.
+		_log.line(Common::String::format("Troops: Harkonnen troop %u arrives at place %u", id, index));
+		return;
+	}
 	if (friendlyPlace(index) && !(d.status & 0x02)) {
 		applyJob(id, (job == 5 || job == 6) ? 4 : job);
 		_log.line(Common::String::format("Troops: troop %u arrives at place %u", id, index));

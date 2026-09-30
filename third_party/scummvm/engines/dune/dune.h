@@ -44,6 +44,7 @@ public:
 
 	Common::Error run() override;
 	bool hasFeature(EngineFeature feature) const override;
+	void syncSoundSettings() override;
 
 private:
 	const ADGameDescription *_gameDescription;

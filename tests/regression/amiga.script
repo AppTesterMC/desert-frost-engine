@@ -42,7 +42,7 @@ click left 160 179      # row 3: Cancel: back to the globe menu
 wait 1500               # the menu comes back
 move 160 163
 click left 160 163      # row 1: EXIT GLOBE: the flat map
-wait 3000               # the map draws with its DUNE MAP popup
+wait 3000               # the map draws (no popup after EXIT GLOBE, as the DOS releases)
 checkpoint amiga-map-flat
 move 160 163
 click left 160 163      # row 1: EXIT MAPS: back to the throne room

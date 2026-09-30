@@ -43,7 +43,7 @@ while [ $# -gt 0 ]; do
 	shift
 done
 
-local_root="${DUNE_LOCAL_BUILD_ROOT:-/private/tmp/dune-scummvm-native-build}"
+local_root="${DUNE_LOCAL_BUILD_ROOT:-${TMPDIR:-/tmp}/dune-scummvm-native-build}"
 # Build (or bring up to date) the desktop ScummVM with the engine; the dump
 # run it ends with is silent and headless.
 SDL_AUDIODRIVER=dummy DUNE_DATA="$data" "$script_dir/test_dune_scummvm_sdl.sh" dump >/dev/null 2>&1 || {

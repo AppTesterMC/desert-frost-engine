@@ -65,18 +65,27 @@ byte *World::troopRecord(uint id) {
 }
 
 int World::changeCharisma(int delta) {
-	// seg000:6f78 / 6fb0: charisma (0..200); crossing a multiple of 4 moves
-	// every active troop's motivation by the change of charisma / 4.
+	// seg000:6f78 (a gain, up to 200) / 6fb0 (a loss, down to 1, not 0);
+	// crossing a multiple of 4 moves every active troop's motivation by the
+	// change of charisma / 4: a gain up to 100 (6f56), a loss through 6f93,
+	// so a troop that falls below 5 sulks (floppy 7ce0 / 7d18, 7cfb).
 	const int before = _state.b(kCharisma);
-	const int after = CLIP(before + delta, 0, 200);
+	int after = before + delta;
+	if (delta < 0 && after <= 0)
+		after = 1; // 6fb7: ja, else al = 1
+	after = MIN(after, 200);
 	_state.setB(kCharisma, (byte)after);
 	const int spill = after / 4 - before / 4;
 	if (!spill)
 		return 0;
 	for (uint id = 1; id <= kTroops; ++id) {
 		byte *t = troopRecord(id);
-		if (t[0] && !(t[kOcc] & 0xa0))
-			t[kMotivation] = (byte)CLIP((int)t[kMotivation] + spill, 0, 100);
+		if (!t[0] || (t[kOcc] & 0xa0))
+			continue;
+		if (spill > 0)
+			t[kMotivation] = (byte)MIN((int)t[kMotivation] + spill, 100);
+		else
+			lowerMotivation(id, (byte)-spill);
 	}
 	return spill;
 }
@@ -127,6 +136,40 @@ uint World::battleLoss(uint x, uint id) {
 	const uint k = (byte)(255 - 2 * t[kArmy]);
 	const uint v = x * k;
 	return MIN<uint>(t[kPopulation], v >= 65536 ? 255 : v / 256);
+}
+
+byte World::battleGauge(uint index) {
+	// seg000:60f8 (floppy likewise): over the place's chain (6603, every
+	// troop): the Harkonnens' men (H), and for the Fremen fighting there
+	// (occupation 6) their men (F), the Harkonnens they killed (word 0x0c)
+	// and their own losses (word 0x0e). Each side's share still standing is
+	// men x 256 / (men + losses); the gauge is 0x80 + 128 x (Fremen share -
+	// Harkonnen share) / the larger share (0x80 when both are 0).
+	Common::Array<uint> ids;
+	troopsAt(index, ids);
+	uint h = 0, f = 0, killed = 0, lost = 0;
+	for (uint i = 0; i < ids.size(); ++i) {
+		const byte *t = troopRecord(ids[i]);
+		if (harkonnen(t)) {
+			h += t[kPopulation];
+		} else if (t[kOcc] == 6) {
+			f += t[kPopulation];
+			killed += READ_LE_UINT16(t + kDepC);
+			lost += READ_LE_UINT16(t + kDepE);
+		}
+	}
+	const int fremen = (f + lost) ? (int)((f << 8) / (f + lost)) : 0;
+	const int harkonnenShare = (h + killed) ? (int)((h << 8) / (h + killed)) : 0;
+	const int big = MAX(fremen, harkonnenShare);
+	int ratio = big ? ((fremen - harkonnenShare) * 256) / big : 0;
+	return (byte)((ratio >> 1) + 0x80);
+}
+
+void World::seedBattleGauge(uint index) {
+	// seg000:6144: ds:fd = the gauge | 1, for the chiefs' lines (cond
+	// 600-602): when Paul lands in a battle (505c) or is in a raided sietch
+	// (2010).
+	_state.setB(0xfd, (byte)(battleGauge(index) | 1));
 }
 
 bool World::placeInBattle(uint index) const {
@@ -221,7 +264,7 @@ void World::attackTick(uint id, uint index) {
 		palaceFalls();
 		return;
 	}
-	_state.setB(0x11bc, (byte)(_state.b(0x11bc) | 1)); // no Harkonnen raid next time
+	_state.vars[raidSuppressOffset()] |= 1; // 739e (floppy 8102): no Harkonnen raid next time
 	uint h, f;
 	const byte b = battleForces(index, h, f);
 	if (!h) {
@@ -449,54 +492,66 @@ void World::battleLost(uint index) {
 	_log.line(Common::String::format("Battle: place %u is lost", index));
 }
 
-void World::militaryTraining(uint id, uint index) {
-	// seg000:71ef, with the fortress conversion of 6e20 on a new day.
-	byte *t = troopRecord(id);
+bool World::fortressConversion(uint index) {
+	// troop_location_do_stuff_upon_new_day (CD 6e28-6e47, floppy 7b90-7baf):
+	// a fortress held since the fight (status bit 3, byte 0x0b the day it
+	// fell) turns sietch two days later; until then the rest of the new-day
+	// routine is skipped (6e36 jae 6e81: false).
 	byte *l = &locationByte(index, 0);
-	if (timeSlot() == 0 && (l[10] & kStatusHeld)) {
-		const byte delta = (byte)((_state.w(GameState::kGameTime) >> 4) - l[11]);
-		if (delta != 254 && delta != 255) {
-			// floppy sub_9A58 (9A6C-9A7E): the place turns sietch (type & 7).
-			l[10] &= ~kStatusHeld;
-			l[8] &= 7;
-			_state.setB(GameState::kSietchesAvailable, (byte)(_state.b(GameState::kSietchesAvailable) + 1));
-			// sub_99F3: the characters staying here (their record's second
-			// word is 0x80, place + 1, from sub_61D8) take the new type and
-			// room 1 or 2 (a sietch has no more), and so does Paul's position
-			// (ds:4, ds:0b, ds:8) when he is here. Without it a character left
-			// here with STAY HERE no longer matches ds:4 (loc_136EE) and is
-			// absent: the war council never started for Thufir at place 2.
-			const byte key = (byte)(index + 1);
-			for (uint c = 0; c < 12; ++c) {
-				byte *r = _state.vars + kCharacterTable + c * kCharacterSize;
-				if (r[2] == 0x80 && r[3] == key) {
-					r[1] = l[8];
-					if (r[0] != 1)
-						r[0] = 2;
-				}
-			}
-			if (_state.b(6) == 0x80 && _state.b(7) == key) {
-				const byte room = _state.b(GameState::kLocationAndRoom) == 1 ? 1 : 2;
-				_state.setB(GameState::kLocationAndRoom, room);
-				_state.setB(GameState::kLocationAndRoom + 1, l[8]);
-				_state.setB(0x0b, room);
-				_state.setB(8, l[8]);
-			}
-			// The troops' callback (bp 7B77, 9A4C): flag 0x20 goes, the
-			// speech flag 0x1000 comes.
-			Common::Array<uint> ids;
-			troopsAt(index, ids);
-			for (uint i = 0; i < ids.size(); ++i) {
-				byte *o = troopRecord(ids[i]);
-				if (o[kBits] & 0x20) {
-					o[kBits] &= ~0x20;
-					WRITE_LE_UINT16(o + kSpeech, READ_LE_UINT16(o + kSpeech) | 0x1000);
-				}
-			}
-			l[11] = 5; // 9A7E
-			_log.line(Common::String::format("Battle: fortress %u becomes a sietch", index));
+	if (!(l[10] & kStatusHeld))
+		return true;
+	const byte delta = (byte)((_state.w(GameState::kGameTime) >> 4) - l[11]);
+	if (delta == 254 || delta == 255)
+		return false;
+	// floppy sub_9A58 (9A6C-9A7E): the place turns sietch (type & 7).
+	l[10] &= ~kStatusHeld;
+	l[8] &= 7;
+	_state.setB(GameState::kSietchesAvailable, (byte)(_state.b(GameState::kSietchesAvailable) + 1));
+	// sub_99F3: the characters staying here (their record's second
+	// word is 0x80, place + 1, from sub_61D8) take the new type and
+	// room 1 or 2 (a sietch has no more), and so does Paul's position
+	// (ds:4, ds:0b, ds:8) when he is here. Without it a character left
+	// here with STAY HERE no longer matches ds:4 (loc_136EE) and is
+	// absent: the war council never started for Thufir at place 2.
+	const byte key = (byte)(index + 1);
+	for (uint c = 0; c < 12; ++c) {
+		byte *r = _state.vars + kCharacterTable + c * kCharacterSize;
+		if (r[2] == 0x80 && r[3] == key) {
+			r[1] = l[8];
+			if (r[0] != 1)
+				r[0] = 2;
 		}
 	}
+	if (_state.b(6) == 0x80 && _state.b(7) == key) {
+		const byte room = _state.b(GameState::kLocationAndRoom) == 1 ? 1 : 2;
+		_state.setB(GameState::kLocationAndRoom, room);
+		_state.setB(GameState::kLocationAndRoom + 1, l[8]);
+		_state.setB(0x0b, room);
+		_state.setB(8, l[8]);
+	}
+	// The troops' callback (bp 7B77, 9A4C): flag 0x20 goes, the
+	// speech flag 0x1000 comes.
+	Common::Array<uint> ids;
+	troopsAt(index, ids);
+	for (uint i = 0; i < ids.size(); ++i) {
+		byte *o = troopRecord(ids[i]);
+		if (o[kBits] & 0x20) {
+			o[kBits] &= ~0x20;
+			WRITE_LE_UINT16(o + kSpeech, READ_LE_UINT16(o + kSpeech) | 0x1000);
+		}
+	}
+	l[11] = 5; // 9A7E
+	_log.line(Common::String::format("Battle: fortress %u becomes a sietch", index));
+	return true;
+}
+
+void World::militaryTraining(uint id, uint index) {
+	// seg000:71ef (floppy 7f58): the new-day routine first (6e20: the
+	// fortress conversion, the sietch's ring, the motivation decay, the
+	// north/south quarrel).
+	byte *t = troopRecord(id);
+	byte *l = &locationByte(index, 0);
+	troopNewDay(id, index);
 	// CD 71f2 clears bitfield_10 bit 9 (a damaged harvester); the floppy's
 	// 7f58 does not.
 	if (!floppy())

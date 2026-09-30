@@ -84,8 +84,8 @@ new one so a regression can be compared.
 - Device-only things this cannot check: touch behaviour, the mouse pointer,
   real loudness, and performance. Say so plainly rather than implying the build
   was verified on the phone.
-- Game data is copied to `/private/tmp/dune-data` (CD) and
-  `/private/tmp/dune-data/floppy` on first run; the repository volume is slow.
+- Game data is copied to `$TMPDIR/dune-data` (CD) and
+  `$TMPDIR/dune-data/floppy` on first run; the repository volume is slow.
 - Developer config keys used by the check (`dune_dump`, `dune_intro_start`,
   `dune_speech_probe`, `dune_no_music`) are documented in
   `third_party/scummvm/engines/dune/debug.h`.

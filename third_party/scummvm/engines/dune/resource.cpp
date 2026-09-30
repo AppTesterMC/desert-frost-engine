@@ -71,7 +71,57 @@ private:
 
 } // namespace
 
+bool Resource::setLanguage(uint language) {
+	if (_amiga || _segaCd)
+		return language == 1;
+	if (language < 1 || language > 7)
+		return false;
+	auto validBank = [](const Common::Array<byte> &bank) {
+		if (bank.size() < 2)
+			return false;
+		const uint header = READ_LE_UINT16(bank.data());
+		if (header < 2 || (header & 1) || header > bank.size())
+			return false;
+		for (uint offset = 0; offset < header; offset += 2) {
+			const uint entry = READ_LE_UINT16(bank.data() + offset);
+			if (entry < header || entry >= bank.size())
+				return false;
+		}
+		return true;
+	};
+	Common::Array<byte> data;
+	bool ok = loadUntranslated(Common::String::format("COMMAND%u.HSQ", language), data) && validBank(data);
+	ok = loadUntranslated(Common::String::format("PHRASE%u1.HSQ", language), data) && validBank(data) && ok;
+	ok = loadUntranslated(Common::String::format("PHRASE%u2.HSQ", language), data) && validBank(data) && ok;
+	if (language != 1)
+		ok = loadUntranslated("COMMAND1.HSQ", data) && validBank(data) && ok;
+	if (language == 7)
+		ok = loadUntranslated("DNCHAR2.BIN", data) && data.size() >= 2304 && ok;
+	if (ok)
+		_language = language;
+	return ok;
+}
+
 bool Resource::load(const Common::String &requestedName, Common::Array<byte> &data) const {
+	Common::String name = requestedName;
+	name.toUppercase();
+	// CD E610/CFE4/D00F: the language indexes COMMAND, both PHRASE files
+	// and the Irulan captions together. DUT selects the alternate font,
+	// not Dutch text. Keeping the names logical also covers the panel,
+	// book and floppy prologue, which all request the default text bank.
+	if (_language != 1) {
+		if (name == "COMMAND1.HSQ" || name == "PHRASE11.HSQ" || name == "PHRASE12.HSQ")
+			name.setChar('0' + _language, name.hasPrefix("COMMAND") ? 7 : 6);
+		else if (name == "IRUL1.HSQ")
+			name.setChar('0' + _language, 4);
+		else if (_language == 7 && name == "DNCHAR.BIN")
+			name = "DNCHAR2.BIN";
+	}
+
+	return loadUntranslated(name, data);
+}
+
+bool Resource::loadUntranslated(const Common::String &requestedName, Common::Array<byte> &data) const {
 	if (_amiga)
 		return loadAmiga(requestedName, data);
 	Common::String name = requestedName;

@@ -15,15 +15,15 @@ set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
-local_root="${DUNE_LOCAL_BUILD_ROOT:-/private/tmp/dune-scummvm-native-build}"
+local_root="${DUNE_LOCAL_BUILD_ROOT:-${TMPDIR:-/tmp}/dune-scummvm-native-build}"
 build_root="$local_root/build-sdl-dune"
 run_root="$local_root/sdl-run"
 evidence_root="$repo_root/notes/temp/dune_scummvm_engine_20260916"
 out="$evidence_root/results/preflight"
 dump_root="$evidence_root/results/sdl-dump"
 
-cd_data="${DUNE_DATA_CD:-/private/tmp/dune-data}"
-floppy_data="${DUNE_DATA_FLOPPY:-/private/tmp/dune-data/floppy}"
+cd_data="${DUNE_DATA_CD:-${TMPDIR:-/tmp}/dune-data}"
+floppy_data="${DUNE_DATA_FLOPPY:-${TMPDIR:-/tmp}/dune-data/floppy}"
 
 rm -rf "$out"
 mkdir -p "$out" "$run_root/saves"

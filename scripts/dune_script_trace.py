@@ -25,7 +25,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LOCAL = Path(os.environ.get("DUNE_LOCAL_BUILD_ROOT", "/private/tmp/dune-scummvm-native-build"))
+LOCAL = Path(os.environ.get("DUNE_LOCAL_BUILD_ROOT", str(Path(os.environ.get("TMPDIR", "/tmp")) / "dune-scummvm-native-build")))
 
 
 def main() -> int:

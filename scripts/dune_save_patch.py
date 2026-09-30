@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """Read or patch the data segment of an original Dune save (DUNE21Sn.SAV floppy,
-DUNE37Sn.SAV CD), for late-game test states the original can't reach quickly.
+DUNE37Sn.SAV CD, DUNEAMSn.SAV engine Amiga), for late-game test states the original can't reach quickly.
 
 The format is the engine's saves.cpp: word game time, word RLE marker (0xf7),
 word length - 2, then an RLE body (marker, count, value) whose LAST 4718
-(floppy) or 4705 (CD) bytes are the data segment from ds:0000. Patched saves
+(floppy) or 4705 (CD/engine Amiga) bytes are the data segment from ds:0000. Patched saves
 say so in their scenario/check (they are not states the original produced).
 
 usage: dune_save_patch.py SAVE [--out OUT] [--show ADDR[:N] ...] [--set ADDR=BYTE[,BYTE...] ...]
        ADDR hex ds offset (the floppy's shift of +13 above ds:1190 is not applied).
 """
 import argparse, struct, sys
+from pathlib import Path
 
 def unpack(packed):
     marker = packed[2]
@@ -42,11 +43,11 @@ def main():
     ap.add_argument('save'); ap.add_argument('--out')
     ap.add_argument('--show', action='append', default=[])
     ap.add_argument('--set', action='append', default=[])
-    ap.add_argument('--cd', action='store_true', help='CD layout (4705-byte data segment)')
+    ap.add_argument('--cd', action='store_true', help='CD/engine Amiga layout (4705-byte data segment)')
     a = ap.parse_args()
     packed = open(a.save, 'rb').read()
     body = unpack(packed)
-    size = 4705 if a.cd or 'DUNE37' in a.save.upper() else 4718
+    size = 4705 if a.cd or any(prefix in Path(a.save).name.upper() for prefix in ('DUNE37', 'DUNEAMS')) else 4718
     base = len(body) - size
     for s in a.show:
         addr, _, n = s.partition(':'); addr = int(addr, 16); n = int(n or '1', 16 if n.startswith('0x') else 10)

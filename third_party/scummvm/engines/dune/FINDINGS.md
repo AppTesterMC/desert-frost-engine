@@ -95,8 +95,11 @@ FF FF. Command word:
   then (unless that vertex is also flagged 0x8000) the left side's vertices up to
   the one flagged 0x8000. Each pixel is `(noise & 3) + (colour >> 8) - 1`: that
   is the grain on floors and walls.
-- bits 15 and 14 set: **line**, colour in the low byte, two points. The
-  original can dither lines; not implemented.
+- bits 15 and 14 set: **line**, colour in the low byte, two points (raw
+  words). The room draw passes the pattern 0xffff (CD 13bdb), so room lines
+  are solid; only the map's move route is dotted (0x5555, CD 81c5). Both go
+  through the original's line routine (`drawVgaLine`, segvga 1a07; see "The
+  small troop rules").
 
 Markers are top-left positions for standing characters: Duke Leto (PERS sprite
 0) at the throne room's last marker (186, 53) lands exactly where the recording
@@ -567,7 +570,8 @@ next chosen at each clip's end from the terrain six cells ahead (low nibble
 FORT; travel_arrival_landing_sequence, seg000:488a). None of these videos has
 a palette: the SKYDN.HSQ record of the hour colours them, over ONMAP's for the
 minimap (`drawCdFlightView`, `playArrivalVideo`). The original also waits
-for MNT1 to come round before the approach clip; the engine cuts to it.
+for MNT1 to come round before the approach clip; built 2026-09-30 (see "The
+CD flight's clips").
 
 ## Location staging and room-entry lines
 
@@ -1091,7 +1095,7 @@ The Dune wiki says tribes from both hemispheres in one sietch "quarrel and refus
 - **What it shows.** The dispatcher (`sub_98B0`, CD 6c92) skips a troop whose word 0x12 has 0x430. The chief's lines read that word: 0x90 both "Life is impossible here! We came from the south...", 0x10 alone "It's difficult to understand Fremen from the south...", 0x20 the sulk line, 0xA0 "Some men even talk about going back to the south...". On contact: "We refuse to work anymore." (CD condition 513, floppy 511).
 - **The release.** Moving a troop out (`troop_issue_move_order`, floppy `sub_B072` at B096 calling `sub_9AF7`; CD 6ebf/6ecb) re-applies the job of every troop left behind that has bit 4. That goes through `sub_973E` (CD 6ad4), which clears bits 4–5 (`and byte [si+12h], 0CFh`, floppy 9759). The quarrel starts again the next day if both sides are still there and still below motivation 0x28.
 - **The engine.** `World::fremenQuarrel` (troops.cpp), called from `runPeriod` at time slot 0 for miners, trainers and irrigators. `applyJob` clears bits 4–5 and `issueMoveOrder` releases the troops left behind. The speedrun bot asks `World::wouldQuarrel` before sending miners or soldiers to a place.
-- **Not transcribed.** `sub_9A58` also runs `sub_9934` (the sietch's byte 0x0B counter) and a daily motivation decay (`sub_9BCB(1)` when more than 8 days have passed since troop byte 0x14; below 5 the troop sulks with bit 5).
+- **The rest of the routine** (the sietch's ring and the daily motivation decay) was built on 2026-09-30; see "The small troop rules". The floppy addresses above are IDA's numbering; in the unpacked image the routine is at 7b88.
 - **Check.** `scripts/check_hemispheres.sh` puts a northern and a southern troop at one sietch (`dune_story_setup=hemispheres`) on both releases. It checks that both quarrel the next day, that message 0x302 is queued, the contact and in-person lines, and that both work again after the southern troop leaves.
 
 ## Celimyn-Tuek (an original bug, fixed as an option)
@@ -1202,7 +1206,7 @@ The wiki says saboteurs stop production and the troop takes no orders "for a few
   - MODIFY EQUIPMENT stays greyed (`7888`).
   - MOVE TROOP is taken: its answer has ds:23 = 0x0b.
   - The map's troop info popup would say "Repairing" (COMMAND 0x3F, `178e9`). The engine does not build that popup.
-- **The event bits stay.** 0x8000, 0x4000, 0x2000 and 0x1000 are never cleared, so the troop keeps talking about them. The CD's army training clears bit 9 (`71f2`); the floppy's does not (`7f58`).
+- **The event bits** 0x8000, 0x4000, 0x2000 and 0x1000 stay until the next map contact closes (7b7c keeps only 0x3f0; checked on Spice86 2026-09-30, see "Closing a map contact"), so the troop talks about them until then. The CD's army training clears bit 9 (`71f2`); the floppy's does not (`7f58`).
 - **The hunt** (`725f`).
   - An army troop (job 4) at a place with status bit 2 does not train. It counts word 0x0e down instead: high byte 0xff, low byte from $\mathtt{0x40} - 	ext{army skill}$, one a period.
   - When the count goes negative (`727d`):
@@ -1349,7 +1353,7 @@ The \x81-\x82 names are staged at every line of a speaker below 9 before phase 0
 - **How it comes.**
   - **CD:** `1ebe` runs when a map contact closes (`7b79`) and before an in-person troop chief's lines (`93a2`). With the troop's 0x800 and phase 0x60-0x63, it calls `121f` with 0x64: the phase triggers, then the callback.
   - **Floppy:** no such code. The contact line "Oh! Chani isn't with you... She vanished! Nobody has seen her." (condition 504) carries action 12, the next chapter. On the CD the same line (507) has no action.
-  - **Both:** closing the contact clears the troop's 0x800, along with word 0x12's 0x1200 and word 0x10's bits outside 0x3f0 (`7b7c` / `889a`). The engine clears only 0x800.
+  - **Both:** closing the contact clears the troop's 0x800, along with word 0x12's 0x1200 and word 0x10's bits outside 0x3f0 (`7b7c` / `889a`). Built 2026-09-30 (see "Closing a map contact").
 - **The callback** (the table's entry for 0x64 is the byte 0xe9 at `11e6`: with the next word, the first entry, it forms `jmp 1f13`).
   - It takes the Harkonnen fortress with the largest latitude word above −100 (type ≥ 0x28 without status bit 3, `5d36`) where no Fremen troop is attacking (occupation exactly 6, `5098`).
   - The scan goes on while the next record's first name is below 8.
@@ -1666,6 +1670,598 @@ the evening reached at about 6.75 s.
 - Not built: the CD's desert stills (380c's DN20-DN38 / VG01-VG10 terrain
   tiles); the engine's desert and cockpit on the CD still draw the floppy's
   landscape under SKY.HSQ.
+
+## The map contact's rows and view (2026-09-29)
+
+Queue item F6. The same code in both releases.
+
+### Addresses
+
+| What | CD (seg000) | Floppy |
+| --- | --- | --- |
+| CONTACT FREMEN TROOPS | 86cc | (by bytes, not needed) |
+| contact at Paul's place (short range) | 86b9 | |
+| NEXT TROOP / the next troop with an icon | 86fa | |
+| open the contact, patch the fifth row | 780d-783b (782d) | 8553 |
+| the greys | 7847-78bb, menu ds:210c | 856d-85e1, menu ds:2772 |
+| free equipment at the place | 7f27 | 8c38 |
+| GIVE ORDERS TO TROOP from the room | 5a03 (inc ds:46f3) | |
+| the DUNE MAP popup | 5a1a -> 5bb0 (first visit), dismissed at 5c03 | |
+| EXIT GLOBE | bc81 -> 5a3d (no popup) | |
+| " Others..." paging | d36d-d410, d423, d429, d45d | |
+
+### The rows
+
+The contact menu is ASK FOR MORE INFORMATION, CHANGE TROOP OCCUPATION,
+MODIFY EQUIPMENT, MOVE TROOP and a fifth row. The fifth is patched when the
+contact opens (782d: `mov ax,52h; cmp [46f3],1; adc ax,0`): CUT CONTACT (0x53
+CD, 0x49 floppy) on a map visit, NO MORE ORDERS when the room's GIVE ORDERS
+TO TROOP opened the map (5a03 bumps ds:46f3; that close returns to the room).
+The static record holds NO MORE ORDERS on the CD and CUT CONTACT on the
+floppy, which is why a memory dump alone suggests the releases differ.
+
+The greys: the occupation, equipment and move rows start greyed. An ill troop
+(word 0x12 bit 0x400) keeps all three. Otherwise the occupation opens unless
+the troop prospects (job 1); a waiting troop (job 2) gets SELECT TROOP
+OCCUPATION and nothing more; MOVE TROOP opens from phase 5; MODIFY EQUIPMENT
+opens from phase 4, not while the troop repairs (word 0x10 bit 0x200), at a
+place held (status bit 3) or not a fortress (type below 0x28), and only with
+something free there (7f27) or carried (byte 0x19).
+
+### The view
+
+CONTACT FREMEN TROOPS does not move the map. It resumes the last troop
+contacted while that troop still has an icon on the map, else takes the
+next troop by id that has one (86fa). Only the short-range case (ds:1176
+below 2) centres on Paul and contacts the troop at his place (86b9). The
+engine centred the map on the troop, so the contact showed another part of
+the planet. That was the "late-game terrain" of the saboteurs and epidemic
+contacts. The engine has no troop icons yet: a troop whose place (or march
+position) lies in the view stands in for "has an icon".
+
+The DUNE MAP popup ("Map to command rallied troops") comes only on the way
+in from the room (5a1a, first visit). EXIT GLOBE (5a3d) and the return from a
+move order do not raise it.
+
+### " Others..."
+
+A command menu shows five rows from its skip byte. The fifth becomes
+" Others..." (COMMAND 0xa0) when more records follow or the menu is
+scrolled. After the last record, a scrolled menu still shows " Others...".
+The row turns the page by four records (d423) or rewinds (d429). A rebuild
+resets the skip. Built for the room menu (the endless-play battle shows it:
+four Fremen chiefs after CALL A WORM).
+
+### Built
+
+- `drawTroop`: the greys, the fifth row by the way in (`_troopFromRoom`, set
+  before the menu is drawn), a log line of the rows.
+- `kRowContact`: no recentring, a troop in view (`troopInView`).
+- No DUNE MAP popup after EXIT GLOBE or a move order.
+- `drawRoom`: the " Others..." paging (`kRowOthers`, `_roomRowSkip`).
+- Check `scripts/check_contact_rows.sh` (the ill troop's and the repairing
+  troop's rows, floppy).
+- Not built: the map's troop icons (6827/68d2); the CD run of the check (the
+  saves are floppy).
+
+## The CD flight's clips (2026-09-30)
+
+Queue item F7. Only the order of the clips and screens has to match the
+original (the user, 2026-09-28).
+
+### Addresses (CD)
+
+| What | seg000 |
+| --- | --- |
+| travel_pump: a flight frame a pass, a step every 0x300 ticks | 4f0c-4f31 |
+| travel_probe_terrain_ahead | 4e8e-4ec4 |
+| travel_select_flight_video | 4ec6-4f03 |
+| travel_arrival_landing_sequence | 488a-48e3 |
+
+### The rules
+
+- **The pace.** The CD takes a travel step every 0x300 ticks (4f2e,
+  3.83 s). The floppy's recordings show 0.64 s a cell, which the engine had
+  used for both releases. Palace to Carthag-Tuek is 22 steps, about 84 s on
+  the CD. The flight clips advance one frame a game-loop pass: 16 ticks,
+  measured on the capture (MNT2 191 frames and MNT3 197 frames in about
+  15 s each).
+- **The probe.** After each step, the map bytes six and seven steps ahead
+  are averaged whole, `(a + b) >> 1`, with the stage bits included. The low
+  nibble 8 or more is rock. The engine averaged the low nibbles of the
+  current cell and the one six steps ahead.
+- **The choice at a clip's loop point.** On rock: MNT2 (sand to rock) from
+  MNT1 or MNT4, else MNT3. On sand: MNT1 from MNT1, MNT4 (rock to sand) from
+  MNT2 or MNT3, else MNT1.
+- **The arrival.** A sietch (SIET) or the palace (PALACE): the minimap goes
+  (489d). The clips run on over sand until MNT1 plays frame 0x3c (sietch) or
+  0x16 (palace), then the approach clip plays. A fortress plays FORT.HNM. A
+  village or the Harkonnen palace has no clip. SKIP TO DESTINATION has no
+  run-in and no clip (F1).
+
+The original's sequence on palace to Carthag-Tuek (captures/cd-flight-long,
+the clip id at ds:dc00 read every second): take-off, MNT1, MNT2, MNT4, MNT2,
+MNT3, MNT4, MNT1, SIET, the exterior. The engine's positions now match the
+capture's step by step (ds:4/ds:6), and so does the sequence. The switch
+times are within a few seconds of the capture.
+
+### Built
+
+- `kCdFlightStepMillis` (3834 ms) for the CD's steps.
+- The probe of bytes 6 and 7.
+- The clip frames at 80 ms, paced by the clock.
+- The sand run-in before SIET or PALACE; no approach clip for a village or
+  the Harkonnen palace.
+- The blocking take-off and the spiral now let a harness script's
+  checkpoints fall at their time (`waitPumping`), so the take-off shows in
+  cd-flight-timed at 2-3 s, as in the original.
+- `scripts/check_cd_flight_skip.sh` checks the unskipped flight's clip
+  sequence against the original's (`DUNE_HARNESS_SECONDS` lengthens the
+  harness's time limit).
+
+## The CD talk screen and " WHAT ? " (2026-09-30)
+
+Queue items F1b and F1d.
+
+- **The zoom, both releases** (CD 3af9-3b55, floppy 3d80-3dc4, the same
+  code). The speaker's anchor is the SAL character part's position, recorded
+  as the room is drawn (CD ds:47f8/47fa). Clamped to 0xf0 and 0x71, it is the
+  top-left of an 80x38 window that vga_zoom scales 4x (bp = 6) over the
+  view. With no anchor there is no zoom (3b21). The engine had a 2x zoom
+  round a guessed centre. The floppy's Leto window (186, 53) now equals the
+  capture's (explore-16).
+- **The CD's text mode** (voice_subtitle_mode 0, subtitle_setup_layout 8d62)
+  has no balloon. The line sits in the strip ds:223c at the foot of the view
+  (it ends at y 0x92, loc_09025), with 16-pixel side pads, in colour 15 with
+  a colour-8 outline. layout_subtitle_lines (8e16) gives each word its width
+  plus a 6-pixel gap from the 288-pixel budget. commit_line spreads a line's
+  leftover over its gaps (leftover / gaps + 6, the remainder one pixel each).
+  The last line keeps 6-pixel gaps, and nothing is justified when any line
+  would need gaps of 0x1e or more (8df0). The dream uses the same strip.
+- **" WHAT ? "** (F1d): the CD's menu_NPC_actions (setup_npc_dialogue_menu
+  90bd-9118) is " TALK TO ME ", the speaker's verb, " WHAT ? " (the last line
+  again, 9ed5) and STOP TALKING. The floppy's COMMAND1 has no " WHAT ? ".
+- **The room rotation** of cd-speedrun-day1: ds:C5 is random at each
+  landing. The original's were read back from its zoom windows: Carthag-Tuek
+  8, Carthag-Harg 6, Carthag-Timin 2 and the palace 7, now set in the
+  scenario (`dune_room_rotations`).
+
+## The night battle view (2026-09-30)
+
+Queue item F4 (built last, the user's order).
+
+### Addresses
+
+| What | CD (seg000) | Floppy |
+| --- | --- | --- |
+| location_arrival_hostility_check (ds:2b, backdrop) | 503c-5075 | |
+| the room draw in a battle | 2dd3-2df8 | 308c-30ab |
+| stage_28_night_attack_start | 0acd-0b1e | 0c51-0ca2 |
+| its teardown | 0b21-0b44 | 0ca5-0cc1 |
+| the particle task | 0b45 | 0cc2 |
+| the menu in a battle | 2f1d-2f3b, then 2fa3 | 31c4-31e2 |
+| the compass in a battle | | 329f -> 32be |
+
+### What the original does
+
+While Paul is in a battle (ds:2b, set by 5058 on arrival at a place in
+battle, or at a place not the Atreides' with Fremen attacking it), every
+room draw goes the night-attack way (2dd3). It clears ds:46df (no sky
+light) and draws ATTACK.HSQ (colours 0, 128-183 and 240-254, so the panel
+turns green): sprite 2 tiled from the top, sprite 3 from y 81, the backdrop
+at (0, 76) and sprite 1 at (0, 134). The backdrop is patched by the place's
+kind at 505f-5075: 0x2f for a sietch, 0x30 for the palace, a village or the
+Harkonnen palace, and 0x33 for a fortress. The intro's night attack uses
+0x31. The particle task runs every 3 ticks (0b10), and SN3 plays (0b1e).
+The compass box is blank (floppy 329f).
+
+The first room's menu is SEE DUNE MAP, MASSIVE ATTACK, FIGHT FOR A WHOLE
+DAY and CALL A WORM (greyed before phase 0x4f). As in every room, the CD's
+Mixer Panel (2fa3) and the people follow. With more than five records the
+fifth row is " Others..." (captures/endgame/endless-play ep-0: the four
+Fremen chiefs on the next page).
+
+### Built
+
+- `drawNightBattle` / `updateNightBattle` / `endNightBattle` (scene.cpp),
+  with the engine's `NightAttack` simulation (the intro's) and
+  `NightAttack::setBackdrop`. The menu goes on to the people, and the
+  compass is blank.
+- The simulation runs in real play only. Capture runs draw its first state.
+- The place's Fremen troops stand in room 1 during a battle, at any kind
+  of place (classify, 3187), so the menu lists their chiefs.
+- Check `scripts/check_night_battle.sh`: the view, its backdrop, and the
+  menu's two pages.
+- Not built: the attack's sound (SN3.VOC, looped); MASSIVE ATTACK's denser
+  pattern (the simulation's `massive` flag, set by the original's
+  set_massive_attack); the troop icons the task also moves (0afb -> 5ba0).
+
+## Harkonnen raids, merges, skill decay, the captain and the gauge (2026-09-30)
+
+Queue item 10 (the wiki-audit gaps), the rules. The code is the same in both
+releases unless stated.
+
+### Addresses
+
+| What | CD (seg000) | Floppy (unpacked image) |
+| --- | --- | --- |
+| actions_time_in_day_4, the raid | 1f64-2014 | 227c-232c |
+| harkonnen_pick_attack_target | 2017-208f | 232f-23a7 |
+| the byte that skips a raid | ds:11bc | ds:11c9 |
+| the troop walk (merge, handler, skill decay) | 6c92-6cfa | 7a00-7a62 |
+| the small-troop merge | 6d19-6d7a | 7a81 |
+| the skill decay | 6d7b-6dba | 7ae3 |
+| the captain's set-up | 31c9-31f5 | (likewise) |
+| OVERPOWER THE PRISONER | 9584-95be | (likewise) |
+| the battle gauge | 60f8-6143, 6144 | (likewise) |
+
+### The raids
+
+- **When.** A raid can come on slot 4 of the day. Before phase 0x3c it also
+  needs 0x70 periods (7 days) past ds:1154, the stamp that phase 0x2c
+  (Stilgar) writes. The day must be even (time & 0x10 clear). The skip byte
+  must be clear; it is always cleared here, and every period of a Fremen
+  attack sets it (739e). ds:0 is rotated left and the raid needs the bit
+  rotated out (one time in two).
+- **The target.** It is a sietch (type below 0x20), neither hidden nor in
+  battle (status 0x82), and without an ill troop (1e24; the floppy's 2169
+  tests the first troop only).
+  - It needs Fremen troops other than the prospectors (ds:60 - ds:63).
+  - It needs a fortress within 30: the nearest hidden one (ds:e2/e4), else
+    the nearest known one (ds:dc/de). That fortress is not the Harkonnen
+    palace, and holds Harkonnen troops but no attacking Fremen.
+  - Of those sietches, the northernmost wins (the first of equals, starting
+    from latitude 100).
+- **The raid.**
+  - ds:c4 + 1. Twice, the first Harkonnen troop of the fortress gets
+    occupation 0x8d, a move order, loses its hidden bit and lands at once
+    (8357; with bit 7 it keeps that occupation).
+  - The sietch is put in battle (status 2) and its troops defend it (83fd:
+    occupation 6, the prospectors stop).
+  - The characters staying there go to its room 1 (140ae).
+  - A troop chief tells "The Harkonnens are attacking -!" (message 0x0c),
+    or the prospectors' warning (0x0d) when they are there.
+  - When Paul is there: room 1, ds:0b, ds:2b = 1 (the night battle) and the
+    gauge (6144).
+- **The outcome** is the usual battle (739e): a lost sietch becomes a
+  fortress (74b6), its characters held in room 3. Every landing clears ds:2b
+  and ds:fd first (503c).
+
+### The troop walk
+
+- **The merge.** A troop under 20 (× 10 men) is merged before its handler
+  runs, if its occupation has none of the bits 0xe3, it lacks bitfield bit 7,
+  and it is not the prospectors.
+  - It merges into the troop at its place with the fewest men that still
+    fits in a byte (the last of equals), counting only Fremen troops that
+    are not 0xa0 and not the prospectors.
+  - That troop gets the men and both troops' equipment, and speech word
+    0x200: "A small troop has merged with us." (condition 528).
+  - The small troop leaves the game (66b1).
+- **The skill decay** runs after every handler, when the clock word is a
+  multiple of 64. The mask is 0xc000 rotated left by the job class and
+  masked with the speech word: bit 15 is ecology, 14 army, 13 spice. So a
+  spice troop can lose a point of army and of ecology, an army troop only
+  of ecology, and an ecology troop nothing. The wiki's "the other classes"
+  is only true for spice.
+- **The floppy's walk** (7a41) has no march test in the 0x430 branch: a
+  troop that sulks, quarrels or is ill stops on the march until ds:fa is
+  set. The CD's walk (6cd3) keeps it marching.
+
+### The Harkonnen captain
+
+- **Entering room 3** (31c9): his record's flag 0x10 (ds:10a7) mirrors his
+  troop's occupation bit 4. ds:ee is cleared. ds:ed is 0xff when he is
+  overpowered, else his troop's motivation.
+- **His talk menu** (90c0) offers " OVERPOWER THE PRISONER " while he is not
+  overpowered.
+- **The verb** (9584) acts once per speaker (the ds:ee bit): 0x29 comes off
+  his motivation and off ds:ed. Below 0 he is overpowered: occupation bit 4
+  and ds:10a7 bit 4, which his lines read as ds:18 bit 4.
+- **Then block 0x85** is presented (character 16's list 5): "We were enough
+  to handcuff him..." or "I can't overpower him alone...". His lines then
+  tell of the fort he knows (cond 395, 435-438).
+
+### The battle gauge
+
+The gauge is 60f8, over the place's chain:
+
+- the Harkonnens' men H;
+- for the Fremen fighting there (occupation 6), their men F, the Harkonnens
+  they killed (word 0x0c) and their own losses (word 0x0e).
+
+Each side's share still standing is men × 256 / (men + losses). The gauge
+is 0x80 + 128 × (Fremen share − Harkonnen share) / the larger share, as a
+byte. ds:fd = gauge | 1 is set when Paul lands in a battle (505c) or is in
+a raided sietch (2010). The chiefs' contact lines read it (conditions
+600-602: "we have nearly routed the Harkonnens", "very close", "severe
+losses").
+
+### Built
+
+- `World::harkonnenRaid`, `pickRaidTarget`, `raidSource`,
+  `raidSuppressOffset`, `mergeSmallTroop`, `skillDecay`, `captainEnters`,
+  `overpowerCaptain`, `battleGauge` and `seedBattleGauge`.
+- The row `kRowOverpower`, the night battle picked up in `battleCheck`, and
+  the floppy's walk difference.
+- A test key `dune_no_raids` for the epidemic check's setup.
+- **Found on the way:**
+  - The skip byte was written at the CD's offset on the floppy too.
+  - `linkTroop` could link a troop twice. A raider that the move order had
+    already landed was linked again and looped the chain; that fort then
+    counted every Harkonnen troop in the game.
+- **The bot adapts as a player would:**
+  - It keeps its soldiers out of reach of a fortress that could beat them.
+  - Its miners prefer fields out of reach.
+  - It keeps in touch with every troop weekly.
+  - Soldiers march to a raided sietch.
+  - It gathers away from raid reach, and walks into a fort that its raiders
+    left empty.
+  - It puts the prospectors back to work after a battle.
+  - It turns soldiers into miners when the spice runs short, and parks the
+    council's allies in room 2 (see below).
+  - With all that it takes longer: day 87 (floppy) and day 95 (CD), against
+    62 before.
+- Check `scripts/check_raids.sh` (raid, raid-paul, troop-rules, captain,
+  characters) on both releases.
+- **Not built:**
+  - the map place popup's "Battle:" panel (160ac: ICONES 0x8e + (gauge +
+    15) / 32) and its spice, water and equipment lines;
+  - the map's troop icons (6827, 68d2: the icon scripts at ds:1672-1935,
+    about 800 lines in dune-re's troop_icons.rs);
+  - the density panel's TROOP OCCUPATION overlay (ds:4722, 563e/57b5).
+
+## The characters, the room scans and the desert collapse (2026-09-30)
+
+Queue leftovers.
+
+### The room-leave scan
+
+- **The scan** (CD ui_click_move_room 3faa-3fc2, run_room_leave_dialogue_
+  scan 36d3, npc_auto_dialogue 3520). A move sets ds:0c to the room Paul
+  heads for, pending_room_action 1, and arms the interrupt gate.
+  - The first person in the room whose topic-4 line holds says it. The line
+    is picked before that person counts as met (35a6 marks them afterwards).
+  - A line with event 2 stops the move: Leto's "Where are you going so
+    fast? I have to talk to you!" (room 4, Leto not met), Jessica's "DON'T
+    USE THIS DOOR!", a sietch's "No, no wait!".
+  - Other lines (Duncan's "Hey, that's not the way to the communication
+    room!") let the move go on. The engine then closes their talk.
+- **Capture runs** skip the scan, as they skip the entry scan, unless
+  `dune_room_scans` is set. Check `scripts/check_room_leave.sh`.
+
+### The characters on a landing and a new day
+
+- **On a landing** (CD 2170, floppy 2488, from 4054), the first nine
+  records, those not travelling with Paul:
+  - Duncan at the palace goes to its room 4.
+  - A character waiting in room 1 of another sietch or the palace, not in
+    battle, goes one room further in. At the palace it goes to its own room
+    (ds:144d by the record's byte 0x0e; room 6 counts as 10 before phase
+    0x24).
+  - Stilgar and the later characters wander the palace rooms 2-12 (not 3
+    before phase 0x54, nor 6 or 11 before phase 0x24). The engine's random
+    generator stands in for rand_iterated.
+  - A character left in the desert walks to the nearest place's room 1
+    (221d: 5344, 40ae), with flag 4 if that is where Paul lands.
+- **In the desert**, STAY HERE now keeps the desert position in the record
+  (ds:4 the longitude, ds:6 fine << 8 | row).
+- **A new day** (CD 1d66, floppy 20a8, from 1c5c): a record whose place
+  changed kind, or whose room is past the kind's room count (cs:1d35), goes
+  to room 1.
+- **The bot:**
+  - It parks the council's allies in room 2, since room 1 empties on every
+    landing elsewhere.
+  - It reads a character's record again after landing: Stilgar wanders.
+  - Check `scripts/check_raids.sh` (characters).
+
+### The desert collapse (CD)
+
+After 0x37 unrested steps the CD plays desert_collapse_cutscene (3757 ->
+0e77): DEAD3.HNM's first frame, then its five other frames, each revealed
+by transition 0x3c. That transition is the slow dissolve (segvga 2a10): a
+15-bit LFSR walks the game area, 80 pixels a tick. Then the head goes down.
+The WORMSUIT score is not built. The floppy has no cutscene; its 3a06 path
+(ds:15cf / 15d1, 11c7) is not traced.
+
+### The night battle: sound and MASSIVE ATTACK
+
+- The battle's start plays sound effect 3 (CD 0b1c: SN3.HSQ; the floppy's
+  SD3.HSQ).
+- **MASSIVE ATTACK** (7317-7396):
+  - It sets the simulation's massive flag, whose fire is denser.
+  - After the rounds, 20 rounds of rand_masked(0x201) force the sky flash
+    to 0x0b or 0x11, with a wait of 0x28 ticks, 2 more when the high byte
+    is set. The ticks are taken as 5 ms each, an assumption.
+
+### Action 13 in person (CD)
+
+The CD's action 13 (a28e) draws the map window on the line's place (ds:47e6)
+whenever it is not Paul's place and the voices do not speak alone.
+
+- The line's place is a vision message's place when a chief delivers it in
+  person, and the ill place for "We have to go to - to stem the epidemic".
+- The dream already drew the window. The floppy's event 13 (a9ce) only sets
+  ds:42ce to 600, which is not built.
+
+### Closing a map contact
+
+Closing a map contact (CD 7b7c-7b89, floppy 889a-88a7) runs every time: the
+ds:4c test always reads 0, since 7b65 has just cleared it. It does three
+things:
+
+- word 0x10 keeps only 0x3f0;
+- word 0x12 loses 0x1a00;
+- byte 0x14 = the day.
+
+Checked on Spice86 (floppy, the saboteurs' patched save, captures/contact-
+close): troop 1's word 0x10 went 0x8300 -> 0x0300 and its byte 0x14 went
+1 -> 5. The saboteurs section's "the event bits stay" is wrong for the
+contact's close.
+
+## The small troop rules (2026-09-30)
+
+Queue item 9. The same code in both releases.
+
+### Addresses
+
+| What | CD (seg000) | Floppy (unpacked image) |
+| --- | --- | --- |
+| troop_location_do_stuff_upon_new_day | 6e20-6e81 | 7b88-7be9 |
+| the sietch's ring | 6cfc | 7a64 |
+| lower motivation (sulk below 5) | 6f93 | 7cfb |
+| charisma loss (spill through 6f93) | 6fb0 | 7d18 |
+| the contact's day (byte 0x14) | 7b86-7b89 | 88a4-88a7 |
+| the duration phrase | 32c7-330f | 356b-35bb |
+| the number written into it | d03c, e2e3 | ca9f, ddef |
+| SPECIALIZE IN ARMY / ECOLOGY | 6a83/6a87 -> 6a89-6ac3 | 781d/7821 -> 7823-785d |
+| the line routine | segvga 1a07 / 1adc | (DUNEVGA) |
+
+### The rules
+
+- **The new-day routine** is the first thing the spice (6fe5), army (71ef)
+  and irrigation (76cb, once vegetation has started) handlers do. It acts
+  on a day's first period (ds:46de).
+  - A fortress still held two days after its fall turns sietch. Until then
+    the rest of the routine is skipped.
+  - **The ring (6cfc).** At a sietch (type below 0x20) that is not being
+    irrigated (status bit 0), byte 0x0b grows by one a day, up to 12. It
+    grows once for each working troop there, since every troop's handler
+    runs the routine. The disc of that radius becomes Atreides land (644e:
+    stage 0x20; vegetation cells keep theirs). The first rally set it to 2.
+  - **The decay.** A troop more than 8 days past its byte 0x14 loses 1
+    motivation (6f93). Byte 0x14 is the day it rallied (6701) or the day of
+    its last map contact (7b89). Below 5 the motivation is 4, the troop
+    stops (occupation bit 4) and sulks (speech word 0x20).
+  - Then the north/south quarrel (see its section).
+- **A charisma loss (6fb0)** goes no lower than 1. Its spill lowers every
+  active troop through 6f93, so a troop can sulk from it. The engine had
+  used a plain clip.
+- **The duration phrase (32c7)** counts the periods since the job began
+  (word 0x0a) into ds:42, and the days into ds:41.
+  - A stopped troop says "but our job is finished".
+  - Otherwise: below 3 periods "for a very short time", below 16 "for a
+    few hours", below 32 "for 1 day".
+  - From 32 periods on it is "for 12 days", with the days written over the
+    number: three right-aligned characters ending after the digits, so 3
+    days reads "for  3 days". The COMMAND record stays patched.
+  - The engine's thresholds had been 4, 16 and 96, with no number.
+- **SPECIALIZE IN ARMY / ECOLOGY.**
+  - Choosing the troop's own job closes the menu with no answer (6a91).
+  - Otherwise the job is applied and the troop answers (list 4, ds:23 =
+    0x0a). A refusal restores the old job and speech word.
+  - Accepted, a job of class 1 or 2 (occupation >> 2 not 0) clears
+    equipment bit 7 (6abf). The harvester stays in the place's stock as
+    free equipment.
+- **Lines.** The line routine takes a 16-bit pattern that rotates left a bit
+  each step, drawing where the rotated-out bit is set, with each pixel
+  clipped to a rectangle.
+  - A horizontal or vertical line runs from its left or top end and draws
+    both ends.
+  - Any other line takes max(|dx|, |dy|) steps with the error seeded at half
+    the major delta, and never draws its start pixel.
+  - Only two callers exist. The room draw passes 0xffff, clipped to the
+    game area. The map's move route (81c5) passes 0x5555 in colour 0x0c,
+    clipped to the map window. So "dithered lines" is the route only.
+  - The engine had drawn rooms with ScummVM's line and the route with its
+    own Bresenham. Both use `drawVgaLine` now.
+
+### Built
+
+- `World::troopNewDay`, `fortressConversion` (split out of
+  `militaryTraining`), `lowerMotivation`, `troopContacted` and
+  `dropHarvester`.
+- `changeCharisma`'s loss path.
+- `SentenceBank::patchCommandNumber`, and the duration phrase in
+  `stageTroopForConditions`.
+- `drawVgaLine` (room.cpp), used by the room renderer and
+  `MapScreen::drawRoute`.
+- Check `scripts/check_small_rules.sh` (`dune_story_setup=small-rules`),
+  2/2.
+- Not built: the route's map-seam case (81a3-81be).
+
+## The Harkonnen-zone warning and the companion's fly-over lines (2026-09-30)
+
+Queue item 8.
+
+### Addresses
+
+| What | CD (seg000) | Floppy |
+| --- | --- | --- |
+| travel_route_hostile_zone_check | 4182-41c5 | 43d6-4419 |
+| the travel dispatch (companion aboard) | 35e9-3636 | 3889-38d6 |
+| the warning with nobody aboard | 3637-366c | 38d7-3905 |
+| the menu for pending_room_action 3 / 4 | 3551-3592 | 37f7-3834 |
+| travel_pick_speaking_companion | 366f | 3908 |
+| the ORNYCAB cabin | 368b | 3924 |
+| the fly-over line (block 16 list 4) | 96d8 | a195 |
+| the sighting scan | 40f9 | 4353 |
+| the warning menu record | ds:1f9e | ds:2620 |
+| CHANGE DESTINATION | 497a | 51fd |
+
+### What the original does
+
+The two releases run the same code. On each step of an ornithopter
+flight, the check (4182) looks at the destination and the terrain. A
+destination that is Atreides (5d36: a sietch, a village, or a place with
+status bit 3) resets the accumulator ds:4726. Otherwise a step over a cell
+of stage 0x30 takes 0x20 from ds:4726. The first such step arms
+pending_room_action 4. SKIP TO DESTINATION stays greyed while the count
+runs. When the accumulator wraps to 0, on the eighth step in a row, the
+ornithopter is shot down (ds:46d9 = 2). The check also runs inside the
+SKIP TO DESTINATION fast-forward (CD 4ffb, floppy 5de3), so the warning
+stops the skip.
+
+The flight pump then waits (ds:11ca) until a row is taken:
+
+- **A companion aboard** (ds:1152). The ORNYCAB cabin comes up with the
+  companion's head. The companion is the first slot when the second is
+  empty or bit 7 of ds:0 is set, else the second slot; the engine had
+  this the wrong way round. The line is the first in block 16 list 4 whose
+  condition holds with ds:23 = 4. That is "Watch out! We are entering the
+  Harkonnen zone...! We'd better get out of here fast!" (CD condition 703;
+  floppy 697, with "... fast!"). The sentence mask is 0x20 (9f8b), so a line
+  already said is never skipped.
+- **Nobody aboard.** The cockpit is drawn (map_screen_draw_base: the sky and
+  ORNYPAN). COMMAND 0xbf on the CD (0xb3 on the floppy), "  ****  WARNING
+  ****\r\rENTERING HARKONNEN ZONE", goes at (0x66, 0x4e) in colour word
+  0x200c.
+- **The menu.** CHANGE DESTINATION opens the cockpit over the flight, and
+  its Cancel carries on. IGNORE WARNING flies on. The CD's record also has
+  " WHAT ? ": greyed with nobody aboard (3662), lit for a companion (357c).
+  The floppy's record has only the two rows. There is no BACK TO STARTING
+  POINT, which the engine used to offer.
+
+**The sighting lines** come from the same block, with ds:23 = 3. The scan
+stages the place's kind in name slot 4 and its side in slot 5.
+
+- **The floppy** has three sides, from bearing + 0x60: below 0x58 "on the
+  left", below 0x68 "ahead", else "on the right" (COMMAND 0xc2-0xc4). It
+  says "Wait a minute, I'm not sure... I think I've just seen [4] [5]."
+  when bit 3 of ds:0 is set (condition 695). Otherwise it says "It looks
+  like [4], there [5]." (condition 696).
+- **The CD** has two sides: below 0x60 "on the left" (0xce), else "on the
+  right" (0xd0), with ds:e1 = 1. The "Wait a minute" line is the right
+  side's (condition 701) and "It looks like" the left side's (702).
+- **The menu** is GO TOWARDS THIS PLACE. The CD's (ds:1f92) adds " WHAT ? ".
+
+### Built
+
+- `askHostileZone` (scene.cpp) returns CHANGE DESTINATION or IGNORE
+  WARNING. With a companion it shows the cabin, the line and the rows
+  (`_cabinWarning`). With nobody aboard it draws the cockpit with the
+  warning text. That text had never drawn: the lookup searched for the
+  record's leading spaces.
+- `flyoverSpeaker` and `flyoverLine` (cockpit.cpp) are shared with
+  `showSighting`, which now takes its line from the dialogue with its
+  release's sides.
+- The speedrun bot still turns back to its starting point. That is the
+  CHANGE DESTINATION pick a player would make.
+- Check `scripts/check_hostile_zone.sh`: floppy and CD, nobody aboard and
+  Gurney aboard, run in real time from `dune_story_setup=hostile-zone[-gurney]`.
+  It checks the rows, the greyed " WHAT ? ", the text in the window, the
+  companion's line, CHANGE DESTINATION -> Cancel, and IGNORE WARNING ->
+  shot down.
 
 ## A fort turned sietch moves its people (2026-09-28)
 
@@ -2303,3 +2899,115 @@ recording also starts there, at the mirror), music and sound (Paula), the
 desert landscape of code 0x5094 (a flat sand colour, colour 2 of the
 time-of-day record, stands in), the talk background's coarser zoom, the
 copy-protection check (not needed).
+
+
+## Amiga cockpit dashboard and destination controls (2026-09-30)
+
+The Amiga's `ORNYPAN` sheet differs from the DOS sheet. Hunk 0 `5e18`
+loads resource `2a`; `5e20-5e22` selects frame 3 through the full-picture
+decoder `1a7fc`. That frame is the complete 320 by 152 dashboard, including
+its opaque sky and black pixels. Frames 0 and 1 are 16 by 1 palette
+placeholders. Drawing those DOS frame indices omitted the dashboard. The
+engine now draws frame 3 and retains the frame 2 window overlay, which the
+original draws at `5d5e-5d6c` through the icon list at `1bf22`.
+
+Destination hover follows hunk 0 `604a/60ba` (CD `4586/45de`, floppy
+`4d9f/4df7`): a visible marker shows its kind and place name, other map
+points show DESERT with a compass direction near the principal bearings,
+and leaving the window restores the SELECT DESTINATION caption (`6164`).
+Hover uses the same location hit test as a destination click, including
+inside the nested CHANGE DESTINATION screen during flight.
+
+The Amiga cursor classifier at `11356-113dc`, using rectangle `1bf06`,
+recognizes scroll bands beside the map: up to 50 pixels horizontally and
+25 pixels vertically, restricted to the view above row 155. `102ca`
+dispatches these directional cursor clicks to the ordinary navigation
+arrows (`e612/e61a/e622/e62a`). The engine now accepts taps in these bands
+as well as the existing lower navigation pad. Held-button repeat timing
+is not covered by this change.
+
+`scripts/check_cockpit.sh` drives actual mouse and keyboard events after
+placing Paul in the palace cockpit. Its 14 assertions cover the dashboard
+structure, named and desert hover, caption restoration, the inert current
+palace, map-edge and navigation-pad scrolling, recentring, Cancel and ESC,
+the direct destination click, takeoff/arrival and sietch entry, plus a
+real-time CHANGE DESTINATION/hover/Cancel/resume/skip sequence. The shared
+hover and destination interaction was also checked on DOS floppy and CD.
+Animation timing, palette fidelity and the destination-label blink remain
+separate work.
+
+
+## Amiga arrival home-room conversion (2026-09-30)
+
+The Amiga arrival shuffle (hunk 0 `3332–33fc`, corresponding to CD
+`2170–21f9`) reads the nine character home-room bytes at hunk 0 `1beae`.
+The lookup at `33a0` uses A6 minus `0xd3e`; A6 is hunk 0 plus `1cbec`.
+With the saved-state base at hunk 0 `1a900`, the table is at Amiga state
+`15ae`, matching CD `ds:144d`. Its bytes are
+`0a 09 08 04 06 05 05 09 02` in both executables and in captured Amiga RAM.
+
+The conversion previously stopped before this table, leaving room zero
+for characters returned home. Gurney's phase `2e` conversation then became
+unreachable. The explicitly traced byte run `{0x144d, 0x15ae, 9, 0}` now
+restores the table; the generator preserves it without extending generic
+conversion past its established boundary. Existing arrival logic retains
+Gurney's room-6 to room-10 substitution before phase `24` and skips followers.
+
+`check_amiga_arrival.sh` covers the phase `23`, `24`, and `2e` room assignments
+and preservation of a following companion. The corrected Amiga campaign bot
+reaches the Emperor throne-room ending at phase `c8` and final attack stage 7.
+This is assisted engine-logic coverage: the observed run uses 33 direct troop
+order fallbacks plus battle save/reload retries. Completion entirely through
+player controls remains unverified; absence of a `FORCED` log marker alone
+must not be presented as proof of an unassisted run.
+
+## DOS floppy map troop sprites and contact (2026-09-30)
+
+The native floppy routines are verified against the unpacked executable. The
+older annotated disassembly's labels in this block are displaced by `0x1ed0`;
+addresses below are actual code offsets, not those labels.
+
+- `CS:74af-74f0` walks visible places' troop chains, then moving troops. Hidden
+  troops are excluded. Unhired Fremen show a question mark only at visited places.
+- `CS:750a-75c0` selects the native script by occupation, stopped/captured state,
+  carried harvester/ornithopter equipment, battle status and slot. Soldiers and
+  Harkonnen have slot-dependent variants. ONMAP frame **0 is valid** (stopped
+  miners), although zero inside a multi-frame script terminates its loop.
+- `CS:75c1-7607` chooses moving sprites from the dominant destination-minus-GPS
+  direction and the occupation class. `CS:7608-766a` positions stationary icons
+  with signed slot offsets and moving icons at their GPS position.
+- `CS:b544-b57f` projects that position using signed longitude displacement,
+  keeping fractional pixels through the multiply. `CS:7069-7091` admits place
+  markers inside `(4,4)-(316,148)`; marching icons have the wider `(-16,-16)` to
+  `(328,160)` anchor limit, then clip to the map window.
+- `CS:c4b3-c52f` spawns the first sprite, centres its rectangle and chooses an
+  animation cursor. `CS:78ce-7923` steps ordinary icons every fourth 15-tick task
+  (about 300 ms). The engine uses a separate animation seed; opening the map
+  cannot alter the gameplay random generator. Full-map redraw preserves each
+  icon's script cursor and relative movement, including under contact popups.
+- `CS:c71b-c73e` draws by unsigned right-plus-bottom depth, with later insertion
+  winning equal-depth ties. `CS:76e0-7715` tests strict rectangle interiors in
+  reverse insertion order and rejects unhired troops. `CS:9426-944a` allows
+  remote contact only when range is at least two; otherwise the troop must be
+  at Paul's current place. Icon clicks now open the same real contact/orders
+  UI as the command row, including for marching troops.
+
+The native script block is `DS:169b-195e`. It is beyond the saved game state's
+`0x1500` bytes and is cached separately from the user's executable. It must not
+be obtained from save-state bytes or embedded as asset data in the engine.
+Only the verified DOS floppy block is enabled by this change; CD and Amiga use
+separate asset layouts.
+
+Validation uses the original chapter-20 map: four visible troops (8, 3, 1, 2)
+with exact native icon bounds, direct contact, MOVE TROOP to Carthag-Harg, a
+north-facing march and arrival after one period. Additional labelled save
+fixtures exercise hidden/unhired/local-range guards and equipment, battle,
+army, ecology and Harkonnen variants. `scripts/check_map_troops.sh` drives real
+pointer input and checks the live animation task. The local fidelity save is
+required; it and the screenshots are not distributed as engine source.
+
+Known limits: original and engine animation phases are independent. The existing
+march simulation takes a slightly different intermediate longitude (two screen
+pixels on the checked route); the icon displays the actual engine GPS, and the
+arrival and stationed position agree. Selected-troop rings and animation timing
+fidelity remain separate work.

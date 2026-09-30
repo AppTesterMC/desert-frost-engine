@@ -29,7 +29,7 @@ set -u
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
-local_root="${DUNE_LOCAL_BUILD_ROOT:-/private/tmp/dune-scummvm-native-build}"
+local_root="${DUNE_LOCAL_BUILD_ROOT:-${TMPDIR:-/tmp}/dune-scummvm-native-build}"
 floppy_data="${DUNE_DATA_FLOPPY:-$repo_root/data/floppy}"
 cd_data="${DUNE_DATA_CD:-$repo_root/data}"
 run_root="$local_root/sdl-run/head"

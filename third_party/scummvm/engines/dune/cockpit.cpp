@@ -76,6 +76,8 @@ void GameScreen::openCockpit(bool changing) {
 	_cockpit = true;
 	_cockpitChanging = changing;
 	_cockpitStart = _system->getMillis();
+	_cockpitPointer = Common::Point(-1, -1);
+	_cockpitLabel.clear();
 	_mode = kMap;
 	debugSetScene("map/cockpit");
 	_log.line(changing ? "Cockpit: CHANGE DESTINATION" : "Cockpit: select destination");
@@ -103,10 +105,78 @@ bool GameScreen::cockpitPlayer(int &x, int &y) const {
 	return _map->windowProject(kWindow, _map->centreLongitude(), _map->centreLatitude(), lng, lat, x, y);
 }
 
+int GameScreen::cockpitArrow(int x, int y) const {
+	const int arrow = _map->hitArrow(x, y);
+	if (arrow >= 0 || !_world.amiga() || y >= 155)
+		return arrow;
+	// Amiga hunk 0 11356-113dc selects a directional cursor beside the
+	// window (template 1bf06); 102ca dispatches its click to the matching
+	// nav arrow. The horizontal bands are 50 pixels, the vertical ones 25.
+	if (y >= 45 && y < 134) {
+		if (x <= 80 && 80 - x < 50)
+			return 3;
+		if (x >= 240 && x - 240 < 50)
+			return 1;
+	} else if (x >= 80 && x < 240) {
+		if (y <= 45 && 45 - y < 25)
+			return 0;
+		if (y >= 134 && y - 134 < 25)
+			return 2;
+	}
+	return -1;
+}
+
+void GameScreen::cockpitHover(int x, int y) {
+	// map_mouse_hover_tracker / map_draw_hover_label: CD 4586/45de,
+	// floppy 4d9f/4df7, Amiga hunk 0 604a/60ba. The same hit test as the
+	// click chooses the label; moving outside the window re-arms the caption.
+	_cockpitPointer = Common::Point(x, y);
+	Common::String label;
+	if (_map && windowRect().contains(x, y)) {
+		const int hit = _map->windowHit(windowRect(), _map->centreLongitude(), _map->centreLatitude(), x, y);
+		if (hit >= 0 && _sentences) {
+			const Location l = _world.location((uint)hit);
+			const char *kinds[4] = { "Sietch: ", "Palace: ", "Village: ", "Fort: " };
+			const uint kind = l.type < 0x20 ? 0 : l.type == 0x20 || l.type == 0x30 ? 1 : l.type < 0x28 ? 2 : 3;
+			const uint16 id = _panel.findCommand(kinds[kind]);
+			label = id != 0xffff ? _panel.commandString(id) : Common::String(kinds[kind]);
+			label += _world.locationName((uint)hit, *_sentences);
+		} else {
+			const uint16 id = _panel.findCommand("DESERT");
+			label = id != 0xffff ? _panel.commandString(id) : Common::String("DESERT");
+			int px, py;
+			if (cockpitPlayer(px, py)) {
+				// The original tests the screen-space bearing from the marker's
+				// tip (its left + 11, bottom), not geographic longitude/latitude.
+				const int dx = x - (px - 2), dy = y - py;
+				if (dx || dy) {
+					byte angle = ABS(dx) >= ABS(dy) ? (byte)(32 * dy / dx + (dx >= 0 ? 0x40 : 0xc0))
+							: (byte)(-(32 * dx / dy - (dy >= 0 ? 0x80 : 0)));
+					angle = (byte)(angle + 3);
+					if ((angle & 31) < 6) {
+						const char *directions[8] = { "northwards", "north-eastwards", "eastwards", "south-eastwards",
+							"southwards", "south-westwards", "westwards", "north-westwards" };
+						const uint16 direction = _panel.findCommand(directions[angle >> 5]);
+						if (direction != 0xffff)
+							label += " " + _panel.commandString(direction);
+					}
+				}
+			}
+		}
+	}
+	if (label == _cockpitLabel)
+		return;
+	_cockpitLabel = label;
+	if (label.empty())
+		_cockpitStart = _system->getMillis();
+	_log.line(Common::String::format("Cockpit: hover %s", label.empty() ? "(outside map)" : label.c_str()));
+}
+
 void GameScreen::drawCockpit() {
 	const Common::Rect kWindow = windowRect();
 	// map_screen_draw_base (CD 439f) in cockpit mode, then map_view_redraw (CD 4377).
 	const uint32 now = _system->getMillis();
+	cockpitHover(_cockpitPointer.x, _cockpitPointer.y); // a scroll may move the marker below a stationary pointer
 	// The map (floppy map_view_redraw, CD 4377): the palettes, the sky, the
 	// cockpit (ORNYPAN 0, 1), the zoomed window (map_draw_zoomed_globe), the
 	// markers, the grid (ORNYPAN 2) over them, Paul's blinking ornithopter.
@@ -118,14 +188,22 @@ void GameScreen::drawCockpit() {
 		amigaDesertView(_system, _resources, view, _state.w(GameState::kGameTime));
 	else
 		drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
-		setSkyPalette(false); // the hour's light, or the running blend (floppy 3b13)
+	setSkyPalette(false); // the hour's light, or the running blend (floppy 3b13)
 	Common::Array<byte> ornypanData;
 	Sprite *ornypan = nullptr;
 	if (_resources.load("ORNYPAN.HSQ", ornypanData)) {
 		ornypan = new Sprite(_system, ornypanData);
 		ornypan->setPalette();
-		ornypan->drawFrame(0, &view, 0, 19);
-		ornypan->drawFrame(1, &view, 10, 43);
+		if (_world.amiga()) {
+			// Amiga hunk 0 5e18-5e22: ORNYPAN file 2a, picture 3 through
+			// 1a7fc. Frames 0/1 are only 16x1 palette placeholders; the
+			// dashboard is a complete 320x152 picture, already decoded by
+			// convertAmigaSheet. Its sky and black pixels are opaque.
+			ornypan->drawFrame(3, &view, 0, 0);
+		} else {
+			ornypan->drawFrame(0, &view, 0, 19);
+			ornypan->drawFrame(1, &view, 10, 43);
+		}
 	}
 	const uint16 centreLng = _map->centreLongitude();
 	const int16 centreLat = _map->centreLatitude();
@@ -151,9 +229,9 @@ void GameScreen::drawCockpit() {
 	// The caption, typed one glyph per 0x18 ticks (spaces are free): "SELECT
 	// DESTINATION ON MAP" (floppy COMMAND 0x4c, CD 0x56), red on the dark strip.
 	const uint16 captionId = _panel.findCommand("SELECT DESTINATION", true);
-	if (captionId != 0xffff) {
-		const Common::String caption = _panel.commandString(captionId);
-		uint glyphs = isDumpRun() || isDuneFastHarness() ? 0xffff : (now - _cockpitStart) / kGlyphMillis;
+	if (captionId != 0xffff || !_cockpitLabel.empty()) {
+		const Common::String caption = _cockpitLabel.empty() ? _panel.commandString(captionId) : _cockpitLabel;
+		uint glyphs = !_cockpitLabel.empty() || isDumpRun() || isDuneFastHarness() ? 0xffff : (now - _cockpitStart) / kGlyphMillis;
 		Common::String shown;
 		for (uint i = 0; i < caption.size(); ++i) {
 			if (caption[i] != ' ') {
@@ -167,7 +245,9 @@ void GameScreen::drawCockpit() {
 		_system->getPaletteManager()->grabPalette(pal, 0, 256);
 		uint red = 0, best = 0xffffffff;
 		for (uint i = 1; i < 256; ++i) {
-			const int dr = pal[3 * i] - 232, dg = pal[3 * i + 1] - 16, db = pal[3 * i + 2] - 16;
+			const int dr = pal[3 * i] - (_world.amiga() ? 252 : 232);
+			const int dg = pal[3 * i + 1] - (_world.amiga() ? 252 : 16);
+			const int db = pal[3 * i + 2] - (_world.amiga() ? 252 : 16);
 			const uint d = (uint)(dr * dr + dg * dg + db * db);
 			if (d < best) {
 				best = d;
@@ -275,7 +355,7 @@ void GameScreen::drawCabin() {
 		amigaDesertView(_system, _resources, view, _state.w(GameState::kGameTime));
 	else
 		drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
-		setSkyPalette(false); // the hour's light, or the running blend (floppy 3b13)
+	setSkyPalette(false); // the hour's light, or the running blend (floppy 3b13)
 	Common::Array<byte> data;
 	if (_resources.load("ORNYCAB.HSQ", data)) {
 		Sprite cabin(_system, data);
@@ -287,41 +367,77 @@ void GameScreen::drawCabin() {
 	_viewOk = true;
 }
 
-void GameScreen::showSighting(uint place, byte relativeBearing) {
-	// travel_pick_speaking_companion (floppy 3908): the only companion, or
-	// one of the two by bit 7 of the clock word. The line is PHRASE12 0x1A0,
-	// "Wait a minute, I'm not sure... I think I've just seen \x84 \x85.",
-	// with the place's kind and its side (floppy 43A0: left under -8, ahead,
-	// right from 8).
+int GameScreen::flyoverSpeaker() const {
+	// travel_pick_speaking_companion (CD 366f, floppy 3908): ax = ds:1152,
+	// the two companions' slots. Both empty: nobody aboard. The second slot
+	// empty, or bit 7 of the clock word ds:0 set: the first slot (al), else
+	// the second. A first slot that is empty then gives 0xff, and the
+	// caller's `js` (CD 3613, floppy 38b3) shows nothing at all.
 	const byte first = _world.companion(0), second = _world.companion(1);
-	uint speaker = first != 0xff ? first : second;
-	if (first != 0xff && second != 0xff && (_state.w(0) & 0x80))
-		speaker = second;
-	if (speaker == 0xff || !loadDialogue())
+	if (first == 0xff && second == 0xff)
+		return -1;
+	const byte who = (second == 0xff || (_state.w(0) & 0x80)) ? first : second;
+	return who == 0xff ? -2 : who;
+}
+
+bool GameScreen::flyoverLine(byte action, Common::String &line) {
+	// loc_096d8 (CD, floppy a195): DIALOGUE block 16 list 4 (the vision
+	// messages, the sighting lines, the warning), the first line whose
+	// condition holds, through present_dialogue_line_with_auto_mask (CD 9f8b:
+	// sentence mask 0x20, so a said line is never skipped). ds:23 is the
+	// pending room action: 3 a sighting (conditions 701/702 on the CD, 695/696
+	// on the floppy), 4 the Harkonnen zone (703 / 697).
+	line.clear();
+	if (!loadDialogue())
+		return false;
+	_state.setB(0x23, action);
+	_conversation->start(16, 4, 0x20, true, true);
+	bool newSentence = false;
+	Common::String page;
+	if (_conversation->next(page, newSentence))
+		line = page; // the fly-over lines are single pages
+	_conversation->finishPending(); // marked said (bit 7), action 0
+	_conversation->stop();
+	_state.setB(0x23, 0); // the next dispatch pass clears it (CD 35f1, floppy 3891)
+	return !line.empty();
+}
+
+void GameScreen::showSighting(uint place, byte relativeBearing) {
+	// travel_scan_nearby_location (CD 40f9, floppy 4353) stages the line's
+	// substitutions: slot 4 the place's kind ("a sietch", ...), slot 5 its
+	// side. The floppy has three sides (43a0: bearing + 0x60 below 0x58 on
+	// the left, below 0x68 ahead, else on the right; COMMAND 0xc2-0xc4), the
+	// CD two (4144: below 0x60 on the left, 0xce, else on the right, 0xd0,
+	// with ds:e1 = 1). The line is block 16 list 4 with ds:23 = 3: on the
+	// floppy "Wait a minute, I'm not sure... I think I've just seen [4] [5]."
+	// when bit 3 of the clock word is set, else "It looks like [4], there
+	// [5]."; on the CD the first on the right (ds:e1), the second on the left.
+	const int speaker = flyoverSpeaker();
+	if (speaker < 0 || !loadDialogue())
 		return;
 	const Location l = _world.location(place);
 	static const char *const kKinds[4] = { "a sietch", "a palace", "a village", "a fortress" };
 	const uint kind = l.type < 0x20 ? 0 : l.type == 0x20 || l.type == 0x30 ? 1 : l.type < 0x28 ? 2 : 3;
-	const int r = (int8)relativeBearing;
-	const char *side = r < -8 ? "on the left" : r < 8 ? "ahead" : "on the right";
-	const uint16 kindId = _panel.findCommand(kKinds[kind]), sideId = _panel.findCommand(side);
-	Common::String line;
+	const byte al = (byte)(relativeBearing + 0x60);
 	const uint16 names = _state.nameTable;
-	if (kindId != 0xffff && sideId != 0xffff) {
-		const uint16 oldKind = _state.w(names + 8), oldSide = _state.w(names + 10);
+	const uint16 kindId = _panel.findCommand(kKinds[kind]);
+	if (kindId != 0xffff)
 		_state.setW(names + 8, (uint16)(kindId + 1));
-		_state.setW(names + 10, (uint16)(sideId + 1));
-		line = _sentences->text((uint16)(0x800 + 0x1a0 + 1), true, _state);
-		_state.setW(names + 8, oldKind);
-		_state.setW(names + 10, oldSide);
+	if (_world.floppy()) {
+		_state.setW(names + 10, (uint16)(al < 0x58 ? 0xc2 : al < 0x68 ? 0xc3 : 0xc4));
+	} else {
+		const uint16 side = _panel.findCommand(al < 0x60 ? "on the left" : "on the right");
+		if (side != 0xffff)
+			_state.setW(names + 10, (uint16)(side + 1));
+		_state.setB(0xe1, al < 0x60 ? 0 : 1);
 	}
-	if (!line.hasPrefix("Wait a minute"))
-		line = Common::String::format("Wait a minute, I'm not sure... I think I've just seen %s %s.",
-				kindId != 0xffff ? _panel.commandString(kindId).c_str() : kKinds[kind],
-				sideId != 0xffff ? _panel.commandString(sideId).c_str() : side);
-	_log.line(Common::String::format("Flight: companion %u sights place %u: %s", speaker, place, line.c_str()));
-	openTalk(speaker);
+	Common::String line;
+	if (!flyoverLine(3, line))
+		return; // no line: no menu (CD 3628, floppy 38c8); the flight already homes on the place
+	_log.line(Common::String::format("Flight: companion %d sights place %u: %s", speaker, place, line.c_str()));
+	openTalk((uint)speaker);
 	_cabinView = true;
+	_cabinWarning = false;
 	_talkLines.clear();
 	_talkLine = 0;
 	_talkLastPage = line;
@@ -329,7 +445,8 @@ void GameScreen::showSighting(uint place, byte relativeBearing) {
 	startTalkAnimation();
 	drawTalk();
 	dumpScreen(_system, "flight-sighting");
-	// The row closes the talk; the flight goes on toward the place.
+	// GO TOWARDS THIS PLACE closes the talk; the flight goes on toward the
+	// place. The CD's menu (ds:1f92) has " WHAT ? " too.
 	while (!_quitRequested && !isDumpRun() && !isDuneFastHarness()) {
 		Common::Event event;
 		bool done = false;
@@ -338,8 +455,12 @@ void GameScreen::showSighting(uint place, byte relativeBearing) {
 				_quitRequested = true;
 			int row, arrow;
 			if (event.type == Common::EVENT_LBUTTONDOWN &&
-					_panel.hitTest(event.mouse.x, event.mouse.y, row, arrow) == Panel::kActionCommand && row == 0)
-				done = true;
+					_panel.hitTest(event.mouse.x, event.mouse.y, row, arrow) == Panel::kActionCommand) {
+				if (row == 0)
+					done = true;
+				else if (row == 1 && !_world.floppy())
+					drawTalk(); // " WHAT ? ": the line again
+			}
 		}
 		if (done)
 			break;
