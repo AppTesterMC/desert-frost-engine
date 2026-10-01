@@ -5,7 +5,6 @@
 ![Engine licence: GPL-3.0-or-later](https://img.shields.io/badge/engine-GPL--3.0--or--later-blue)
 
 # Desert Frost Spice
-**currently only Engine ;)**
 
 <div align="center">
 
