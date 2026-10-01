@@ -25,10 +25,12 @@
 #include "common/endian.h"
 #include "common/func.h"
 #include "common/textconsole.h"
+#include "common/system.h"
 
 #include "audio/fmopl.h"
 
 #include "dune/music.h"
+#include "dune/amiga_music.h"
 
 namespace Dune {
 
@@ -53,8 +55,8 @@ const uint kMaxTracks = 21;
 
 } // namespace
 
-Music::Music() :
-		_opl(nullptr), _playing(false), _instrumentOffset(0), _instrumentCount(0), _loopStart(0), _loopEnd(0),
+Music::Music(bool amiga) :
+		_amiga(amiga), _opl(nullptr), _playing(false), _instrumentOffset(0), _instrumentCount(0), _loopStart(0), _loopEnd(0),
 		_speed(0), _time(0), _tickPosition(0), _totalTicks(0), _loopPosition(0), _songEnd(false) {
 	memset(_channels, 0, sizeof(_channels));
 }
@@ -66,6 +68,14 @@ Music::~Music() {
 
 bool Music::play(const Common::Array<byte> &data) {
 	stop();
+	if (_amiga) {
+		Audio::AudioStream *stream = makeAmigaMusicStream(data, g_system->getMixer()->getOutputRate());
+		if (!stream)
+			return false;
+		g_system->getMixer()->playStream(Audio::Mixer::kMusicSoundType, &_amigaHandle, stream);
+		_playing = true;
+		return true;
+	}
 
 	if (data.size() < kHeaderSize)
 		return false;
@@ -125,6 +135,11 @@ bool Music::play(const Common::Array<byte> &data) {
 }
 
 void Music::stop() {
+	if (_amiga) {
+		g_system->getMixer()->stopHandle(_amigaHandle);
+		_playing = false;
+		return;
+	}
 	if (!_opl || !_playing)
 		return;
 	_opl->stop();

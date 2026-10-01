@@ -17,10 +17,11 @@ or learn something.
 | Area | State |
 | --- | --- |
 | `DUNE.DAT` archive, loose floppy files, HSQ compression | done (`resource.cpp`) |
-| Amiga release: files, sheets (pictures, planar sprites), `.SAM` rooms, 32+32 colours, copper sky, data segment | converted to the DOS layouts on load (`amiga.cpp`, `amiga_gfx.cpp`); rooms, dialogue, map, globe, book, mirror, flights and the story screens work; intro, music, the desert landscape not ported |
+| Amiga release: files, sheets (pictures, planar sprites), `.SAM` rooms, 32+32 colours, copper sky, data segment | converted to the DOS layouts on load (`amiga.cpp`, `amiga_gfx.cpp`); rooms, dialogue, map, globe, book, mirror, flights and the story screens work; intro and the desert landscape not ported; original Amiga tracker music plays |
 | Sprite sheets: 4-bit, 8-bit, RLE, scaling, flipping | done (`sprite.cpp`) |
 | HNM (first generation) video with VOC soundtrack | done for the CD codec (`hnm.cpp`) |
 | HERAD AdLib music through ScummVM's OPL emulator | done, version 1 / OPL2 (`music.cpp`) |
+| Amiga tracker music through ScummVM's Paula emulator | original M1/M2/M3 modules and replay rules; gameplay cues and Music volume ([AMIGA-AUDIO.md](AMIGA-AUDIO.md)) |
 | `.SAL` rooms: sprites, gradient/noise polygons, lines | done; line dithering missing (`room.cpp`) |
 | Sky: tiles and the 33 time-of-day palettes | drawn at fixed midday; no game clock yet (`sky.cpp`) |
 | Control panel: original layout, small game font, day counter, compass | done; which commands a room offers is decoded only for the throne room (`panel.cpp`) |
@@ -33,7 +34,7 @@ or learn something.
 | The book | cover, topics, encyclopedia paragraphs and recorded lines with drop capitals (`book.cpp`); pagination is ours |
 | Map screen and globe | flat map from MAP/TABLAT with the places' icons, scrolling, picking a destination and flying there; the original's DUNE MAP title popup, map menu (contact range, greyed rows) and planet panel; the globe with the game menu (`map.cpp`) |
 | Saves | original DOS `DUNE21S`/`DUNE37S` logs; isolated engine Amiga `DUNEAMS` logs; exact layout validation and nondestructive matching legacy import ([SAVES.md](SAVES.md)) |
-| Options | in-game music, restart and exit; DOS per-game text language, music and sampled-sound controls; standard volume, controller bindings and save path ([original argument mapping](ORIGINAL-OPTIONS.md)) |
+| Options | in-game music, restart and exit; DOS per-game text language, music and sampled-sound controls; Amiga music and story options; standard volume, controller bindings and save path ([original argument mapping](ORIGINAL-OPTIONS.md)) |
 | Sega CD / Mega CD release | detected (extracted `DUNE.DAT` or the data-track image); the disc's index, text, tile screens and the initial game data (converted to the PC layout); the original room screens from the room tables; the original panel (book, day, companions, commands, exit pad; place tints); conversations with measured portraits, close-up backdrops and the text box; the map (zoomed terrain, markers, travel); no verbs, videos, sound, flight or battles yet (`segacd_*.cpp`, FINDINGS.md "Sega CD / Mega CD release") |
 | Characters and troops | who stands on which marker as the executable decides; sietch Fremen and chiefs; hiring by talking to the Fremen; troop orders (occupations) | done; hiring and harvest rules are ours (`world.cpp`) |
 | Clock, flight, spice, rallying, results | the executable's rules: clock rate, flight steps, harvest and prospecting formulas, charisma check, results layout (`world.cpp`, `notes/research/gameplay-rules.md`) | done for those; story phases and callbacks, Jessica's contact-range lessons, the Emperor's shipments bargained with Duncan, the COMM room, visions, the first vision in the desert, the scripted scenes, Stilgar's Water of Life, the ecology route (wind traps, bulbs, irrigation, vegetation, fortresses taken, MODIFY EQUIPMENT), the Harkonnen zone, arrival deaths and the final scene run; troop marches, espionage, fort battles (MASSIVE ATTACK, FIGHT FOR A WHOLE DAY), the Harkonnen captain, worm riding and the final attack on the Harkonnen palace run (`troops.cpp`, `battle.cpp`); the smugglers' village and chapter run, their trade, Harkonnen raids and GO & SEARCH FOR EQUIPMENT not yet |
@@ -74,7 +75,8 @@ IPA. See `scripts/check_speedrun.sh` and its per-run `evidence.json`.
 | `intro_scenes.cpp` | Floppy intro second half, credits and prologue: sietch, palace, backdrops, kiss, ornithopter, flight |
 | `attack.cpp/.h` | The night-attack particle simulation (intro and later battles) |
 | `hnm.cpp/.h` | Blocking HNM video player |
-| `music.cpp/.h` | HERAD song player on OPL |
+| `music.cpp/.h` | HERAD song player on OPL; Amiga music routing |
+| `amiga_music.cpp/.h` | Original Amiga tracker replay through Paula |
 | `sound.cpp/.h` | One-shot VOC sample playback (unused at the moment) |
 | `cursor.cpp/.h` | The original arrow pointer via ScummVM's cursor manager; direct-touch default |
 | `debug.cpp/.h` | Log file, OSD messages, screenshot dumps, developer config keys |
@@ -181,10 +183,12 @@ Settings are stored under the game's section in `scummvm.ini`:
 | AdLib music | `dune_no_music=false` | Enable the original AdLib music through the OPL emulator. Set `true` to disable it. The standard Volume tab's Music slider also applies. |
 | Sampled sounds | `dune_no_sound=false` | Enable effects and CD video soundtracks. Set `true` to mute them while preserving video timing. |
 
-The same two optional fixes are also available for Amiga targets. Their
-English text bank is fixed, and Paula audio is not implemented, so Amiga
-does not show the DOS language or AdLib controls. Controller bindings and
-Save path work through the standard Keymaps and Paths tabs. See the
+Amiga targets offer **Amiga music** (`dune_no_music=false`) and the same two
+optional fixes. The original tracker music uses ScummVM's Paula emulator;
+the standard Music volume slider and mute apply. English text is fixed;
+DOS language, AdLib and independent sampled-sound controls are absent.
+Controller bindings and Save path work through the standard Keymaps and
+Paths tabs. See the
 [Amiga applicability and original evidence](ORIGINAL-OPTIONS.md#amiga-applicability).
 
 Optional fixes:
@@ -263,11 +267,12 @@ CD release" and "Amiga release"):
 
 | Release | Data | State |
 | --- | --- | --- |
-| Amiga (3 disks) | `Dune 1 (Cryo + Virgin) A/B/C.adf`, extracted by `scripts/dune_amiga_extract.py` | Plays on the shared engine: its files, sheets, rooms, palettes and data segment are converted to the DOS layouts on load (`amiga.cpp`, `amiga_gfx.cpp`). Rooms, dialogue, map, globe, book, mirror, flights and the story screens work. Not ported: the intro (the game opens in the throne room), music and sound, the desert landscape |
+| Amiga (3 disks) | `Dune 1 (Cryo + Virgin) A/B/C.adf`, extracted by `scripts/dune_amiga_extract.py` | Plays on the shared engine: its files, sheets, rooms, palettes and data segment are converted to the DOS layouts on load (`amiga.cpp`, `amiga_gfx.cpp`). Rooms, dialogue, map, globe, book, mirror, flights and the story screens work. Not ported: the intro (the game opens in the throne room), the desert landscape; original Amiga tracker music plays, while independent sound effects remain unavailable |
 | Sega CD / Mega CD | `Dune (USA)/*.bin+cue` (or an extracted `DUNE.DAT`) | Its own host (`segacd_*.cpp`): the disc's index, text, tile screens and initial game data (rebuilt in the PC layout); the original room screens, panel, conversations with portraits, and the map with travel. Not yet: verbs, videos, sound, flight, battles. The Mega CD (Europe) entry is detected but untested |
 
 The Leto-loop and Celimyn-Tuek options are available on DOS and Amiga.
-Amiga uses fixed English resources and has no Paula music/sound playback.
+Amiga uses fixed English resources and plays its original tracker music.
+Independent sound effects remain unavailable.
 Its engine saves use the separate `DUNEAMS` namespace; native `DUNE10S` saves
 remain unsupported. See [save compatibility](SAVES.md).
 

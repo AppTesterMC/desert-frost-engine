@@ -80,9 +80,9 @@ void GameScreen::openCockpit(bool changing) {
 	_cockpitLabel.clear();
 	_mode = kMap;
 	debugSetScene("map/cockpit");
-	_log.line(changing ? "Cockpit: CHANGE DESTINATION" : "Cockpit: select destination");
+	_log.line(changing ? "Cockpit: CHANGE DESTINATION" : _wormMap ? "Worm map: select destination" : "Cockpit: select destination");
 	drawMapScreen();
-	dumpScreen(_system, changing ? "orni-cockpit-change" : "orni-cockpit");
+	dumpScreen(_system, changing ? "orni-cockpit-change" : _wormMap ? "worm-map" : "orni-cockpit");
 }
 
 bool GameScreen::cockpitPlayer(int &x, int &y) const {
@@ -184,14 +184,43 @@ void GameScreen::drawCockpit() {
 	_panel.applyPalette();
 	_map->applyPalette();
 	Graphics::Surface view = _surface.surfacePtr()->getSubArea(Common::Rect(0, 0, 320, 152));
-	if (_world.amiga())
-		amigaDesertView(_system, _resources, view, _state.w(GameState::kGameTime));
-	else
-		drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
-	setSkyPalette(false); // the hour's light, or the running blend (floppy 3b13)
 	Common::Array<byte> ornypanData;
 	Sprite *ornypan = nullptr;
-	if (_resources.load("ORNYPAN.HSQ", ornypanData)) {
+	if (_wormMap && _wormBackdrop.size() == 320 * 152) {
+		// map_screen_draw_base without the cockpit (CD 43a9-43c9, floppy
+		// likewise): the view as it was (its palette kept: the captures show
+		// no ORNYPAN colours in it), draw_map_view_border (5b6e: four rings round the window, 0xfc
+		// inside to 0xf6 outside) and the caption strip (77,33)-(245,41) in 0xf5.
+		_system->getPaletteManager()->setPalette(_wormBackdropPalette, 0, 256);
+		for (int y = 0; y < 152; ++y)
+			memcpy(_surface.getBasePtr(0, y), _wormBackdrop.data() + y * 320, 320);
+		_panel.applyPalette();
+		_map->applyPalette();
+		// One palette for both: the colours the view shows round the window
+		// (and the border's 0xf5-0xfc) keep the view's values.
+		bool used[256] = { false };
+		for (int y = 0; y < 152; ++y)
+			for (int x = 0; x < 320; ++x)
+				if (!kWindow.contains(x, y))
+					used[_wormBackdrop[y * 320 + x]] = true;
+		for (uint i = 0xf5; i <= 0xfc; ++i)
+			used[i] = true;
+		for (uint i = 1; i < 256; ++i)
+			if (used[i])
+				_system->getPaletteManager()->setPalette(_wormBackdropPalette + 3 * i, i, 1);
+		for (int k = 0; k < 4; ++k) {
+			const Common::Rect ring(kWindow.left - 1 - k, kWindow.top - 1 - k, kWindow.right + 1 + k, kWindow.bottom + 1 + k);
+			_surface.frameRect(ring, (byte)(0xfc - 2 * k));
+		}
+		_surface.fillRect(Common::Rect(77, 33, 245, 41), 0xf5);
+	} else {
+		if (_world.amiga())
+			amigaDesertView(_system, _resources, view, _state.w(GameState::kGameTime));
+		else
+			drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
+		setSkyPalette(false); // the hour's light, or the running blend (floppy 3b13)
+	}
+	if (!_wormMap && _resources.load("ORNYPAN.HSQ", ornypanData)) {
 		ornypan = new Sprite(_system, ornypanData);
 		ornypan->setPalette();
 		if (_world.amiga()) {
@@ -299,6 +328,24 @@ void GameScreen::cockpitTap(int x, int y) {
 		_map->selectPosition(lng, lat);
 	}
 	_cockpit = false;
+	if (_wormMap) {
+		// map_confirm_travel_and_close in the worm's mode: the departure, the ride.
+		_wormMap = false;
+		_log.line(hit >= 0 ? Common::String::format("Worm map: destination place %d", hit)
+						   : Common::String::format("Worm map: destination the desert at %u/%d", _map->pointLongitude(),
+								   _map->pointLatitude()));
+		// The floppy's map_screen_cleanup puts the view back first (its
+		// capture: the room, its rows, then the head goes down and the worm
+		// comes); the CD wipes from the map to VER.HNM (its capture keeps
+		// the map and its Cancel row until then).
+		if (_desert && _world.floppy()) {
+			_mode = kRoom;
+			_panel.setLeftPanel(Panel::kLeftBook);
+			drawRoom();
+		}
+		rideWormTo(hit >= 0 ? hit : -2);
+		return;
+	}
 	if (_cockpitChanging) {
 		// A later confirm re-aims the flight under way (map_confirm_travel_and_close).
 		_cockpitChanging = false;
@@ -324,6 +371,10 @@ void GameScreen::cockpitCancel() {
 	// map_screen_cleanup (CD 4415): with no travel pending, back to the pad
 	// (room 1), or to the open desert; from CHANGE DESTINATION, back to the flight.
 	_cockpit = false;
+	if (_wormMap) {
+		_wormMap = false;
+		_riding = false;
+	}
 	_log.line("Cockpit: Cancel");
 	if (_cockpitChanging) {
 		_cockpitChanging = false;

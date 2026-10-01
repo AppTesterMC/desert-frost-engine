@@ -170,6 +170,33 @@ SAL format notes are retained as references without changing the user's
 current functionality/completion priority. The executable and verified
 original captures remain the authority for fixes.
 
+### Swift-Dune wiki: central research reference
+
+The user designated the [Swift-Dune wiki](https://github.com/codingstyle/swift-dune/wiki)
+as the central reference on 2026-09-30. Consult it first to locate documented
+formats, resources, animations and game logic, then cross-check the relevant
+release's executable and captures when implementing behavior.
+
+- [Savegame](https://github.com/codingstyle/swift-dune/wiki/Savegame): RLE,
+  location/troop records, map positions, occupations, equipment and flags; useful
+  for map UI and save fixtures. Header/state sections remain unfinished. The
+  listed automatic slot numbers 4/5 differ from this engine's verified 3/4;
+  preserve release-specific evidence instead of changing filenames from the table.
+- [Game phases](https://github.com/codingstyle/swift-dune/wiki/Game-Phases): story
+  milestones through the ending; use to organize progression tests, checking
+  actual prerequisites/callbacks in each binary.
+- [Songs](https://github.com/codingstyle/swift-dune/wiki/Songs) and
+  [Sounds](https://github.com/codingstyle/swift-dune/wiki/Sounds): song/resource
+  mappings and explicitly floppy sound-file descriptions. These are useful DOS
+  audio leads, not evidence that Amiga has the same banks or cue rules.
+- [Versions](https://github.com/codingstyle/swift-dune/wiki/Versions) and
+  [Compression](https://github.com/codingstyle/swift-dune/wiki/Compression): PC
+  release overview and compression entry points; retain separate HSQ, sprite
+  RLE and save-RLE handling.
+
+The home page and six topic pages above were read. This is a navigation/reference
+record, not a claim that every wiki page or uncertain field has been verified.
+
 ## Flight (verified / annotated)
 
 - A travel steps every 0x300 PIT ticks = **3.83 s** (`travel_pump`,
@@ -454,3 +481,13 @@ harvesters, ornithopters, krys knives, laser guns, weirding modules), restocked
 each new day. Battles weigh both sides' skills and populations
 (seg000:60f8); the attacking occupation's per-period resolution is at
 seg000:739e. Not yet read in detail.
+
+### Phase flowchart and ending branches
+
+The [DOS floppy phase flowchart](game-phases/dune-game-phases-floppy.svg)
+shows story transitions, their conditions, final-attack stages, ecology victory
+and continued play. [Evidence and corrections](game-phases/game-phase-flowchart.md)
+explain omitted phases `0x04` and `0x2E`, reachable `0x6C`, the unverified ordinary
+route into `0x07`, and the separate story/final-attack state variables. The SVG,
+editable generator and JSON are retained together; no original game data is
+included. It is a source-audited milestone map, not a claim of complete UI coverage.

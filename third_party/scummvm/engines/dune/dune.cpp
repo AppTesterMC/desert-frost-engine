@@ -128,11 +128,12 @@ Common::Error DuneEngine::run() {
 	if (!_mixer->isReady())
 		showStatus("Dune: the audio device did not start - no sound");
 
-	Music music;
+	Music music(isAmiga);
 	const bool musicEnabled = !isDumpRun() && ConfMan.get("music_driver") != "null" &&
 		!(ConfMan.hasKey("dune_no_music") && ConfMan.getBool("dune_no_music"));
 
-	startSong(music, resources, log, "WORMINTR.HSQ", musicEnabled);
+	if (!isAmiga)
+		startSong(music, resources, log, "WORMINTR.HSQ", musicEnabled);
 	bool keepRunning;
 	if (isAmiga) {
 		// The Amiga intro is not ported yet: the game starts in the throne room.
@@ -151,7 +152,8 @@ Common::Error DuneEngine::run() {
 		return Common::kNoError;
 	}
 
-	startSong(music, resources, log, "ARRAKIS.HSQ", musicEnabled);
+	// Original Amiga startup (hunk0:124): M2/ECOLOVE follows the intro.
+	startSong(music, resources, log, isAmiga ? "M2.HSQ" : "ARRAKIS.HSQ", musicEnabled);
 	showGameCursor(); // The intro runs without a pointer, as in the original.
 	GameScreen screen(_system, resources, log);
 	// As in the original, the game lands in the throne room; there is no

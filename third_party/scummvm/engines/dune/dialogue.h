@@ -150,7 +150,7 @@ public:
 	/** The whole table, said flags included (saved with the game). */
 	const Common::Array<byte> &data() const { return _data; }
 	void setData(const Common::Array<byte> &data);
-	/** Entries from the sixth character on use PHRASEx2; the word at 0x60 is the split. */
+	/** Entries at/after the release-specific split use PHRASEx2. */
 	bool secondPhraseFile(uint offset) const { return offset >= _split; }
 
 private:

@@ -22,34 +22,22 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#ifndef ENGINES_DUNE_DUNE_H
-#define ENGINES_DUNE_DUNE_H
+#ifndef DUNE_AMIGA_MUSIC_H
+#define DUNE_AMIGA_MUSIC_H
 
-#include "common/error.h"
-#include "engines/engine.h"
+#include "common/array.h"
+#include "common/scummsys.h"
 
-struct ADGameDescription;
+namespace Audio { class AudioStream; }
 
 namespace Dune {
 
-/**
- * Engine entry point. run() is the whole life of a game session: data check,
- * graphics, music, intro, then the GameScreen event loop. See README.md in
- * this directory for the map of the engine.
+/** Native four-channel tracker playback of the Amiga M1/M2/M3 resources.
+ * Returns nullptr for malformed or unsupported modules. Copies the input;
+ * the caller retains ownership of data. The mixer owns the returned stream.
  */
-class DuneEngine : public Engine {
-public:
-	DuneEngine(OSystem *syst, const ADGameDescription *gameDescription);
-	~DuneEngine() override;
-
-	Common::Error run() override;
-	bool hasFeature(EngineFeature feature) const override;
-	void syncSoundSettings() override;
-
-private:
-	const ADGameDescription *_gameDescription;
-};
+Audio::AudioStream *makeAmigaMusicStream(const Common::Array<byte> &data, int rate);
 
 } // namespace Dune
 
-#endif // ENGINES_DUNE_DUNE_H
+#endif

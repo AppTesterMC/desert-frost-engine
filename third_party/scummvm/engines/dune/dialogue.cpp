@@ -27,8 +27,8 @@
  * OpenRakis' annotated DNCDPRG_RECENT.ASM: sub_1A396 (condition evaluation,
  * also decoded by madmoose's dune-rust crates/condit), sub_19F9E (find and
  * show the next line), sub_1A03F (actions and the said flag) and the driver
- * at loc_19472. The floppy executable behaves the same with the same data
- * files.
+ * at loc_19472. The floppy uses the same record layout, but keeps Liet
+ * Kynes in the first phrase bank (CS:CA75), unlike the CD (CS:D00F).
  */
 
 #include "dune/dialogue.h"
@@ -184,12 +184,17 @@ bool Conditions::evaluate(uint index, const GameState &state) const {
 
 bool Dialogue::load(Resource &resources, StartupLog &log) {
 	_split = 0;
-	if (!resources.load("DIALOGUE.HSQ", _data) || _data.size() < 0x62) {
+	const uint splitIndex = (resources.dosFloppy() || resources.amiga()) ? 0x70 : 0x60;
+	if (!resources.load("DIALOGUE.HSQ", _data) || _data.size() < splitIndex + 2) {
 		log.line("Dialogue: DIALOGUE.HSQ missing");
 		_data.clear();
 		return false;
 	}
-	_split = READ_LE_UINT16(_data.data() + 0x60);
+	// Floppy CS:CA75 compares the current entry against ds:D059, the
+	// Chani list pointer at DIALOGUE base CFE9 + 0x70. CD CS:D00F instead
+	// compares against its Liet pointer at DIALOGUE + 0x60. Amiga hunk 0
+	// FB28/FB2E likewise adds DIALOGUE[$70] to its base at $3d86.
+	_split = READ_LE_UINT16(_data.data() + splitIndex);
 	return true;
 }
 

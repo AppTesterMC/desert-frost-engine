@@ -14,6 +14,12 @@ run_root="${DUNE_RUN_ROOT:-$local_root/sdl-run}"
 case_root="$run_root/map-troops-check"
 fixture="${DUNE_MAP_TROOPS_SAVE:-$repo_root/tests/fidelity/saves/saboteurs/DUNE21S1.SAV}"
 data="${DUNE_DATA_FLOPPY:-$repo_root/data/floppy}"
+if [ ! -f "$fixture" ]; then
+	# The fixture is a test save that is not published; without it there is
+	# nothing to check (set DUNE_MAP_TROOPS_SAVE to a mid-game floppy save).
+	echo "SKIP map troops: no fixture save ($fixture); set DUNE_MAP_TROOPS_SAVE"
+	exit 0
+fi
 "$script_dir/test_dune_scummvm_sdl.sh" build >/dev/null 2>&1 || {
 	echo "FAIL map troops: desktop build failed"
 	exit 1

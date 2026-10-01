@@ -349,7 +349,7 @@ void GameScreen::flightLandscapeDraw(Graphics::Surface &view, const Common::Arra
 	view.fillRect(Common::Rect(0, kHorizon, 320, MIN<int>(152, view.h)), kGroundColour);
 	for (int i = (int)_flightObjects.size() - 1; i >= 0; --i) {
 		const LandObject &o = _flightObjects[i];
-		drawLandObject(view, dunes, o.sprite, (uint)o.z, o.x, kFlightHeight);
+		drawLandObject(view, dunes, o.sprite, (uint)o.z, o.x, _riding ? 0x1e : kFlightHeight); // ds:20ED: 0x1e on a worm (54b0)
 	}
 }
 

@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Dump DIALOGUE.HSQ entries with their CONDIT expressions and sentences.
 
-Usage: dune_dialogue_dump.py DUNE.DAT [regex]   (lines whose text matches)
+Usage: dune_dialogue_dump.py DUNE.DAT|FLOPPY_DIR [regex]
+Use --release cd for extracted CD files or --release amiga for Amiga files.
 Entry layout and operators as in engines/dune/dialogue.cpp (sub_19F9E,
 sub_1A396): b0 bit7 said, bit6 repeatable, bits0-3 action; condition =
 (b2 >> 6) << 8 | b1; sentence = (b2 & 3) << 8 | b3 (1-based); entries from
-the word at 0x60 on use PHRASEx2.
+the word at 0x60 (CD) / 0x70 (DOS floppy / Amiga) on use PHRASEx2.
+Original loaders: CD CS:D00F, DOS floppy CS:CA75, Amiga hunk 0 FB16.
 """
-import re, struct, sys
+import argparse, re, struct, sys
+from pathlib import Path
 sys.path.insert(0, __file__.rsplit('/', 1)[0])
 import dune_sprite_sheet as s
 
@@ -45,11 +48,23 @@ def condition(c, index):
     return ' '.join(parts)
 
 def main():
-    f = s.dat(sys.argv[1])
-    pat = re.compile(sys.argv[2], re.I) if len(sys.argv) > 2 else None
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('data', type=Path)
+    parser.add_argument('regex', nargs='?')
+    parser.add_argument('--release', choices=('floppy', 'cd', 'amiga'),
+                        help='defaults to floppy for a directory, CD for DUNE.DAT')
+    args = parser.parse_intermixed_args()
+    if args.data.is_dir():
+        f = {p.name.upper(): p.read_bytes() for p in args.data.iterdir()
+             if p.is_file() and p.suffix.lower() == '.hsq'}
+    else:
+        f = s.dat(args.data)
+    release = args.release or ('floppy' if args.data.is_dir() else 'cd')
+    pat = re.compile(args.regex, re.I) if args.regex else None
     dlg = s.unhsq(f['DIALOGUE.HSQ']); cond = s.unhsq(f['CONDIT.HSQ'])
-    p1 = strings(s.unhsq(f['PHRASE11.HSQ'])); p2 = strings(s.unhsq(f['PHRASE12.HSQ']))
-    split = struct.unpack_from('<H', dlg, 0x60)[0]
+    lang = 2 if release == 'amiga' else 1
+    p1 = strings(s.unhsq(f['PHRASE%d1.HSQ' % lang])); p2 = strings(s.unhsq(f['PHRASE%d2.HSQ' % lang]))
+    split = struct.unpack_from('<H', dlg, 0x60 if release == 'cd' else 0x70)[0]
     for idx in range(17 * 8):
         o = struct.unpack_from('<H', dlg, idx * 2)[0]
         while o + 4 <= len(dlg) and not (dlg[o] == 0xff and dlg[o + 1] == 0xff):
@@ -62,4 +77,5 @@ def main():
                       'R' if b0 & 0x40 else '-', 'S' if b0 & 0x80 else '-', cnum, condition(cond, cnum), snum - 1, text[:110]))
             o += 4
 
-main()
+if __name__ == '__main__':
+    main()

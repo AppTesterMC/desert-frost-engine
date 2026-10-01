@@ -83,10 +83,12 @@ public:
 		// still identifies them before they are run and detected again.
 		if (Common::checkGameGUIOption(GAMEOPTION_AMIGA_OPTIONS, ConfMan.get("guioptions", target)) ||
 			Common::parsePlatform(ConfMan.get("platform", target)) == Common::kPlatformAmiga) {
-			ExtraGuiOptions options;
-			options.push_back(optionsList[0].option);
-			options.push_back(optionsList[1].option);
-			return new GUI::ExtraGuiOptionsWidget(boss, name, target, options);
+			// Refresh cached pre-music capabilities as well as older targets with
+			// no flags. OptionsDialog rereads these before enabling its controls.
+			ConfMan.set("guioptions", Common::getGameGUIOptionsDescription(GUIO7(
+				GAMEOPTION_FIX_LETO_LOOP, GAMEOPTION_FIX_CELIMYN_TUEK, GAMEOPTION_AMIGA_OPTIONS,
+				GUIO_NOSFX, GUIO_NOSPEECH, GUIO_NOMIDI, GUIO_NOLANG)), target);
+			return new Dune::OriginalOptionsWidget(boss, name, target, true);
 		}
 		if (Common::checkGameGUIOption(GAMEOPTION_ORIGINAL_OPTIONS, ConfMan.get("guioptions", target)) ||
 			Common::checkGameGUIOption(GAMEOPTION_FIX_LETO_LOOP, ConfMan.get("guioptions", target)))

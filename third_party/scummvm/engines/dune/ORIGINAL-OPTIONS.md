@@ -100,8 +100,8 @@ targets to avoid presenting a second, ineffective language setting. The
 unsupported MIDI/MT-32 tabs are also suppressed for DOS; its Audio tab still
 provides the implemented AdLib emulator and No music choices.
 
-Amiga **Game Options > Game** exposes **Fix the Leto loop** and **Fix
-Celimyn-Tuek**, both off by default. These options already work in the shared
+Amiga **Game Options > Game** exposes **Amiga music**, enabled by default,
+and **Fix the Leto loop** and **Fix Celimyn-Tuek**, both off by default. These options already work in the shared
 world implementation; they are now reachable through the launcher. Existing
 Amiga targets with a stored platform are recognized even before re-detection.
 Controller bindings remain in **Keymaps**, and the engine's working save/load
@@ -109,15 +109,22 @@ uses **Paths > Save path**. This does not use the original Amiga game's broken
 disk-save menu.
 
 The original Amiga music banks are `M1.HSQ`, `M2.HSQ` and `M3.HSQ`, with the
-song titles WORMSIGN, ECOLOVE and FREMENS and an executable Paula replayer.
-The current engine's music player implements DOS HERAD through OPL only;
-`amigaFileName` rejects its DOS song names. Its sampled-sound player decodes
-VOC, which these Amiga disks do not contain. Amiga music and sound remain
-unimplemented, so this menu exposes neither an AdLib switch nor a pretend
-Paula switch. Detection disables unused volume sliders and MIDI tabs.
-ScummVM's generic Audio device chooser remains a host setting and cannot
-enable the missing Amiga player. The `.SAM` files are room command streams,
-not audio samples.
+song titles WORMSIGN, ECOLOVE and FREMENS. The engine now plays these native
+tracker modules through ScummVM's Paula emulator using the executable's
+replay rules. Gameplay starts with ECOLOVE and changes interior music at the
+original room-transition cue. M1 is backend-tested; the Amiga intro remains
+unported, so its intro cue is not yet wired. See [AMIGA-AUDIO.md](AMIGA-AUDIO.md)
+for the original offsets, replay details and captured-audio checks.
+
+The **Amiga music** checkbox uses `dune_no_music`: `false` enables playback,
+`true` disables it on the next game start. **Volume > Music** and the standard
+mute control apply. Opening Game Options refreshes cached pre-music Amiga
+capabilities, so older targets also gain their working Music volume control.
+DOS AdLib and MIDI device selections do not choose the Amiga instrument bank.
+SFX and speech sliders stay disabled: no independent Amiga sample resource or
+sound-effect dispatcher was identified in the examined release. Its `.SAM`
+files are room command streams. The native modules contain their own PCM
+instruments; no DOS VOC substitution is used.
 
 The original Amiga executable provides independent evidence for the two
 optional fixes. The phase dispatcher at hunk 0 `0x20C6–0x20F0` indexes the table
@@ -133,6 +140,7 @@ Run `scripts/check_amiga_options.sh` with `DUNE_DATA_AMIGA` set to installed
 Amiga data. It checks both story options off and on, their actual room and
 conversation behavior, the discovery phase boundary, save/reload, keyboard
 navigation and an isolated writable save path. On iPhone, open an Amiga
-target's Game Options, toggle each fix, save and reopen the dialog; confirm
-that no DOS language or AdLib control appears. Check Keymaps with a paired
+target's Game Options, toggle music and each fix, save and reopen the dialog;
+confirm that no DOS language or AdLib control appears. Start with music on,
+then off; test Music volume and mute. Check Keymaps with a paired
 controller and save/load an engine log under an alternate Save path.

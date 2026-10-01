@@ -97,6 +97,8 @@ public:
 	bool step();
 	const byte *screen() const { return _screen.data(); }
 	const byte *palette() const { return _palette; }
+	/** Copy the entries the video's palette chunks set so far into @p target (256 x 3). */
+	void mergePalette(byte *target) const;
 	uint frameNumber() const { return _streamFrame; }
 
 private:
@@ -107,6 +109,7 @@ private:
 
 	OSystem *_system;
 	byte _palette[256 * 3];
+	bool _paletteSet[256];
 	bool _paletteDirty;
 	Common::Array<byte> _screen;
 	Common::Array<byte> _unpacked;

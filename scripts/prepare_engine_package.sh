@@ -61,10 +61,11 @@ for f in \
 	scummvm_source.sh check_scummvm_source.sh check_cockpit.sh \
 	check_map_troops.sh check_amiga_arrival.sh \
 	check_original_options.sh check_original_options.py check_amiga_options.sh check_amiga_options.py \
+	check_amiga_music.sh check_amiga_music.py \
 	check_save_compatibility.sh check_save_compatibility.py \
 	check_speedrun_evidence.sh check_speedrun_orders.sh dune_speedrun_evidence.py \
 	test_dune_scummvm_sdl.sh test_dune_scummvm_native.sh test_dune_scummvm_runtime.sh \
-	check_dune_build.sh check_speedrun.sh watch_speedrun.sh check_flight_landscape.sh check_leto_loop.sh check_celimyn_tuek.sh check_hemispheres.sh check_search_equipment.sh check_water_of_life.sh check_ecology_win.sh check_endless_play.sh check_smugglers.sh check_chani.sh check_epidemic.sh check_head.sh check_all.sh check_saboteurs.sh check_other_releases.sh build_dune_scummvm_ios.sh install_dune_scummvm_ios_devicectl.sh \
+	check_dune_build.sh check_speedrun.sh watch_speedrun.sh check_flight_landscape.sh check_leto_loop.sh check_celimyn_tuek.sh check_hemispheres.sh check_search_equipment.sh check_water_of_life.sh check_ecology_win.sh check_endless_play.sh check_smugglers.sh check_chani.sh check_epidemic.sh check_head.sh check_all.sh check_saboteurs.sh check_other_releases.sh check_hostile_zone.sh check_small_rules.sh check_raids.sh check_room_leave.sh build_dune_scummvm_ios.sh install_dune_scummvm_ios_devicectl.sh \
 	ScummVM-iOS.xcscheme PREFLIGHT.md README-local-builds.md \
 	dune_regress.py dune_accept_golden.py dune_audio_level.py \
 	dune_sprite_sheet.py dune_hnm_frames.py dune_room.py dune_dat.py dune_unlzexe.py chani_grep.py dune_disasm.py asm_range.py dune_dialogue_dump.py dune_script_trace.py dune_save_patch.py globe_ref.py dune_amiga_extract.py segacd_iso.py segacd_img.py segacd_bitmaps.py segacd_sprites.py segacd_ds_align.py segacd_ds_convert.py segacd_portrait_match.py segacd_portrait_pose.py \
@@ -74,7 +75,7 @@ done
 tree scripts/patches
 
 # Regression scenarios; the golden images are game frames and stay out.
-tree tests/regression
+tree tests/regression --exclude 'kynes-dialogue.script'
 
 # Documentation and README media; of the research notes only the write-ups the
 # engine and its checks cite (raw extracts, disassembly dumps and videos stay private).
@@ -83,7 +84,6 @@ put notes/speedrun/route.md
 put notes/speedrun/battle-worm-spec.md
 tree doc --include dune-intro.gif --include "screen-*.png" --exclude "*"
 tree docs --exclude 'desert-frost/'
-
 # ---- Checks: fail rather than publish something that must not be public.
 fail=0
 data=$(cd "$REPO" && find . -type f \( -iname '*.dat' -o -iname '*.hsq' -o -iname '*.hnm' \

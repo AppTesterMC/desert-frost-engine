@@ -102,23 +102,28 @@ bool optionEnabled(const char *key, const Common::String &domain) {
 
 } // namespace
 
-OriginalOptionsWidget::OriginalOptionsWidget(GUI::GuiObject *boss, const Common::String &name, const Common::String &domain) :
-		OptionsContainerWidget(boss, name, "DuneOriginalOptions", domain) {
-	new GUI::StaticTextWidget(widgetsBoss(), _dialogLayout + ".languageLabel", _("Text language:"));
-	_language = new GUI::PopUpWidget(widgetsBoss(), _dialogLayout + ".language",
-		_("Uses the installed game's original command, dialogue, book and intro text. Takes effect when the game starts."));
-	const uint installed = installedLanguages(ConfMan.getPath("path", domain));
-	for (uint language = 1; language <= 7; ++language)
-		if (installed & (1 << language))
-			_language->appendEntry(_(originalLanguageName(language)), language);
-	if (!_language->numEntries()) {
-		_language->appendEntry(_("Game text files not found"), 0);
-		_language->setEnabled(false);
+OriginalOptionsWidget::OriginalOptionsWidget(GUI::GuiObject *boss, const Common::String &name, const Common::String &domain, bool amiga) :
+		OptionsContainerWidget(boss, name, amiga ? "DuneAmigaOptions" : "DuneOriginalOptions", domain),
+		_language(nullptr), _sound(nullptr) {
+	if (!amiga) {
+		new GUI::StaticTextWidget(widgetsBoss(), _dialogLayout + ".languageLabel", _("Text language:"));
+		_language = new GUI::PopUpWidget(widgetsBoss(), _dialogLayout + ".language",
+			_("Uses the installed game's original command, dialogue, book and intro text. Takes effect when the game starts."));
+		const uint installed = installedLanguages(ConfMan.getPath("path", domain));
+		for (uint language = 1; language <= 7; ++language)
+			if (installed & (1 << language))
+				_language->appendEntry(_(originalLanguageName(language)), language);
+		if (!_language->numEntries()) {
+			_language->appendEntry(_("Game text files not found"), 0);
+			_language->setEnabled(false);
+		}
 	}
-	_music = new GUI::CheckboxWidget(widgetsBoss(), _dialogLayout + ".music", _("AdLib music"),
+	_music = new GUI::CheckboxWidget(widgetsBoss(), _dialogLayout + ".music", amiga ? _("Amiga music") : _("AdLib music"),
+		amiga ? _("Play the original Amiga tracker music. Volume is set in the Volume tab.") :
 		_("Play the original AdLib music through ScummVM's OPL emulator (ADL). Other original music drivers are not yet supported."));
-	_sound = new GUI::CheckboxWidget(widgetsBoss(), _dialogLayout + ".sound", _("Sampled sounds"),
-		_("Play sound effects and CD video soundtracks (SDB/SBP). Volume is set in the Volume tab."));
+	if (!amiga)
+		_sound = new GUI::CheckboxWidget(widgetsBoss(), _dialogLayout + ".sound", _("Sampled sounds"),
+			_("Play sound effects and CD video soundtracks (SDB/SBP). Volume is set in the Volume tab."));
 	_leto = new GUI::CheckboxWidget(widgetsBoss(), _dialogLayout + ".leto", _("Fix the Leto loop"),
 		_("Remove Duke Leto from the palace after his death, from phase 0x4c."));
 	_celimyn = new GUI::CheckboxWidget(widgetsBoss(), _dialogLayout + ".celimyn", _("Fix Celimyn-Tuek"),
@@ -127,19 +132,24 @@ OriginalOptionsWidget::OriginalOptionsWidget(GUI::GuiObject *boss, const Common:
 
 void OriginalOptionsWidget::load() {
 	const uint language = ConfMan.hasKey("dune_language", _domain) ? ConfMan.getInt("dune_language", _domain) : 1;
-	_language->setSelectedTag(language);
+	if (_language)
+		_language->setSelectedTag(language);
 	_music->setState(!optionEnabled("dune_no_music", _domain));
-	_sound->setState(!optionEnabled("dune_no_sound", _domain));
+	if (_sound)
+		_sound->setState(!optionEnabled("dune_no_sound", _domain));
 	_leto->setState(optionEnabled("dune_fix_leto_loop", _domain));
 	_celimyn->setState(optionEnabled("dune_fix_celimyn_tuek", _domain));
 }
 
 bool OriginalOptionsWidget::save() {
-	const uint language = _language->getSelectedTag();
-	if (language >= 1 && language <= 7)
-		ConfMan.setInt("dune_language", language, _domain);
+	if (_language) {
+		const uint language = _language->getSelectedTag();
+		if (language >= 1 && language <= 7)
+			ConfMan.setInt("dune_language", language, _domain);
+	}
 	ConfMan.setBool("dune_no_music", !_music->getState(), _domain);
-	ConfMan.setBool("dune_no_sound", !_sound->getState(), _domain);
+	if (_sound)
+		ConfMan.setBool("dune_no_sound", !_sound->getState(), _domain);
 	ConfMan.setBool("dune_fix_leto_loop", _leto->getState(), _domain);
 	ConfMan.setBool("dune_fix_celimyn_tuek", _celimyn->getState(), _domain);
 	return true;
@@ -148,13 +158,14 @@ bool OriginalOptionsWidget::save() {
 void OriginalOptionsWidget::defineLayout(GUI::ThemeEval &layouts, const Common::String &layoutName,
 		const Common::String &overlayedLayout) const {
 	layouts.addDialog(layoutName, overlayedLayout)
-		.addLayout(GUI::ThemeLayout::kLayoutVertical).addPadding(8, 8, 8, 8)
-		.addWidget("languageLabel", "OptionsLabel")
-		.addWidget("language", "PopUp")
-		.addSpace(8)
-		.addWidget("music", "Checkbox")
-		.addWidget("sound", "Checkbox")
-		.addSpace(8)
+		.addLayout(GUI::ThemeLayout::kLayoutVertical).addPadding(8, 8, 8, 8);
+	if (_language)
+		layouts.addWidget("languageLabel", "OptionsLabel")
+			.addWidget("language", "PopUp").addSpace(8);
+	layouts.addWidget("music", "Checkbox");
+	if (_sound)
+		layouts.addWidget("sound", "Checkbox");
+	layouts.addSpace(8)
 		.addWidget("leto", "Checkbox")
 		.addWidget("celimyn", "Checkbox")
 		.closeLayout().closeDialog();

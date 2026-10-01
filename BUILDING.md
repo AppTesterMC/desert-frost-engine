@@ -91,9 +91,11 @@ Notes:
 
 Open **Game Options > Game** for DOS language/music/sampled-sound controls or
 the two optional story fixes available on DOS and Amiga. Amiga uses fixed
-English resources; Paula music and sound playback are not implemented.
+English resources and its native Paula music, with an Amiga music toggle and
+Music volume. Independent sound effects and speech are not implemented.
 **Keymaps** configures controller bindings and **Paths > Save path** selects
-per-game storage. A generic audio-device choice cannot enable Amiga audio.
+per-game storage. The Amiga backend uses the original M1/M2/M3 files; see
+[Amiga audio](third_party/scummvm/engines/dune/AMIGA-AUDIO.md).
 
 DOS saves retain `DUNE21S1.SAV`–`DUNE21S4.SAV` (floppy) and
 `DUNE37S1.SAV`–`DUNE37S4.SAV` (CD). Engine Amiga uses `DUNEAMS1.SAV`–`DUNEAMS4.SAV`.
@@ -184,6 +186,9 @@ fixture is not distributed. The script does not need or include golden images.
 `scripts/check_amiga_arrival.sh` checks the Amiga arrival-room conversion.
 `scripts/check_original_options.sh` checks DOS language/audio options, while
 `scripts/check_amiga_options.sh` checks the applicable Amiga story options.
+`scripts/check_amiga_music.sh` captures native Paula mixer output, tests all three
+tracks, music controls and room cues, and rejects malformed modules. It uses
+SDL disk audio rather than system speakers.
 `scripts/check_save_compatibility.sh` exercises the isolated DOS and Amiga save
 namespaces and matching legacy-save reads. Set `DUNE_DATA_AMIGA` for these
 Amiga checks.
@@ -223,6 +228,15 @@ arrival. It uses generated screenshots rather than original-game captures.
 `scripts/check_saboteurs.sh`, `check_epidemic.sh`, `check_chani.sh` and
 `check_head.sh` check the Harkonnen saboteurs and worm attacks on harvesters, the
 Fremen epidemic, Chani's kidnapping and Paul's panel head.
+
+`scripts/check_hostile_zone.sh`, `check_small_rules.sh`, `check_raids.sh` and
+`check_room_leave.sh` check the Harkonnen-zone warning (CHANGE DESTINATION),
+the troops' daily motivation and skill rules, the Harkonnen raids on sietches
+and the room-leave line (Leto's "Where are you going so fast?").
+
+`scripts/check_all.sh [-j N] [--no-full] [--no-speedrun]` builds once and runs
+the whole check set in parallel; a check that lacks an optional input prints
+`SKIP` instead of failing.
 
 `scripts/check_search_equipment.sh`, `check_water_of_life.sh`,
 `check_ecology_win.sh`, `check_endless_play.sh` and `check_smugglers.sh` check

@@ -30,6 +30,8 @@
 #include "common/system.h"
 #include "common/textconsole.h"
 
+#include "engines/engine.h"
+
 #include "graphics/font.h"
 #include "graphics/fontman.h"
 #include "graphics/paletteman.h"
@@ -427,7 +429,7 @@ GameScreen::GameScreen(OSystem *system, Resource &resources, StartupLog &log) :
 		_system(system), _resources(resources), _log(log), _panel(system, resources), _mode(kRoom),
 		_room(kPalaceFirstRoom), _viewOk(false), _world(_state, resources, log), _sentences(nullptr),
 		_dialogue(nullptr), _conditions(nullptr), _conversation(nullptr), _book(nullptr), _map(nullptr),
-		_saves(nullptr), _menu(kMenuNone), _menuStatus(0xffff), _music(nullptr), _musicOn(false), _musicOrder(0),
+		_saves(nullptr), _menu(kMenuNone), _menuStatus(0xffff), _music(nullptr), _musicOn(false), _amigaMusic(2), _musicOrder(0),
 		_quitRequested(false), _troopId(0), _troopFromMap(false), _troopChoosing(false), _recruiting(false), _troopFromRoom(false),
 		_hireTroop(0),
 		_clockStart(0), _talkWho(0), _talkIdle(0), _talkEnded(false), _talkRecruit(0), _talkRecruitOk(false), _talkSheet(nullptr), _talkLine(0), _talkPage(0), _talkAnimation(0), _talkFrame(0), _talkStart(0),
@@ -738,6 +740,12 @@ void GameScreen::rideWormTo(int destination) {
 	_riding = true;
 	setGamePhase(0x50);
 	_log.line(Common::String::format("Travel: riding a worm to %d", destination));
+	// The departure (CD 47a0, floppy 4faf): the head goes, the worm comes.
+	wormRideSetup();
+	if (destination != (int)_world.currentLocation() || _desert) {
+		headForDeparture();
+		wormDeparture();
+	}
 	if (destination == -2)
 		travelToward(_map->pointLongitude(), _map->pointLatitude());
 	else
@@ -1607,9 +1615,20 @@ void GameScreen::panelAction(Panel::Action action, int row, int arrow) {
 			openCockpit(false);
 			return;
 		case kRowWorm:
-			// seg000:42d1: the map, choosing where the worm goes.
-			_riding = true;
-			openMap(MapScreen::kFlat, true);
+			// CD seg000:42d1, floppy 4b08: worm_ride_setup, then the
+			// destination map without the cockpit (map_ornithopter_mode 0:
+			// the view stays behind the window's border, CD 43a9-43c9).
+			wormRideSetup();
+			_wormBackdrop.resize(320 * 152);
+			for (int y = 0; y < 152; ++y)
+				memcpy(_wormBackdrop.data() + y * 320, _surface.getBasePtr(0, y), 320);
+			_system->getPaletteManager()->grabPalette(_wormBackdropPalette, 0, 256);
+			_wormMap = true;
+			openCockpit(false);
+			if (!_cockpit) {
+				_wormMap = false;
+				_riding = false;
+			}
 			return;
 		case kRowMassiveAttack:
 			// menu_callback_choice_massive_attack (CD 7317-7396): the denser
@@ -1816,6 +1835,16 @@ bool GameScreen::roomLeaveScan(uint room) {
 void GameScreen::enterRoom(uint room) {
 	if (!roomLeaveScan(room))
 		return;
+	// Amiga hunk0:57fc..5820: only entering from exterior room 1
+	// selects a new song. Flights, maps and other rooms keep it running.
+	if (_world.amiga() && _room == 1 && room != 1 && _world.placeType() <= 0x20) {
+		const byte song = _world.placeType() == 0x20 ? 2 : 3;
+		if (song != _amigaMusic) {
+			_amigaMusic = song;
+			if (_musicOn)
+				playCurrentMusic();
+		}
+	}
 	// ui_click_move_room (seg000:3f27): ds:26 cleared; the first move inside
 	// a place marks it visited (status bit 4), counts a sietch (ds:25) and
 	// flags the first entry (ds:26 = 0xff); ds:0c the new room; then
@@ -2442,6 +2471,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 	};
 	// The landscape (floppy 4F63): its rows follow the route five steps ahead.
 	const uint32 kLandFrameMillis = 80; // a frame per 16 ticks (the frame task at 546D)
+	const uint stepFrames = _riding ? 16 : 8; // frames a travel step (ds:4286)
 	uint landFrames = 0; // landscape frames since the rows were laid out
 	auto startLandscape = [&]() {
 		// 76CA: five groups of rows, each seeded one register step further on
@@ -2458,8 +2488,10 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		}
 		flightLandscapeStart(longitudes, latitudes);
 		// The step counter (ds:4286) is 0 after the take-off: the first frame
-		// already brings a step, then one every 8 frames (reloaded with 7).
-		_flightTicks = 7;
+		// already brings a step, then one every 8 frames (reloaded with 7;
+		// the worm's every 16, reloaded with 0xf: 5cf6-5d08).
+		_flightTicks = stepFrames - 1;
+		_wormToggle = false;
 		landFrames = 0;
 	};
 	auto reseedLandscape = [&]() {
@@ -2474,7 +2506,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 	};
 	const uint32 flightStart = _system->getMillis();
 	uint32 lastTimedDump = 0;
-	const bool cdView = !skipping && !dunes && !_world.floppy() && startCdFlightView();
+	const bool cdView = !skipping && !dunes && !_world.floppy() && (_riding ? startCdWormView() : startCdFlightView());
 	auto present = [&]() {
 		if (cdView) {
 			// travel_probe_terrain_ahead (CD 4e8e-4ec4): the map bytes six and
@@ -2538,8 +2570,14 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		// makes the next one due (the counter at ds:4286), so rows and steps
 		// keep the original's order: the step's row is drawn with the old seed.
 		bool ticked = false;
-		while (nowMillis - _flightFrameAt >= kLandFrameMillis && _flightTicks < 8) {
-			flightLandscapeTick();
+		while (nowMillis - _flightFrameAt >= kLandFrameMillis && _flightTicks < stepFrames) {
+			// The worm (floppy 54b0): the objects move and a row comes in
+			// every second frame (ror [2937], 0x5555); its back every frame.
+			_wormToggle = !_wormToggle;
+			if (!_riding || _wormToggle)
+				flightLandscapeTick();
+			if (_riding)
+				wormAnimAdvance();
 			_flightFrameAt += kLandFrameMillis;
 			++_flightTicks;
 			++landFrames;
@@ -2554,6 +2592,8 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		} else {
 			flightLandscapeDraw(view, dunesData);
 		}
+		if (_riding)
+			wormAnimFrame(view, false); // 5744: the worm's back over the landscape
 		_map->drawMinimap(_surface, Common::Rect(202, 3, 318, 61), _panel);
 		setFlightRows();
 		_panel.setLeftPanel(Panel::kLeftBook);
@@ -2696,7 +2736,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 	int turning = 0;
 	uint32 nextTurn = 0;
 	const uint cap = 4 * total + 64;
-	auto stepDue = [&]() { return dunes ? _flightTicks >= 8 : _system->getMillis() >= next; };
+	auto stepDue = [&]() { return dunes ? _flightTicks >= stepFrames : _system->getMillis() >= next; };
 	for (;;) {
 		if (!freeFlight && arrived())
 			break;
@@ -2871,7 +2911,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 	// (terrain forced to 0, so the loop comes back to MNT1) until MNT1 plays
 	// its frame 0x3c (sietch) or 0x16 (palace); the approach clip takes over
 	// from there (playArrivalVideo). A skipped flight has no run-in (F1).
-	if (cdView && !skipping && !_quitRequested && destination >= 0) {
+	if (cdView && !skipping && !_quitRequested && destination >= 0 && !_riding) {
 		const byte type = _world.location((uint)destination).type;
 		if (type <= Location::kPalace && _flightVideo) {
 			const uint handoff = type == Location::kPalace ? 0x16 : 0x3c;
@@ -4005,13 +4045,27 @@ bool GameScreen::loadSlot(uint slot) {
 	return true;
 }
 
+void GameScreen::playCurrentMusic() {
+	if (!_music)
+		return;
+	const Common::String name = _world.amiga() ? Common::String::format("M%u.HSQ", _amigaMusic) : "ARRAKIS.HSQ";
+	Common::Array<byte> song;
+	const bool playing = _resources.load(name, song) && _music->play(song);
+	_log.line(Common::String::format("Music: %s %s", name.c_str(), playing ? "started" : "not started"));
+	debugSetAudioStream(Common::String::format("music:%s %s", name.c_str(), playing ? "playing" : "not started"));
+}
+
 void GameScreen::toggleMusic() {
 	_musicOn = !_musicOn;
+	// The game menu and launcher checkbox describe the same setting. A
+	// launcher-disabled song must become audible when MUSIC ON is chosen,
+	// while ScummVM's global mute and volume still take precedence.
+	ConfMan.setBool("dune_no_music", !_musicOn);
+	if (g_engine)
+		g_engine->syncSoundSettings();
 	if (_music) {
 		if (_musicOn) {
-			Common::Array<byte> song;
-			if (_resources.load("ARRAKIS.HSQ", song))
-				_music->play(song);
+			playCurrentMusic();
 		} else {
 			_music->stop();
 		}
@@ -4204,7 +4258,10 @@ void GameScreen::advanceConversation() {
 		waterOfLifeWakeUp();
 		return;
 	}
-	applyStory();
+	// A chapter queued by the final resource page waits until that page's
+	// last wrapped segment is visible, even when it spans several balloons.
+	if (_talkLine + bubbleLines() >= _talkLines.size())
+		applyStory();
 	if (!_talkEnded && _talkLine + bubbleLines() < _talkLines.size()) {
 		// The rest of a page that did not fit the balloon.
 		_talkLine += bubbleLines();
@@ -4270,6 +4327,11 @@ void GameScreen::advanceConversation() {
 	lineHeadDown();
 	startTalkAnimation();
 	drawTalk();
+	// Floppy A866-A8B3 / CD A03F: the line's event takes effect as its
+	// final visible segment is presented. A queued chapter must not wait
+	// for another TALK (Kynes's bulb line already puts the game at 0x5c).
+	if (_talkLine + bubbleLines() >= _talkLines.size())
+		applyStory();
 	dumpScreen(_system, Common::String::format("talk-%u", ++_talkPage).c_str());
 }
 

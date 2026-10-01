@@ -452,8 +452,8 @@ original does, and the harness checks that landing.
 
 ## Dialogue and the book
 
-Recovered from the CD executable (OpenRakis' `DNCDPRG_RECENT.ASM`; the
-floppy uses the same data) and checked against the data files with Python
+Recovered from the CD executable (OpenRakis' `DNCDPRG_RECENT.ASM`), with
+release-specific phrase banks verified below, and checked with Python
 before the port was written. Implemented in `text.cpp`, `dialogue.cpp`,
 `book.cpp` and the talk/book modes of `scene.cpp`.
 
@@ -461,8 +461,9 @@ before the port was written. Implemented in `text.cpp`, `dialogue.cpp`,
   `PHRASEx1/x2.HSQ` (dialogue lines; x = language) are offset tables of
   0xFF-terminated strings. Ids are 1-based; bit 11 selects the phrase files
   (`sub_1CF70` decrements first, then tests the bit). Which phrase file a
-  dialogue entry uses depends on its position: entries from the sixth
-  character on (the word at DIALOGUE offset 0x60) use `PHRASEx2`.
+  dialogue entry uses depends on its position: the CD switches at Liet
+  Kynes (zero-based character 6, `DIALOGUE+0x60`); DOS floppy and Amiga
+  switch at Chani (character 7, `DIALOGUE+0x70`).
 - **Codes inside strings** (`sub_18944`): 0x0D line break; 0xFE page break;
   0x80 hi lo another sentence; 0x81-0x8F a sentence whose id sits in the
   name table at data-segment word 0x11EB + 2n (sietch first/last name,
@@ -3011,3 +3012,84 @@ march simulation takes a slightly different intermediate longitude (two screen
 pixels on the checked route); the icon displays the actual engine GPS, and the
 arrival and stationed position agree. Selected-troop rings and animation timing
 fidelity remain separate work.
+
+
+## Liet Kynes phrase banks and room-entry introduction
+
+Verified on 2026-09-30 against the original DOS floppy, CD and Amiga
+executables. Liet Kynes belongs to the first phrase bank on DOS floppy and
+Amiga, and to the second bank on CD. Sharing the CD boundary caused missing
+greetings and unrelated equipment dialogue in the other releases.
+
+| Release | Original bank selector | Dialogue base and second-bank boundary |
+| --- | --- | --- |
+| DOS floppy 2.1 | CS:CA45/CA75 | Loaded at ds:CFE9 by CS:0F9A. CS:CA78 compares the current entry (ds:42D8) with ds:D059, the pointer at `DIALOGUE+0x70`. |
+| DOS CD 3.7 | CS:CF70/D00F | Compares the current entry with the pointer at `DIALOGUE+0x60`, before Liet's lists. |
+| Amiga | Hunk 0:FB16–FB5C | FB28 loads base 3D86, FB2E adds the word at offset 70, FB36 compares the current entry. Phrase bank pointers are A6+ED8 and A6+EDC. |
+
+The Amiga initializer at hunk 0:1708–1738 loads resource 0x59 (`dialogue`)
+at 3D86, resource 0x60 (`phrase21`) through A6+ED8, and resource 0x61
+(`phrase22`) through A6+EDC. The resource indexes match the original
+installer's filename table. Its native banks contain 446 and 434 entries;
+Liet's greeting is first-bank sentence 441 (zero-based). DOS floppy's banks
+contain 444 and 434 entries; the greeting is first-bank sentence 439.
+The CD greeting is second-bank sentence 13. Sega CD routing is unchanged.
+
+The floppy reference route continues an unmodified chapter save through the
+palace greenhouse, Chani's father dialogue and flight to Sihaya-Tuek. A
+native save taken at phase 0x55, place 62, exterior room 1 is then loaded
+unchanged into both the original and engine. UP reaches hall 3; UP again
+enters Liet's room 2. His entry line (record 2396, condition 354, action 12)
+advances to phase 0x58 immediately and displays Continue. Ten Continue inputs
+play the original introduction, after which talking to Liet explains the
+planet and bulbs. The bulb line advances to phase 0x5C; UP reaches botanical
+room 5 with Liet. LEFT reaches reservoir room 4.
+
+The chapter action must commit as the final visible segment is presented,
+not on an extra TALK input (floppy A866–A8B3, CD A03F/A235). The phase-0x58
+callback starts the scene at floppy CS:155F/1B06 or CD CS:1196/1771.
+These routines initialize the scene without replacing the triggering
+portrait and greeting. The next Continue displays the first scripted shot.
+`startScene` therefore supports holding that line, and room-entry scenes use
+it. The optional regression key `dune_scene_scripts` keeps scripted scenes
+active in capture runs; ordinary capture runs retain their existing skip.
+No story phase is forced by this option.
+
+`scripts/check_kynes_dialogue.sh` replays this path with a private native
+arrival save supplied through `DUNE_KYNES_SAVE`. The save is not distributed;
+without it the test explicitly reports SKIP. It checks the greeting and
+phase 0x58 before Continue, the complete introduction, correct ecological
+speech, phase 0x5C on the bulb line, and the botanical-room navigation. It
+must fail against the earlier binary. A separate synthetic test privately
+expands the final bulb-text page beyond three balloons while keeping the
+native save and original dialogue action. Phase 0x58 must survive the early
+balloons and advance to 0x5C after paging through the text. This catches an
+unconditional pre-paging commit as well as the original delayed commit.
+The derived text bank is not shipped or used for fidelity screenshots.
+Amiga's bank selection is established by its original code and decoded
+resources; this DOS replay does not claim an original Amiga Kynes playthrough.
+
+On a device: meet Liet with Chani and Stilgar, confirm the greeting opens
+with Continue, finish the introduction, ask about his ecology research,
+then enter the bulb garden. Confirm the correct text, portrait, chapter
+advance and room exits. CD's existing Kynes dialogue must remain unchanged.
+
+## The worm call and ride
+
+Traced on 2026-10-01 in the CD 3.7 executable (OpenRakis' `DNCDPRG_RECENT.ASM`, capstone on `DNCDPRG.EXE`, madmoose's dune-re `worm_ride.rs`) and in the floppy image (`DUNEPRG.unpacked.bin`, addresses found by their bytes). Captured on Spice86: floppy `captures/worm-ride` (route v3 chapter 13's end save), CD `captures/worm-ride-cd` (a patched day-1 CD save with phase 0x4f).
+
+| Step | CD | Floppy |
+|---|---|---|
+| CALL A WORM verb | 42d1 | 4b08 |
+| worm_ride_setup | 4285: loads VER.BIN (resource 0xbe) over cs:015f once; ds:11c9 = 8, vehicle ds:487e = 1 (DFL2.HNM), no cockpit (ds:473e = 0), script cursor ds:aa6e, VER.HSQ (0x39) and its palette | 4ae7: ds:11d6 = 8, cursor ds:a5b5, VER.HSQ (0x39); VER.BIN is VERBIN.HSQ, loaded to cs:44d9 at start-up (0f20) |
+| Destination map | map_screen_draw_base without the cockpit (43a9-43c9): the view stays, four rings round the window (0xfc inside to 0xf6 outside), the caption strip (77,33)-(245,41) in 0xf5; "Cancel" | the same |
+| Departure | 47a0: phase 0x50, head index 0 at once, transition 0x10 (dotted columns) to VER.HNM's first frame (4913, then set_sky_palette 388d), VER.HNM to its end (491c) with SN8.VOC, the loop ended at frame 0x0b | 4faf: phase 0x50, head down (1b82), 50c8: SHAI.HSQ (0x37) with SHAI2's frames, the desert (sprite 0x2c at 0,0x4a) under the hour's sky palette (3b13), then 0x2c frames from the list in SHAI sprite 0x2d, 0x19 ticks each (5122/5158), SD8 (voc 8) |
+| Ride view | DFL2.HNM looped (4ec6: a vehicle below 2 plays its own clip), each decoded frame through worm_view_redraw (4aeb: VER.HSQ, worm_anim_step 4d6c, worm_anim_draw_list 4da0, the minimap rect restored) | the flight landscape (54b0): ds:20ED = 0x1e (the orni's 0x48), the objects move and a row comes in every second frame (`ror [2937]`, 0x5555), the VER script every frame (5744/577a); a travel step every 16 frames (0xf reload) |
+| Step time | 0x300 ticks, as the ornithopter | 16 frames |
+| Arrival | no approach clip: ds:4732 = ds:11c9 & 1 (4fb6), 1 only for the ornithopter | no landing animation |
+
+Travel mode ds:11c9 (CD) / ds:11d6 (floppy) after the confirm: & 3 = 1 the ornithopter, 2 the worm. VER.BIN is identical in both releases (1532 bytes: view (0,9)-(318,152), 39 sprite lists, a 477-byte script of 238 frames); VER.HSQ differs. The floppy has no DFL2.HNM, VER.HNM or SN8.VOC.
+
+Built in `worm.cpp`, `cockpit.cpp` (the map without the cockpit), `scene.cpp` (flight hooks) and `story_scene.cpp` (the DFL2 view). Checked by `scripts/check_worm_ride.sh` and the fidelity scenarios `worm-ride` and `cd-worm-ride`.
+
+Not built: a CD worm ride to a desert point is homing (the original flies it free, with BACK TO STARTING POINT, TOWARDS NEAREST PLACE and the steering arrows); a companion's sighting during a ride shows the ornithopter cabin (the original redraws the worm view, 36cb); the SN8 loop end at frame 0x0b (the VOC plays once).

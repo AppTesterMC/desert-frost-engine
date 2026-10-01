@@ -69,14 +69,14 @@ is more limited (see its row). The table shows what works; the full status is in
 | Dialogue and book | the original dialogue engine (conditions, actions, talking portraits) and Paul's book |
 | Map | the flat map with place and troop icons, original-style labels, troop hit testing and orders, animated marches and arrival; the original DUNE MAP popup, map menu and planet panel, travel (with the CD's flight and arrival videos), and the globe with the game menu |
 | Saves | DOS floppy/CD `DUNE21S?.SAV` / `DUNE37S?.SAV` and isolated engine Amiga `DUNEAMS?.SAV` logs; matching legacy engine Amiga saves can be read without moving or rewriting them ([save details](third_party/scummvm/engines/dune/SAVES.md)) |
-| Sound | HERAD AdLib music through ScummVM's OPL emulator |
+| Sound | DOS HERAD AdLib music through ScummVM's OPL emulator; Amiga M1/M2/M3 tracker music through Paula with standard music controls. Independent Amiga sound effects and speech are not implemented. |
 | iOS | direct touch, the audio-session fix, ad-hoc-signed IPA builds |
 | Gameplay | the game clock, flight, hiring Fremen troops (WORK FOR ME) and giving them orders, the prospector lesson and MOVE TROOP with the spice-density popup, GO & SEARCH FOR EQUIPMENT, the palace plan, people standing where the original's per-landing rotation puts them, spice harvest and prospecting, rallying (charisma), the results screen, all following the executable's rules ([gameplay-rules.md](notes/research/gameplay-rules.md)) |
-| Story | story phases and their callbacks, Jessica's lessons, the Emperor's spice demands bargained with Duncan in the COMM room, Paul's visions, the scripted scenes, the sietch chiefs' story lines (the stillsuit maker) and Stilgar's Water of Life (the blackout, three periods, Stilgar's wake-up line) |
+| Story | story phases and their callbacks, Jessica's lessons, the Emperor's spice demands bargained with Duncan in the COMM room, Paul's visions, the scripted scenes, the sietch chiefs' story lines (the stillsuit maker), Stilgar's Water of Life, and corrected floppy/Amiga phrase-bank selection with natural Kynes room-entry greeting and scene progression |
 | Ecology and ending | the ecology route (wind traps, bulbs, irrigation, vegetation spreading on the map, fortresses taken, MODIFY EQUIPMENT), the ecology win (vegetation takes the forts; the final attack), the Harkonnen zone, deaths on arrival, the final scene, and playing on after the final battle |
-| Desert and flight | walking in the desert with its landscape, the ornithopter cockpit and destination screen, steering in free flight, CHANGE DESTINATION, the flight landscape (seeded row by row as the original, checked against its memory) and sightings of companions |
+| Desert and flight | walking in the desert with its landscape, the ornithopter cockpit and destination screen, steering in free flight, CHANGE DESTINATION, the Harkonnen-zone warning, the worm call and ride (the original's worm animation over the desert on the floppy, its worm-ride clips on the CD), the flight landscape (seeded row by row as the original, checked against its memory) and sightings of companions |
 | War and the ending | troop marches and espionage, fort battles, MASSIVE ATTACK and FIGHT FOR A WHOLE DAY, the Harkonnen captain, worm riding, the smugglers' village and their trade (offers, ARGUE / ACCEPT / REFUSE, bills paid through Duncan), Harkonnen saboteurs and worm attacks on harvesters, the Fremen epidemic cured by Chani, Chani's kidnapping and rescue, the quarrel between north and south troops (as in the original: mixed troops stop working) and the final attack on the Harkonnen palace |
-| Amiga | plays on the shared engine: its files, sheets, rooms, 32-colour palettes, copper sky and data segment are converted to the DOS layouts on load. Rooms, dialogue, map, globe, book, mirror, flights and story screens work. The ornithopter cockpit draws the full original dashboard; destination labels, map scrolling and recentering, cancel, and CHANGE DESTINATION resume have desktop checks. The Leto loop and Celimyn-Tuek options are also available. These checks do not establish a completable Amiga campaign. Not ported yet: the intro (the game opens in the throne room), music and sound, and the desert landscape (walks and flights show plain sky over sand) |
+| Amiga | plays on the shared engine: its files, sheets, rooms, 32-colour palettes, copper sky and data segment are converted to the DOS layouts on load. Rooms, dialogue, map, globe, book, mirror, flights and story screens work. The ornithopter cockpit draws the full original dashboard; destination labels, map scrolling and recentering, cancel, and CHANGE DESTINATION resume have desktop checks. The Leto loop and Celimyn-Tuek options are also available. Assisted full-campaign checks also reach the ending; player-only completion remains unverified. Native M1/M2/M3 music plays through Paula with music controls and volume. Not ported yet: the intro (the game opens in the throne room), independent sound effects, and the desert landscape (walks and flights show plain sky over sand) |
 | Sega CD / Mega CD | its own host: the disc's index, text, tile screens and initial game data, the original room screens, panel, conversations with portraits, and the map with travel. Not yet: verbs, videos, sound, flight and battles. The Mega CD (Europe) entry is detected but untested |
 | Not yet | full command lists per room |
 
@@ -108,8 +108,10 @@ entry added to ScummVM by an older build shows the checkboxes only after Dune
 has been started once, because ScummVM refreshes the entry's stored options
 when the game starts. See [the original option mapping](third_party/scummvm/engines/dune/ORIGINAL-OPTIONS.md).
 
-Amiga uses fixed English resources; Paula music and sound playback are not
-implemented. Its Game tab does not offer DOS language or AdLib controls.
+Amiga uses fixed English resources and plays its native M1/M2/M3 music through
+Paula. Its Game tab offers the Amiga music toggle, and Music volume is available;
+independent sound effects and speech remain unsupported. DOS language and AdLib
+controls are not offered. See [Amiga audio](third_party/scummvm/engines/dune/AMIGA-AUDIO.md).
 Controller bindings and Save path use the standard **Keymaps** and **Paths** tabs.
 Native Amiga `DUNE10S` saves remain unsupported; see the save details above.
 
@@ -203,8 +205,8 @@ differences. The repository will not bundle the commercial audio.
 
 ### Other releases
 
-- **Amiga:** the intro, the Amiga music and sound, and the desert landscape
-  for walks and flights.
+- **Amiga:** the intro, independent sound effects and speech, and the desert
+  landscape for walks and flights. Native M1/M2/M3 music is implemented.
 - **Sega CD / Mega CD:** the verbs, the videos, sound, flight and battles; test
   the European Mega CD release.
 - **DOS gameplay:** the remaining room commands. The DOS version then serves as the

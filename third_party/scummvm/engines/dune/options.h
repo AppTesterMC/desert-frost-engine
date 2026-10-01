@@ -35,7 +35,7 @@ const char *originalLanguageName(uint language);
 /** Per-game equivalents of the original's text and audio arguments. */
 class OriginalOptionsWidget : public GUI::OptionsContainerWidget {
 public:
-	OriginalOptionsWidget(GUI::GuiObject *boss, const Common::String &name, const Common::String &domain);
+	OriginalOptionsWidget(GUI::GuiObject *boss, const Common::String &name, const Common::String &domain, bool amiga = false);
 	void load() override;
 	bool save() override;
 

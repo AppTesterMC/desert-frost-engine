@@ -25,6 +25,7 @@
 #ifndef ENGINES_DUNE_MUSIC_H
 #define ENGINES_DUNE_MUSIC_H
 
+#include "audio/mixer.h"
 #include "common/array.h"
 #include "common/mutex.h"
 #include "common/scummsys.h"
@@ -41,16 +42,19 @@ namespace Dune {
  *
  * A song has up to nine MIDI-like tracks, one per OPL2 voice, and a bank of
  * 40-byte instruments with velocity/aftertouch/slide "macros". The sequencer
- * runs at 200 Hz. The playback logic follows AdPlug's HERAD player by
+ * runs at 200 Hz. The Amiga backend instead plays its native FLT4 modules
+ * through the separate Paula sequencer (amiga_music.cpp).
+ *
+ * The HERAD playback logic follows AdPlug's HERAD player by
  * Stas'M (LGPL 2.1 or later), reduced to the version 1 / OPL2 subset that
  * Dune uses.
  */
 class Music {
 public:
-	Music();
+	Music(bool amiga = false);
 	~Music();
 
-	/** Start a decoded (un-HSQ'd) HERAD song; it loops until stop(). */
+	/** Start a decoded HERAD song, or native FLT4 for the Amiga backend. */
 	bool play(const Common::Array<byte> &data);
 	void stop();
 	bool isPlaying() const { return _playing; }
@@ -100,6 +104,8 @@ private:
 	void macroFeedback(uint c, int8 sensitivity, byte level);
 	void macroSlide(uint c);
 
+	const bool _amiga;
+	Audio::SoundHandle _amigaHandle;
 	OPL::OPL *_opl;
 	Common::Mutex _mutex;
 	bool _playing;

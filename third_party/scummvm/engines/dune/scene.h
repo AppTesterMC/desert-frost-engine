@@ -308,8 +308,8 @@ private:
 	void openTalk(uint character);
 	/** Present @p character's list @p list, one line, with @p speaker's portrait. */
 	void presentLine(uint speaker, uint character, uint list, byte mask, TalkKind kind);
-	/** The scripted scene at CD code offset @p cdOffset (seg000:11771), once no dialogue runs. */
-	void startScene(uint16 cdOffset);
+	/** Start the script at @p cdOffset; @p holdLine keeps its triggering line until Continue. */
+	void startScene(uint16 cdOffset, bool holdLine = false);
 	void sceneStep();
 	void endScene();
 	bool maybeStartScene();
@@ -419,6 +419,32 @@ private:
 	// clips' ends by the terrain ahead; and the approach clip on arrival.
 	HnmPlayer *_flightVideo = nullptr;
 	Common::Array<byte> _mntData[4];
+	// The worm ride (worm.cpp): VER.BIN's view rect, sprite lists and frame
+	// script (CD 4285 over cs:015f, floppy cs:44d9), DFL2.HNM on the CD.
+	struct WormPiece {
+		uint16 sprite;
+		int16 dx, dy;
+	};
+	struct WormAnim {
+		Common::Rect rect;
+		Common::Array<Common::Array<WormPiece> > lists;
+		Common::Array<byte> script;
+		uint cursor = 0;
+		bool loaded = false;
+	} _wormAnim;
+	Common::Array<byte> _dflData;
+	bool _wormMap = false;          ///< the destination map was opened by CALL A WORM (no cockpit)
+	Common::Array<byte> _wormBackdrop; ///< the view under the worm's map (320 x 152)
+	byte _wormBackdropPalette[256 * 3];
+	bool _wormToggle = false;       ///< floppy: ror [2937], the landscape moves every second frame
+	bool wormAnimLoad();
+	void wormRideSetup();
+	/** One frame of the VER.BIN script over @p view; @p advance moves the script on. */
+	void wormAnimFrame(Graphics::Surface &view, bool advance);
+	void wormAnimAdvance();
+	void wormDeparture();
+	bool startCdWormView();
+	void dottedColumnsPresent(const byte *pixels, const byte *palette);
 	int _mntClip = -1;
 	/** The last flight ended by SKIP TO DESTINATION (CD 4ffb jumps to loc_4fc3, past
 	 *  "ds:4732 = ds:11C9 & 1" at loc_4fb0): the scene reload (2dfb) then skips 488a. */
@@ -643,6 +669,7 @@ private:
 	void setSaveMenuRows();
 	Common::String slotLabel(uint slot) const;
 	void toggleMusic();
+	void playCurrentMusic();
 
 	bool loadDialogue();
 	void closeBook();
@@ -720,6 +747,7 @@ private:
 	uint16 _menuStatus; ///< COMMAND id shown on the last row after a save (0xffff: none).
 	Music *_music;
 	bool _musicOn;
+	byte _amigaMusic; ///< Original resource choice: M2 at startup, M3 inside sietches.
 	byte _musicOrder; ///< Original ds:33fe menu selection: 0 game relative, 1 standard, 3 shuffle.
 	bool _quitRequested;
 

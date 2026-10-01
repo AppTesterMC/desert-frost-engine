@@ -19,7 +19,7 @@ set -u
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
-local_root="${DUNE_LOCAL_BUILD_ROOT:-${TMPDIR:-/tmp}/dune-scummvm-native-build}"
+local_root="${DUNE_LOCAL_BUILD_ROOT:-/tmp/dune-scummvm-native-build}"
 jobs=$(( $(sysctl -n hw.ncpu) - 1 ))
 speedrun=1
 full=1
@@ -34,6 +34,10 @@ while [ $# -gt 0 ]; do
 done
 
 out="$local_root/check-all"
+# Every check gets the other releases' data folders (save_compatibility and
+# other_releases read them); the user's copies are the defaults.
+export DUNE_DATA_AMIGA="${DUNE_DATA_AMIGA:-$HOME/dune-amiga-data/game}"
+export DUNE_DATA_SEGACD="${DUNE_DATA_SEGACD:-$HOME/dune-segacd-data}"
 rm -rf "$out"
 mkdir -p "$out"
 start=$(date +%s)
@@ -53,7 +57,7 @@ if [ "$speedrun" = 1 ]; then
 	echo "speedrun-campaign	$script_dir/check_speedrun.sh campaign" >> "$list"
 fi
 echo "verify	python3 $script_dir/dune_regress.py verify" >> "$list"
-echo "other-releases	env DUNE_DATA_AMIGA=${DUNE_DATA_AMIGA:-$HOME/dune-amiga-data/game} DUNE_DATA_SEGACD=${DUNE_DATA_SEGACD:-$HOME/dune-segacd-data} $script_dir/check_other_releases.sh" >> "$list"
+echo "other-releases	$script_dir/check_other_releases.sh" >> "$list"
 for f in "$script_dir"/check_*.sh; do
 	name=$(basename "$f" .sh)
 	case "$name" in
@@ -82,7 +86,7 @@ while IFS='	' read -r name cmd; do
 		echo "FAIL $name: process exited $code (see $out/$name.log)"
 		status=1
 	fi
-	lines=$(grep -E "^(PASS|FAIL)|VERIFY (PASSED|FAILED)" "$out/$name.log" 2>/dev/null)
+	lines=$(grep -E "^(PASS|FAIL|SKIP)|VERIFY (PASSED|FAILED)" "$out/$name.log" 2>/dev/null)
 	if [ -z "$lines" ]; then
 		echo "?? $name: no PASS/FAIL line (exit $code, see $out/$name.log)"
 		status=1

@@ -75,7 +75,7 @@ void GameScreen::presentLine(uint speaker, uint character, uint list, byte mask,
 
 // ---- Scripted scenes -----------------------------------------------------------
 
-void GameScreen::startScene(uint16 cdOffset) {
+void GameScreen::startScene(uint16 cdOffset, bool holdLine) {
 	Common::Array<byte> bytes;
 	if (!_world.sceneScript(cdOffset, bytes)) {
 		_log.line(Common::String::format("Scene: script %#x not found", cdOffset));
@@ -88,7 +88,14 @@ void GameScreen::startScene(uint16 cdOffset) {
 	_cast.clear();
 	_sceneKiss = 0;
 	_log.line(Common::String::format("Scene: script %#x starts", cdOffset));
-	sceneStep();
+	if (holdLine) {
+		// Original CS:1771 initializes the script while the triggering line
+		// remains visible. Its first shot runs on the next Continue.
+		_talkKind = kTalkScene;
+		drawTalk();
+	} else {
+		sceneStep();
+	}
 }
 
 bool GameScreen::maybeStartScene() {
@@ -96,8 +103,8 @@ bool GameScreen::maybeStartScene() {
 		return false;
 	const uint16 script = _pendingScene;
 	_pendingScene = 0;
-	if (fastCapture()) {
-		// The dump and harness pictures must not wait on a Continue.
+	if (fastCapture() && !ConfMan.hasKey("dune_scene_scripts")) {
+		// Ordinary capture runs skip scenes; fidelity replays opt in.
 		_log.line(Common::String::format("Scene: script %#x skipped in a capture run", script));
 		return false;
 	}
@@ -303,6 +310,15 @@ bool GameScreen::roomEntryScan(bool always) {
 		if (_conversation->hasLine(group, 4, 0x80)) {
 			_log.line(Common::String::format("Room: character %u speaks on entry", who));
 			presentLine(who, group, 4, 0x80, kTalkNormal);
+			// advanceConversation commits the chapter on the final segment.
+			// The resulting scene (CD 11196/1771) keeps the greeting visible
+			// until Continue instead of requesting another TALK command.
+			if (_pendingScene && _mode == kTalk && !_talkEnded &&
+					(!fastCapture() || ConfMan.hasKey("dune_scene_scripts"))) {
+				const uint16 script = _pendingScene;
+				_pendingScene = 0;
+				startScene(script, true);
+			}
 			_state.setB(0x23, 0);
 			return true;
 		}
@@ -330,12 +346,19 @@ void GameScreen::drawCdFlightView(byte terrainAhead) {
 	if (!_flightVideo)
 		return;
 	const uint32 now = _system->getMillis();
+	bool stepped = false;
 	if (now >= _mntNextFrame) {
 		// A flight frame a game-loop pass (travel_pump 4f24): 16 ticks, as
 		// measured on the original (captures/cd-flight-long: MNT2 191 frames
 		// and MNT3 197 frames in about 15 s each), paced by the clock.
 		_mntNextFrame = (!_mntNextFrame || now - _mntNextFrame > 160) ? now + 80 : _mntNextFrame + 80;
-		if (!_flightVideo->step()) {
+		stepped = true;
+		const bool more = _flightVideo->step();
+		if (!more && _riding) {
+			// The worm's clip (vehicle 1) starts again whatever the terrain (4ec6).
+			_flightVideo->begin(_dflData);
+			_flightVideo->step();
+		} else if (!more) {
 			// The clip is over: the next one by the terrain ahead (seg000:4ec6).
 			const bool rock = terrainAhead >= 8;
 			int next;
@@ -360,6 +383,14 @@ void GameScreen::drawCdFlightView(byte terrainAhead) {
 	_surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
 	for (int y = 0; y < 152; ++y)
 		memcpy(_surface.getBasePtr(0, y), _flightVideo->screen() + 320 * y, 320);
+	if (_riding) {
+		// hnm_decode_video_frame's bit 5 (DFL2): worm_view_redraw (4aeb), the
+		// worm's back over each decoded frame, one script frame a clip frame.
+		Graphics::Surface view = _surface.surfacePtr()->getSubArea(Common::Rect(0, 0, 320, 152));
+		if (stepped)
+			wormAnimAdvance();
+		wormAnimFrame(view, false);
+	}
 	if (isDumpRun() && _flightVideo->frameNumber() % 40 == 1) {
 		uint lit = 0, pal = 0, lo = 255, hi = 0;
 		for (uint i = 0; i < 320 * 152; ++i) {

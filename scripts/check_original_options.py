@@ -126,6 +126,13 @@ def main():
         assert "Music: ARRAKIS.HSQ started" in log, f"{release}: volume test did not start its music stream"
         assert capture_level(target)[1] == 0, f"{release}: zero music volume was audible"
         print(f"PASS original options {release}: standard Music volume controls OPL output", flush=True)
+        target, log = play(f"{release}-menu-enable-music", data,
+            {"dune_floppy_start": 99, "dune_intro_start": 6, "dune_no_music": "true"},
+            script="wait 300\nclick left 160 163\nwait 300\nclick left 45 170\nwait 300\n"
+                   "click left 160 195\nwait 300\nclick left 160 171\nwait 2500\nquit\n", seconds=10)
+        assert "Options: music on" in log and "Music: ARRAKIS.HSQ started" in log
+        assert capture_level(target)[0] > 100, f"{release}: MUSIC ON left launcher-disabled music muted"
+        print(f"PASS original options {release}: game MUSIC ON enables launcher-disabled OPL output", flush=True)
     cd = Path(os.environ.get("DUNE_DATA_CD", ROOT / "data"))
     for disabled in (False, True):
         target, log = play(f"cd-sound-{disabled}", cd,

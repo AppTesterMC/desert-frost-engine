@@ -58,6 +58,13 @@ bool isBlockTag(const byte *data, const char *tag) {
 HnmPlayer::HnmPlayer(OSystem *system) :
 		_system(system), _paletteDirty(false), _screen(kScreenWidth * kScreenHeight), _scale(0) {
 	memset(_palette, 0, sizeof(_palette));
+	memset(_paletteSet, 0, sizeof(_paletteSet));
+}
+
+void HnmPlayer::mergePalette(byte *target) const {
+	for (uint i = 0; i < 256; ++i)
+		if (_paletteSet[i])
+			memcpy(target + 3 * i, _palette + 3 * i, 3);
 }
 
 bool HnmPlayer::readPalette(const byte *data, uint32 size, uint32 &position) {
@@ -81,6 +88,7 @@ bool HnmPlayer::readPalette(const byte *data, uint32 size, uint32 &position) {
 			const byte value = data[position++] & 0x3f;
 			_palette[start * 3 + i] = value << 2;
 		}
+		memset(_paletteSet + start, 1, count);
 		_paletteDirty = true;
 	}
 	return false;

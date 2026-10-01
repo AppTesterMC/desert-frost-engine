@@ -18,6 +18,11 @@
 #             (the atomics troops are captured; being fixed)
 #   --data    the game folder (default: the floppy data in data/floppy)
 #   --seed    the random seed (the checks pass with --seed 1)
+#   -h        this help
+#
+# From the first worm ride (day 5-6) the bot travels by worm: CALL A WORM's
+# map, the call (floppy: the SHAI worm; CD: VER.HNM) and the ride on the
+# worm's back. To watch it: scripts/watch_speedrun.sh campaign [--cd]
 
 set -eu
 
@@ -38,12 +43,13 @@ while [ $# -gt 0 ]; do
 		--seed) seed=$2; shift ;;
 		--data) data=$2; shift ;;
 		--cd) data="$repo_root/data" ;;
+		-h|--help) sed -n '3,/^$/p' "$0" | sed -n '/^#/s/^# \{0,1\}//p'; echo; echo "Worm rides: scripts/watch_speedrun.sh campaign [--cd]"; exit 0 ;;
 		*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
 	shift
 done
 
-local_root="${DUNE_LOCAL_BUILD_ROOT:-${TMPDIR:-/tmp}/dune-scummvm-native-build}"
+local_root="${DUNE_LOCAL_BUILD_ROOT:-/tmp/dune-scummvm-native-build}"
 # Build (or bring up to date) the desktop ScummVM with the engine; the dump
 # run it ends with is silent and headless.
 SDL_AUDIODRIVER=dummy DUNE_DATA="$data" "$script_dir/test_dune_scummvm_sdl.sh" dump >/dev/null 2>&1 || {

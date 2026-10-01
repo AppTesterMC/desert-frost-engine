@@ -62,6 +62,7 @@ public:
 	static bool unpackHSQ(const byte *packed, uint32 packedSize, byte *unpacked, uint32 unpackedSize);
 
 	bool amiga() const { return _amiga; }
+	bool dosFloppy() const { return !_useArchive && !_amiga && !_segaCd; }
 
 private:
 	/** The Amiga release: its own file names, converted to the DOS layouts (amiga.cpp). */

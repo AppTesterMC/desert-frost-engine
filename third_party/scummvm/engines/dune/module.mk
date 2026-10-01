@@ -3,6 +3,7 @@ MODULE := engines/dune
 MODULE_OBJS := \
 	amiga.o \
 	amiga_gfx.o \
+	amiga_music.o \
 	attack.o \
 	book.o \
 	cursor.o \
@@ -42,7 +43,8 @@ MODULE_OBJS := \
 	troops.o \
 	speedrun.o \
 	text.o \
-	world.o
+	world.o \
+	worm.o
 
 # This module can be built as a plugin.
 ifeq ($(ENABLE_DUNE), DYNAMIC_PLUGIN)
