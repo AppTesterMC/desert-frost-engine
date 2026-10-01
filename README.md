@@ -9,7 +9,7 @@
 
 <div align="center">
 
-<img src="doc/intro-paul.bmp" alt="Paul's hair on red background during the Dune intro" width="640">
+<img src="doc/STOREFRONT.png" alt="A game engine for Cryo's Dune 1992 Rebuild the classic. Power your own Dune experiences with Desert Frost Spice." width="640">
 
 </div>
 
