@@ -38,6 +38,7 @@
 #include "common/system.h"
 
 #include "dune/debug.h"
+#include "dune/harness.h"
 #include "dune/map.h"
 #include "dune/palace.h"
 #include "dune/world.h"
@@ -57,7 +58,7 @@ void GameScreen::speedrunLog(const Common::String &what) {
 	// Watched runs show each milestone on screen too.
 	if (ConfMan.hasKey("dune_speedrun_watch") &&
 			(what.contains("OK") || what.contains("BLOCKED") || what.contains("FORCED") || what.contains("taken") ||
-			 what.contains("story phase") || what.contains("recruited") || what.contains("works for")))
+			 what.contains("story phase") || what.contains("recruited") || what.contains("works for") || what.contains("Tour:")))
 		showStatus(Common::String::format("Day %u: %s", _world.day(), what.c_str()).c_str());
 	_log.line(Common::String::format("Speedrun: day %u %02u:%02u, phase %#x, charisma %u, rallied %u, stage %u: %s",
 			_world.day(), _world.timeSlot() * 3 / 2, (_world.timeSlot() & 1) ? 30 : 0,
@@ -65,27 +66,106 @@ void GameScreen::speedrunLog(const Common::String &what) {
 			_state.b(kFinalStage), what.c_str()));
 }
 
-void GameScreen::speedrunPause(uint millis) {
-	// Watched runs (dune_speedrun_watch): the screen stays up for a moment
-	// and the window keeps answering; closing it stops the run.
+void GameScreen::speedrunPause(uint millis, bool scaleToPace) {
+	// Watched runs (dune_speedrun_watch): hold the current screen without
+	// taking game input; only closing the window can interrupt the pause.
 	if (!ConfMan.hasKey("dune_speedrun_watch") || _quitRequested)
 		return;
-	const uint scale = MAX(1, ConfMan.getInt("dune_speedrun_watch"));
+	uint64 duration = millis;
+	if (scaleToPace) {
+		const uint scale = MAX(1, ConfMan.getInt("dune_speedrun_watch"));
+		duration = duration * scale / 100;
+	}
+	// getMillis() is a wrapping 32-bit clock. Keep the comparison below
+	// within its signed half-range so the pause remains correct across wrap.
+	duration = MIN<uint64>(duration, 0x7fffffff);
 	if (isRecording()) {
-		// Headless recording: the screen held for the pause, no waiting.
-		_system->updateScreen();
-		recordFrame(_system, millis * scale / 100);
+		// Headless recording: encode the held screen duration without taking
+		// game steps. recordFrame stores at most 99,999 ms per frame.
+		while (duration && !_quitRequested) {
+			_system->updateScreen();
+			const uint frameMillis = (uint)MIN<uint64>(duration, 99999);
+			recordFrame(_system, frameMillis);
+			duration -= frameMillis;
+		}
 		return;
 	}
-	const uint32 until = _system->getMillis() + millis * scale / 100;
-	while (_system->getMillis() < until && !_quitRequested) {
+	const uint32 until = _system->getMillis() + (uint32)duration;
+	while ((int32)(until - _system->getMillis()) > 0 && !_quitRequested) {
 		Common::Event event;
-		while (_system->getEventManager()->pollEvent(event))
+		while (pollDuneEvent(_system, event))
 			if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER)
 				_quitRequested = true;
 		_system->updateScreen();
 		_system->delayMillis(10);
 	}
+}
+
+void GameScreen::speedrunActionPause(bool before) {
+	const char *key = before ? "dune_speedrun_pause_before" : "dune_speedrun_pause_after";
+	const int seconds = MAX(0, ConfMan.getInt(key));
+	if (seconds)
+		speedrunPause((uint)seconds * 1000, false);
+}
+
+void GameScreen::speedrunStartConversation(uint character) {
+	speedrunActionPause(true);
+	if (_quitRequested)
+		return;
+	startConversation(character);
+	speedrunActionPause(false);
+}
+
+void GameScreen::speedrunWaitRoom() {
+	const int seconds = MAX(0, ConfMan.getInt("dune_speedrun_room_wait"));
+	if (seconds)
+		speedrunPause((uint)seconds * 1000, false);
+}
+
+void GameScreen::speedrunRideWormTo(int destination) {
+	speedrunActionPause(true);
+	if (_quitRequested)
+		return;
+	rideWormTo(destination);
+	speedrunActionPause(false);
+}
+
+void GameScreen::speedrunShowRoom(uint room, bool wait) {
+	speedrunActionPause(true);
+	if (_quitRequested)
+		return;
+	showRoom(room);
+	speedrunActionPause(false);
+	if (wait && !_quitRequested && _mode == kRoom && _world.room() == room) {
+		speedrunPause(700);
+		speedrunWaitRoom();
+	}
+}
+
+void GameScreen::speedrunEnterRoom(uint room, bool wait) {
+	speedrunActionPause(true);
+	if (_quitRequested)
+		return;
+	enterRoom(room);
+	speedrunActionPause(false);
+	if (wait && !_quitRequested && _mode == kRoom && _world.room() == room) {
+		speedrunPause(700);
+		speedrunWaitRoom();
+	}
+}
+
+void GameScreen::speedrunMouseClick(int x, int y, const char *what) {
+	speedrunActionPause(true);
+	if (_quitRequested)
+		return;
+	Common::Event event;
+	event.type = Common::EVENT_LBUTTONDOWN;
+	event.mouse = Common::Point(x, y);
+	_system->warpMouse(x, y);
+	handleEvent(event);
+	if (what)
+		speedrunLog(what);
+	speedrunActionPause(false);
 }
 
 bool GameScreen::speedrunAlive() {
@@ -179,28 +259,35 @@ bool GameScreen::speedrunFight(uint place) {
 	// kills Paul there, and the route reloads the log taken before the
 	// attack; the battle rolls are not saved, so the reload rerolls them.
 	// The caller saved log 1 before the troops were ordered in.
-	rideWormTo((int)place);
+	speedrunRideWormTo((int)place);
 	if (_ending || !_battle)
 		return !_ending && _world.friendlyPlace(place);
 	saveSlot(1);
 	for (uint attempt = 0; attempt < 32; ++attempt) {
 		for (uint round = 0; round < 8 && _battle && !_ending; ++round) {
 			speedrunPause(900);
+			speedrunActionPause(true);
+			if (_quitRequested)
+				return false;
 			_world.massiveAttack(place);
 			battleCheck();
+			speedrunActionPause(false);
+			if (_quitRequested)
+				return false;
 			if (_battle && !_ending && _world.captainTroop(place)) {
 				// Items 34-35, 39: the captain in room 3 tells of another fort.
 				const uint before = _world.location(place).hidden();
 				(void)before;
-				showRoom(3);
+				speedrunShowRoom(3, true);
 				Common::Array<byte> people;
 				_world.peopleInRoom(people);
 				for (uint i = 0; i < people.size(); ++i)
 					if (people[i] == World::kCaptain) {
-						talkThrough(World::kCaptain);
+						speedrunStartConversation(World::kCaptain);
+						speedrunConverse();
 						speedrunLog(Common::String::format("talked to the Harkonnen captain at fort %u", place));
 					}
-				showRoom(1);
+				speedrunShowRoom(1, true);
 			}
 		}
 		if (!_ending && _world.friendlyPlace(place)) {
@@ -234,7 +321,7 @@ void GameScreen::speedrunCampaign() {
 		return;
 	}
 	landInDesert();
-	rideWormTo(0);
+	speedrunRideWormTo(0);
 	if (!(_state.b(World::kPaulEvents) & 0x40)) {
 		speedrunLog("BLOCKED the worm ride did not set ds:0a bit 6");
 		return;
@@ -382,7 +469,7 @@ void GameScreen::speedrunCampaign() {
 				if (!_world.troopAgreesToFollow(id))
 					continue;
 				if (_world.currentLocation() != (uint)at)
-					rideWormTo(at);
+					speedrunRideWormTo(at);
 				if (!speedrunAlive())
 					break;
 				if (_world.rallyTroop(id)) {
@@ -501,7 +588,7 @@ void GameScreen::speedrunCampaign() {
 				}
 				if (spotted >= 0) {
 					speedrunLog(Common::String::format("flying from %d toward hidden fort %u spots sietch %d", from, hidden[h], spotted));
-					rideWormTo(spotted);
+					speedrunRideWormTo(spotted);
 					break;
 				}
 			}
@@ -652,7 +739,7 @@ void GameScreen::speedrunCampaign() {
 				// not fight long without him (his +30 motivation, and the
 				// Harkonnen blow is shared among the troops at his place).
 				if (_world.currentLocation() != (uint)stage)
-					rideWormTo(stage);
+					speedrunRideWormTo(stage);
 				saveSlot(0); // before the troops go in: a failed attack comes back here
 				for (uint k = 0; k < group.size(); ++k)
 					_world.issueMoveOrder(group[k], (uint)target);
@@ -683,7 +770,7 @@ void GameScreen::speedrunCampaign() {
 			}
 		}
 		if (_mode != kRoom && !_ending)
-			showRoom(_world.room());
+			speedrunShowRoom(_world.room());
 		for (uint p = 0; p < 4 && speedrunAlive() && !_battle; ++p)
 			passTime(1);
 	}
@@ -823,10 +910,16 @@ void GameScreen::speedrunTravel(uint place) {
 	}
 	// The worm once it has been ridden (phase 0x50, ds:0a bit 6), the
 	// ornithopter before.
+	speedrunActionPause(true);
+	if (_quitRequested)
+		return;
 	if (_state.b(World::kPaulEvents) & 0x40)
 		rideWormTo((int)place);
 	else
 		travelTo(place);
+	speedrunActionPause(false);
+	if (_quitRequested)
+		return;
 	// The Emperor does not wait: a pending demand is served between trips.
 	if (!_speedrunShipping && !_ending && (_state.b(World::kShipmentFlags) & 0x10))
 		speedrunShipment();
@@ -847,32 +940,53 @@ void GameScreen::speedrunConverse() {
 			// ACCEPT Duncan's spice deals and Stilgar's launch of the final
 			// attack; REFUSE the rest (the Water of Life: the route never drinks).
 			const bool yes = _talkWho == 3 || _state.b(kFinalStage) == 5;
+			speedrunActionPause(true);
+			if (_quitRequested)
+				return;
 			answerQuestion(yes ? 1 : 2);
+			speedrunActionPause(false);
 			continue;
 		}
 		if (_sceneActive) {
 			speedrunPause(1400);
+			speedrunActionPause(true);
+			if (_quitRequested)
+				return;
 			if (_mode == kTalk)
 				advanceConversation();
 			else
 				sceneStep();
+			speedrunActionPause(false);
 			continue;
 		}
 		if (talking() || _talkRecruit) {
 			speedrunPause(1400); // read the page
+			speedrunActionPause(true);
+			if (_quitRequested)
+				return;
 			advanceConversation();
+			speedrunActionPause(false);
 			continue;
 		}
 		if (inConversation()) {
+			speedrunActionPause(true);
+			if (_quitRequested)
+				return;
 			endConversation(); // a scene an event asked for may follow
+			speedrunActionPause(false);
 			continue;
 		}
 		if (_pendingScene && maybeStartScene())
 			continue;
 		break;
 	}
-	if (inConversation())
+	if (inConversation()) {
+		speedrunActionPause(true);
+		if (_quitRequested)
+			return;
 		endConversation();
+		speedrunActionPause(false);
+	}
 }
 
 void GameScreen::speedrunWait() {
@@ -883,6 +997,63 @@ void GameScreen::speedrunWait() {
 		checkIdle(_idleStart + 600000);
 		speedrunConverse();
 	}
+}
+
+void GameScreen::speedrunEndlessTour() {
+	speedrunLog("Tour: staging endless mode and recruiting Liet Kynes");
+	speedrunActionPause(true);
+	if (_quitRequested)
+		return;
+	endlessPlaySetup(true);
+	speedrunActionPause(false);
+	if (_ending || _quitRequested)
+		return;
+	speedrunPause(1000);
+	auto visitRoom = [&](uint room) {
+		speedrunShowRoom(room, true);
+	};
+
+	const bool withKynes = (_state.w(GameState::kPersonsWith) & (1u << 6)) != 0;
+	speedrunLog(Common::String::format("Tour: palace garden (%s Liet Kynes)", withKynes ? "with" : "without"));
+	speedrunTravel(0);
+	if (_world.currentLocation() == 0 && _rooms.size() >= 3)
+		visitRoom(3); // Palace room 3 is the garden / greenhouse (SERRE 207).
+	else
+		speedrunLog("Tour: BLOCKED the palace garden was not reached");
+
+	for (uint place = 0; place < _world.locationCount() && !_quitRequested; ++place) {
+		if (!_world.location(place).isSietch())
+			continue;
+		if (_world.location(place).status & 2)
+			_world.setLocationStatus(place, (byte)(_world.location(place).status & ~2));
+		if (_world.currentLocation() != place || _desert)
+			speedrunTravel(place);
+		if (_world.currentLocation() != place) {
+			speedrunLog(Common::String::format("Tour: BLOCKED sietch %u was not reached", place));
+			continue;
+		}
+		speedrunLog(Common::String::format("Tour: sietch %u, room 1", place));
+		visitRoom(1);
+		const uint rooms = _rooms.size();
+		for (uint room = 2; room <= rooms && !_quitRequested; ++room) {
+			speedrunLog(Common::String::format("Tour: sietch %u, room %u", place, room));
+			visitRoom(room);
+		}
+	}
+	if (_quitRequested)
+		return;
+	speedrunTravel(0);
+	if (_world.currentLocation() != 0 || _rooms.size() < 3) {
+		speedrunLog("Tour: BLOCKED the final palace garden was not reached");
+		_quitRequested = true;
+		return;
+	}
+	visitRoom(3);
+	const bool kynesAtFinish = (_state.w(GameState::kPersonsWith) & (1u << 6)) != 0;
+	speedrunLog(Common::String::format("Tour: final palace garden (%s Liet Kynes)", kynesAtFinish ? "with" : "without"));
+	speedrunPause(5000);
+	speedrunLog("Tour: every sietch room visited; exiting the game in the palace garden");
+	_quitRequested = true;
 }
 
 void GameScreen::speedrunTalkHere(Common::Array<uint> &newTroops) {
@@ -897,13 +1068,18 @@ void GameScreen::speedrunTalkHere(Common::Array<uint> &newTroops) {
 			continue; // one new troop a round early on: Leto's stillsuit line wants exactly two
 		} else if (who == World::kFremen) {
 			const uint troop = _world.localTroop(false);
-			startConversation(World::kFremen);
+			speedrunStartConversation(World::kFremen);
 			speedrunConverse();
 			if (troop && !_world.troop(troop).hired()) {
-				startConversation(World::kFremen);
-				for (uint guard = 0; talking() && guard < 40; ++guard)
+				speedrunStartConversation(World::kFremen);
+				for (uint guard = 0; talking() && guard < 40; ++guard) {
+					speedrunActionPause(true);
 					advanceConversation();
+					speedrunActionPause(false);
+				}
+				speedrunActionPause(true);
 				workForMe();
+				speedrunActionPause(false);
 				speedrunConverse();
 				if (_world.troop(troop).hired()) {
 					_speedrunRecruited = true;
@@ -926,7 +1102,7 @@ void GameScreen::speedrunTalkHere(Common::Array<uint> &newTroops) {
 			// The chief once a chapter: what he knows (the orders go through him too).
 			if (!speedrunOnce(Common::String::format("chief %u %u %#x", who, _world.currentLocation(), _state.b(GameState::kPhase))))
 				continue;
-			startConversation(who);
+			speedrunStartConversation(who);
 			speedrunConverse();
 		} else if (who != 3) {
 			// A companion talks once a chapter, and in the palace rooms whose
@@ -944,7 +1120,7 @@ void GameScreen::speedrunTalkHere(Common::Array<uint> &newTroops) {
 							_state.b(World::kUnread));
 			if (!speedrunOnce(key))
 				continue;
-			startConversation(who);
+			speedrunStartConversation(who);
 			speedrunConverse();
 		}
 	}
@@ -958,7 +1134,7 @@ void GameScreen::speedrunVisitPlace(uint place, Common::Array<uint> &newTroops) 
 	const uint rooms = _rooms.size();
 	const bool palace = _world.placeType() == Location::kPalace;
 	const uint16 with = _state.w(GameState::kPersonsWith);
-	for (uint room = 1; room <= rooms && !_ending; ++room) {
+	for (uint room = 1; room <= rooms && !_ending && !_quitRequested; ++room) {
 		if (palace && (palaceRoom(room).code & 0x80))
 			continue;
 		// Only rooms with a reason, once a chapter and party: in the palace
@@ -983,10 +1159,11 @@ void GameScreen::speedrunVisitPlace(uint place, Common::Array<uint> &newTroops) 
 			continue;
 		++_speedrunRoundVisits;
 		if (room == 1)
-			showRoom(room);
+			speedrunShowRoom(room, true);
 		else
-			enterRoom(room); // as walking in: the entry lines speak (ds:23 = 5)
-		speedrunPause(700);
+			speedrunEnterRoom(room, true); // as walking in: the entry lines speak (ds:23 = 5)
+		if (_quitRequested)
+			break;
 		if (_world.placeType() == Location::kPalace && room == 8 && _world.sightingCount()) {
 			// The COMM room: the messages first (seg000:290b); Thufir's first
 			// answer there is "View the message before anything else."
@@ -1001,7 +1178,7 @@ void GameScreen::speedrunVisitPlace(uint place, Common::Array<uint> &newTroops) 
 		}
 		speedrunTalkHere(newTroops);
 	}
-	showRoom(1);
+	speedrunShowRoom(1, true);
 }
 
 void GameScreen::speedrunCompanions(const uint *want, uint count) {
@@ -1018,7 +1195,7 @@ void GameScreen::speedrunCompanions(const uint *want, uint count) {
 		// the chapters move their records inside the palace (seg000:116a).
 		if ((c >= 1 && c <= 3) && (_world.currentLocation() != 0 || _desert)) {
 			speedrunTravel(0);
-			showRoom(1);
+			speedrunShowRoom(1, true);
 		}
 		speedrunCompanion(c, false);
 	}
@@ -1124,7 +1301,7 @@ void GameScreen::speedrunShipment() {
 	// The Emperor's message on the COMM first (his demand is then seen).
 	if (_world.currentLocation() != 0 || _desert)
 		speedrunTravel(0);
-	enterRoom(8);
+	speedrunEnterRoom(8, true);
 	speedrunConverse();
 	for (int i = (int)_world.sightingCount() - 1; i >= 0; --i) {
 		if (_world.sighting((uint)i) & 0x80)
@@ -1140,7 +1317,7 @@ void GameScreen::speedrunShipment() {
 		_speedrunShipping = false;
 		return;
 	}
-	startConversation(3);
+	speedrunStartConversation(3);
 	speedrunConverse();
 	const uint16 agreed = _state.w(World::kAgreed);
 	if (!agreed) {
@@ -1152,7 +1329,7 @@ void GameScreen::speedrunShipment() {
 	if (speedrunCompanion(3, true)) {
 		if (_world.currentLocation() != 0)
 			speedrunTravel(0);
-		enterRoom(8);
+		speedrunEnterRoom(8, true);
 		speedrunConverse();
 		speedrunCompanion(3, false);
 	}
@@ -1234,7 +1411,7 @@ void GameScreen::speedrunStory() {
 					const int at = _world.troopPlace(troops[k]);
 					if (t.hired() && !(t.occupation & 0x60) && (t.occupation & 0x0f) == kJobTraining && at > 0) {
 						speedrunTravel((uint)at);
-						showRoom(1);
+						speedrunShowRoom(1, true);
 						speedrunCompanion(4, false);
 						break;
 					}
@@ -1251,7 +1428,7 @@ void GameScreen::speedrunStory() {
 					continue;
 				if ((_state.w(GameState::kPersonsWith) >> 8) & 1) {
 					speedrunTravel(i);
-					showRoom(1);
+					speedrunShowRoom(1, true);
 					speedrunCompanion(8, false);
 				}
 				break;
@@ -1267,7 +1444,7 @@ void GameScreen::speedrunStory() {
 				const uint slot = _world.timeSlot();
 				passTime(slot < 12 ? 12 - slot : 1);
 				updateRoomVars();
-				startConversation(7);
+				speedrunStartConversation(7);
 				speedrunConverse();
 				continue;
 			}
@@ -1379,11 +1556,11 @@ bool GameScreen::speedrunClickRow(RowAction action, int argument, const char *wh
 		if (_panel.rowDisabled(i))
 			return false; // A disabled row is not a successful command.
 		speedrunPause(900); // the watcher reads the menu first
-		Common::Event event;
-		event.type = Common::EVENT_LBUTTONDOWN;
-		event.mouse = Common::Point(160, 163 + 8 * (int)i);
-		_system->warpMouse(event.mouse.x, event.mouse.y);
-		handleEvent(event);
+		if (_quitRequested)
+			return false;
+		speedrunMouseClick(160, 163 + 8 * (int)i, nullptr);
+		if (_quitRequested)
+			return false;
 		if (what)
 			speedrunLog(Common::String::format("orders: %s", what));
 		return true;
@@ -1392,6 +1569,8 @@ bool GameScreen::speedrunClickRow(RowAction action, int argument, const char *wh
 }
 
 bool GameScreen::speedrunOpenOrders(uint id) {
+	if (_quitRequested)
+		return false;
 	// In the troop's sietch: its chief, " TALK TO ME " then GIVE ORDERS TO
 	// TROOP (seg000:5a03: the chief of the k-th hired troop there).
 	const int at = _world.troopPlace(id);
@@ -1416,7 +1595,9 @@ bool GameScreen::speedrunOpenOrders(uint id) {
 		for (uint i = 0; i < people.size(); ++i)
 			chief |= found && people[i] == World::kFremenChief + k;
 		if (chief) {
-			startConversation(World::kFremenChief + k);
+			speedrunStartConversation(World::kFremenChief + k);
+			if (_quitRequested)
+				return false;
 			if (speedrunClickRow(kRowGiveOrders, -1, Common::String::format("the chief of troop %u, GIVE ORDERS TO TROOP", id).c_str()) &&
 					_mode == kTroop && _troopId == id)
 				return true;
@@ -1427,10 +1608,22 @@ bool GameScreen::speedrunOpenOrders(uint id) {
 	// Elsewhere: the map, and the troop's popup through its contact.
 	if (inConversation())
 		endConversation();
+	speedrunActionPause(true);
+	if (_quitRequested)
+		return false;
 	openMap(MapScreen::kFlat, false);
+	speedrunActionPause(false);
+	if (_quitRequested)
+		return false;
 	_map->setCaption(false);
 	speedrunPause(700);
+	speedrunActionPause(true);
+	if (_quitRequested)
+		return false;
 	openTroop(id, true);
+	speedrunActionPause(false);
+	if (_quitRequested)
+		return false;
 	_troopFromRoom = false;
 	speedrunLog(Common::String::format("orders: troop %u contacted from the map", id));
 	return _mode == kTroop;
@@ -1509,10 +1702,8 @@ void GameScreen::speedrunOrders(uint id, int job, bool harvester, int moveTo, co
 		if (open && _mode == kTroop && speedrunClickRow(kRowEquipment, -1, Common::String::format("troop %u, MODIFY EQUIPMENT", id).c_str())) {
 			const Common::Rect item = _equipRects[1][0];
 			if (!item.isEmpty()) {
-				Common::Event event;
-				event.type = Common::EVENT_LBUTTONDOWN;
-				event.mouse = Common::Point((item.left + item.right) / 2, (item.top + item.bottom) / 2);
-				handleEvent(event); // MODIFY EQUIPMENT's actual item hit test.
+				speedrunMouseClick((item.left + item.right) / 2, (item.top + item.bottom) / 2,
+						"orders: click the harvester in MODIFY EQUIPMENT"); // Use the actual item hit test.
 			}
 			speedrunLog(Common::String::format("orders: troop %u %s the harvester lying at place %d", id,
 					(_world.troop(id).equipment & 0x80) ? "takes" : "could not take", at));
@@ -1533,9 +1724,21 @@ void GameScreen::speedrunOrders(uint id, int job, bool harvester, int moveTo, co
 					_pickQueue[_pickCount++] = World::placeOffset(queue[k]);
 				drawTroop();
 				speedrunPause(1200);
+				speedrunActionPause(true);
+				if (_quitRequested)
+					return;
 				endTroopPick(-3);
+				speedrunActionPause(false);
+				if (_quitRequested)
+					return;
 			} else {
+				speedrunActionPause(true);
+				if (_quitRequested)
+					return;
 				endTroopPick(moveTo);
+				speedrunActionPause(false);
+				if (_quitRequested)
+					return;
 			}
 			picked = true;
 			speedrunLog(Common::String::format("orders: troop %u picks %s", id,
@@ -1792,7 +1995,7 @@ bool GameScreen::speedrunMeet(uint who) {
 	// The landing may have moved him (CD 2170: Stilgar and the later
 	// characters wander the palace's rooms): read the record again.
 	const Character now = _world.character(who);
-	showRoom(now.room ? now.room : 1);
+	speedrunShowRoom(now.room ? now.room : 1, true);
 	speedrunConverse(); // an entry line
 	Common::Array<byte> people;
 	_world.peopleInRoom(people);
@@ -1810,10 +2013,15 @@ bool GameScreen::speedrunCompanion(uint who, bool come) {
 	const bool with = (_state.w(GameState::kPersonsWith) >> who) & 1;
 	if (with == come)
 		return true;
-	startConversation(who);
-	for (uint guard = 0; talking() && guard < 40; ++guard)
+	speedrunStartConversation(who);
+	for (uint guard = 0; talking() && guard < 40; ++guard) {
+		speedrunActionPause(true);
 		advanceConversation(); // the lines first: their events fire as they end
+		speedrunActionPause(false);
+	}
+	speedrunActionPause(true);
 	companionVerb();
+	speedrunActionPause(false);
 	speedrunConverse();
 	const bool now = (_state.w(GameState::kPersonsWith) >> who) & 1;
 	speedrunLog(Common::String::format("%s to character %u: %s", come ? "COME WITH ME" : "STAY HERE", who,
@@ -1859,8 +2067,10 @@ void GameScreen::speedrunFinalAttack() {
 		passTime(World::kSlotsPerDay - _world.timeSlot());
 	}
 	// Stilgar talks of Thufir (item 46).
-	if (speedrunMeet(kStilgar))
-		talkThrough(kStilgar);
+	if (speedrunMeet(kStilgar)) {
+		speedrunStartConversation(kStilgar);
+		speedrunConverse();
+	}
 	// Stage 2: Thufir comes along (item 47).
 	if (stage() == 1 && speedrunMeet(kThufir))
 		speedrunCompanion(kThufir, true);
@@ -1872,10 +2082,10 @@ void GameScreen::speedrunFinalAttack() {
 	// The allies wait in room 2: whoever waits in room 1 of a sietch
 	// walks further in whenever Paul lands elsewhere (CD 2170), so a
 	// player parks them there.
-	rideWormTo(council);
+	speedrunRideWormTo(council);
 	if (_ending)
 		return;
-	enterRoom(2);
+	speedrunEnterRoom(2, true);
 	if (!((_state.w(GameState::kPersonsWith) >> kThufir) & 1)) {
 		_world.setTravelling(kThufir, true);
 		_world.addCompanion(kThufir);
@@ -1890,12 +2100,12 @@ void GameScreen::speedrunFinalAttack() {
 	for (uint k = 0; k < 2 && !_ending; ++k) {
 		if (!speedrunMeet(parked[k]) || !speedrunCompanion(parked[k], true))
 			continue;
-		rideWormTo(council);
-		enterRoom(2);
+		speedrunRideWormTo(council);
+		speedrunEnterRoom(2, true);
 		// A refusal (her topic-6 answer) can give way once her pending lines
 		// are said: talk, then ask again (three times at most).
 		for (uint tries = 0; tries < 3 && !_ending && !speedrunCompanion(parked[k], false); ++tries) {
-			startConversation(parked[k]);
+			speedrunStartConversation(parked[k]);
 			speedrunConverse();
 			speedrunWait();
 		}
@@ -1904,8 +2114,8 @@ void GameScreen::speedrunFinalAttack() {
 		speedrunCompanion(kStilgar, true);
 	if (speedrunMeet(kChani))
 		speedrunCompanion(kChani, true);
-	rideWormTo(council);
-	enterRoom(2); // the room's entry scan: "Hey! here we are."
+	speedrunRideWormTo(council);
+	speedrunEnterRoom(2, true); // the room's entry scan: "Hey! here we are."
 	speedrunConverse();
 	if (stage() == 4)
 		speedrunLog("step 51 OK: the war council, stage 4");
@@ -2010,15 +2220,17 @@ void GameScreen::speedrunFinalAttack() {
 		speedrunLog(Common::String::format("BLOCKED fewer than 10 000 men with atomics round the palace (%u atomics lying free)", total));
 		return;
 	}
-	if (speedrunMeet(kThufir))
-		talkThrough(kThufir);
+	if (speedrunMeet(kThufir)) {
+		speedrunStartConversation(kThufir);
+		speedrunConverse();
+	}
 	if (stage() == 5)
 		speedrunLog("step 52 OK: Thufir: enough men round the palace, stage 5");
 	else
 		force(5, "Thufir's line did not raise it");
 	// Stilgar: "Do you want to launch the attack now?" ACCEPT (item 53).
 	if (speedrunMeet(kStilgar)) {
-		startConversation(kStilgar);
+		speedrunStartConversation(kStilgar);
 		speedrunConverse();
 	}
 	if (stage() == 6) {
@@ -2036,15 +2248,17 @@ void GameScreen::speedrunFinalAttack() {
 		return;
 	}
 	speedrunLog("step 54 OK: the palace falls, the shield is down, stage 7");
-	rideWormTo(1);
+	speedrunRideWormTo(1);
 	if (!speedrunAlive())
 		return;
-	showRoom(2);
+	speedrunShowRoom(2, true);
 	for (uint guard = 0; _sceneActive && guard < 200; ++guard) {
+		speedrunActionPause(true);
 		if (_mode == kTalk)
 			advanceConversation();
 		else
 			sceneStep();
+		speedrunActionPause(false);
 	}
 	if (_state.b(GameState::kPhase) >= 0xc8)
 		speedrunLog("step 56 OK: the Emperor's throne room, the end");
@@ -2135,6 +2349,18 @@ void GameScreen::speedrun(const Common::String &part) {
 					_world.troopPlace(World::kProspectorTroop) == safe && (_world.troop(World::kProspectorTroop).occupation & 0x40)
 					? "PASS" : "FAIL"));
 		}
+		speedrunLog("end");
+		return;
+	}
+	if (part == "green") {
+		speedrunLog("route: assisted whole-planet greening and release-specific palace finish");
+		ecologyWinSetup(true, true);
+		speedrunLog("end");
+		return;
+	}
+	if (part == "endless-tour") {
+		speedrunLog("route: endless-mode sietch and palace-garden tour");
+		speedrunEndlessTour();
 		speedrunLog("end");
 		return;
 	}

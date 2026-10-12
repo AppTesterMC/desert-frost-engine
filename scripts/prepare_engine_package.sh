@@ -156,7 +156,7 @@ exist only on GitHub, such as `doc/intro-paul.bmp`, stay):
 git clone git@github.com:AppTesterMC/desert-frost-engine.git
 cd desert-frost-engine
 git switch -c engine-update
-rsync -a /path/to/this/package/repo/ ./
+rsync -rt --no-perms /path/to/this/package/repo/ ./
 git status                      # review: no game data, no logs, no golden/
 git add -A
 git commit -m "Update Dune engine, add build instructions and scripts"

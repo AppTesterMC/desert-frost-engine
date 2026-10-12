@@ -52,7 +52,12 @@ if [ ! -f "$source_root/.dune-local-source-ready" ]; then
 	touch "$source_root/.dune-local-source-ready"
 fi
 mkdir -p "$source_root/engines/dune"
-rsync -a "$repo_source_root/engines/dune/" "$source_root/engines/dune/"
+# Copy by content, not with the repo's dates: a file that differs gets
+# today's date, so make rebuilds it even when the build tree last held
+# a newer snapshot (rsync -a kept old dates and left stale objects).
+rsync -rlp --checksum "$repo_source_root/engines/dune/" "$source_root/engines/dune/"
+build_id=$(stamp_dune_build_id "$source_root/engines/dune")
+echo "Dune build: $build_id"
 
 # Our changes to ScummVM itself live as patches in scripts/patches/ so they
 # stay visible and removable. Each is applied once to the staged tree.
@@ -173,5 +178,6 @@ ditto -c -k --sequesterRsrc --keepParent "$staging_root/Payload" "$ipa_path"
 (cd "$(dirname -- "$ipa_path")" && shasum -a 256 "$(basename -- "$ipa_path")" > "$(basename -- "$ipa_path").sha256")
 
 echo "Built: $ipa_path"
+echo "Dune build: $build_id"
 echo "DUNE_DEBUG: $debug_label"
 echo "Checksum: $(awk '{print $1}' "$ipa_path.sha256")"

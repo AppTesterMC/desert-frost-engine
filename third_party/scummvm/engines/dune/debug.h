@@ -82,6 +82,12 @@ bool isDumpRun();
 /** A recorded run (dune_record=<folder>): the screen as a frame shown for @p millis. */
 bool isRecording();
 void recordFrame(OSystem *system, uint millis);
+/**
+ * A streamed run (dune_stream=<folder>, scripts/watch_speedrun.sh --stream):
+ * the screen and the game's sound in real time into the folder's "video" pipe
+ * and "audio.raw" file for ffmpeg. Called from every event poll.
+ */
+void streamTick(OSystem *system);
 /** On a dump run, write the current screen as <name>.bmp; otherwise nothing. */
 void dumpScreen(OSystem *system, const char *name);
 

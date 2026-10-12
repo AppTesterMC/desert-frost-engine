@@ -181,7 +181,8 @@ Common::Error DuneEngine::run() {
 		// Developer key: the speedrun check (notes/speedrun/route.md). A
 		// watched run (dune_speedrun_watch) leaves the game playable after it.
 		screen.speedrun(ConfMan.get("dune_speedrun"));
-		if (!ConfMan.hasKey("dune_speedrun_watch") || screen.quitRequested() || isRecording()) {
+		if (!ConfMan.hasKey("dune_speedrun_watch") || screen.quitRequested() || isRecording() ||
+				ConfMan.getBool("dune_exit_after_speedrun")) {
 			debugEnd();
 			return Common::kNoError;
 		}
@@ -239,7 +240,7 @@ Common::Error DuneEngine::run() {
 	}
 
 	Common::Event event;
-	while (!shouldQuit()) {
+	while (!shouldQuit() && !screen.quitRequested()) {
 		const Common::Point cursor = _eventMan->getMousePos();
 		debugSetCursor(cursor.x, cursor.y);
 		while (pollDuneEvent(_system, event)) {

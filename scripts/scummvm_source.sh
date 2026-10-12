@@ -14,9 +14,34 @@
 SCUMMVM_REPO="${SCUMMVM_REPO:-https://github.com/scummvm/scummvm.git}"
 SCUMMVM_REF="${SCUMMVM_REF:-430653b98d75e86d15a293c0aa3b3dbed56b499d}"
 
+# Stamp each staged Dune build with an ID that is visible in its screen
+# watermark. The pid keeps two builds started in the same second distinct.
+stamp_dune_build_id() {
+	stamp_dir=$1
+	stamp_id="build_$(date +%Y%m%d_%H%M%S)_$$"
+	cat > "$stamp_dir/build_id.h" <<EOF
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+#ifndef ENGINES_DUNE_BUILD_ID_H
+#define ENGINES_DUNE_BUILD_ID_H
+
+#define DUNE_BUILD_ID "$stamp_id"
+
+#endif
+EOF
+	printf '%s\n' "$stamp_id"
+}
+
 stage_scummvm_source() {
 	dest=$1
 	mkdir -p "$dest"
+	# A complete checkout is included in private Windows handoff bundles so
+	# their first WSL build does not need to clone ScummVM over the network.
+	if [ -x "$repo_root/third_party/scummvm/configure" ] &&
+			[ -f "$repo_root/third_party/scummvm/engines/access/detection.cpp" ]; then
+		rsync -a --exclude '/.git/' --exclude '/engines/dune/' \
+			"$repo_root/third_party/scummvm/" "$dest/"
+		return
+	fi
 	if [ -f "$repo_root/third_party/scummvm-source.tar" ]; then
 		# Older offline archives include a prototype engine. Preserve the
 		# authoritative tree, just as the git fallback below does. Archives

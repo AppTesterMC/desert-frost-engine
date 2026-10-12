@@ -2736,8 +2736,16 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 	int turning = 0;
 	uint32 nextTurn = 0;
 	const uint cap = 4 * total + 64;
+	const uint skipFlightAfter = ConfMan.hasKey("dune_speedrun")
+			? (uint)MIN(2147483, MAX(0, ConfMan.getInt("dune_speedrun_skip_flight_after"))) : 0;
+	const uint32 flightStarted = _system->getMillis();
 	auto stepDue = [&]() { return dunes ? _flightTicks >= stepFrames : _system->getMillis() >= next; };
 	for (;;) {
+		if (skipFlightAfter && !freeFlight && !hostileSteps && !skipping &&
+				_system->getMillis() - flightStarted >= skipFlightAfter * 1000u) {
+			skipping = true;
+			_log.line(Common::String::format("Flight: automatically skipping after %u second(s)", skipFlightAfter));
+		}
 		if (!freeFlight && arrived())
 			break;
 		if (!freeFlight && step >= cap) {
@@ -2748,6 +2756,12 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 		if (!skipping && step > 0) {
 			// The take-off already took the first step (floppy 4F63).
 			while (!stepDue() && !skipping && !_quitRequested && !isRecording()) {
+				if (skipFlightAfter && !freeFlight && !hostileSteps &&
+						_system->getMillis() - flightStarted >= skipFlightAfter * 1000u) {
+					skipping = true;
+					_log.line(Common::String::format("Flight: automatically skipping after %u second(s)", skipFlightAfter));
+					break;
+				}
 				Common::Event event;
 				while (pollDuneEvent(_system, event)) {
 					if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER) {

@@ -74,7 +74,7 @@ def run_scenario(root: Path, scenario: dict) -> tuple[Path, int, str]:
     output.mkdir(parents=True)
     extra = output / "extra.ini"
     extra.write_text("\n".join(scenario.get("config", [])) + ("\n" if scenario.get("config") else ""))
-    data = os.environ.get(scenario["data_env"], scenario["data_default"])
+    data = os.environ.get(scenario["data_env"], str(root / scenario["data_default"]))
     cmd = [
         str(root / "scripts/test_dune_scummvm_sdl.sh"),
         "harness",
@@ -280,7 +280,7 @@ def main() -> int:
     # An "optional" scenario is skipped when its game data is not present.
     kept = []
     for scenario in manifest["scenarios"]:
-        data = os.environ.get(scenario["data_env"], scenario["data_default"])
+        data = os.environ.get(scenario["data_env"], str(root / scenario["data_default"]))
         if scenario.get("optional") and not Path(data).exists():
             print(f"{scenario['name']}: skipped, no data at {data} (set {scenario['data_env']})")
             continue

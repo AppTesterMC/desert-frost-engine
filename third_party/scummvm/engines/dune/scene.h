@@ -397,7 +397,7 @@ private:
 	void emperorEnding();
 	void waterOfLifeWakeUp();
 	void waterOfLifeSetup();
-	void ecologyWinSetup();
+	void ecologyWinSetup(bool wholePlanetGreen = false, bool finishPalace = false);
 	void firstVisionForSetup();
 	void endlessPlaySetup(bool withPaul);
 	void epidemicSetup();  ///< dune_story_setup=epidemic (scripts/check_epidemic.sh)
@@ -467,8 +467,15 @@ private:
 	bool battleCheck();
 	/** A worm journey (seg000:4703, travel mode 2). */
 	void rideWormTo(int destination);
+	void speedrunRideWormTo(int destination);
+	void speedrunShowRoom(uint room, bool wait = false);
+	void speedrunEnterRoom(uint room, bool wait = false);
+	void speedrunStartConversation(uint character);
 	void speedrunLog(const Common::String &what);
-	void speedrunPause(uint millis);
+	void speedrunPause(uint millis, bool scaleToPace = true);
+	void speedrunActionPause(bool before);
+	void speedrunWaitRoom();
+	void speedrunMouseClick(int x, int y, const char *what);
 	bool speedrunAlive();
 	void speedrunCampaignSetup();
 	void speedrunCampaign();
@@ -479,6 +486,7 @@ private:
 	bool speedrunMeet(uint who);
 	bool speedrunCompanion(uint who, bool come);
 	void speedrunWait();
+	void speedrunEndlessTour();
 	void speedrunTalkHere(Common::Array<uint> &newTroops);
 	void speedrunVisitPlace(uint place, Common::Array<uint> &newTroops);
 	void speedrunCompanions(const uint *want, uint count);

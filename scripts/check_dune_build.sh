@@ -22,8 +22,8 @@ evidence_root="$repo_root/notes/temp/dune_scummvm_engine_20260916"
 out="$evidence_root/results/preflight"
 dump_root="$evidence_root/results/sdl-dump"
 
-cd_data="${DUNE_DATA_CD:-${TMPDIR:-/tmp}/dune-data}"
-floppy_data="${DUNE_DATA_FLOPPY:-${TMPDIR:-/tmp}/dune-data/floppy}"
+cd_data="${DUNE_DATA_CD:-$repo_root/data}"
+floppy_data="${DUNE_DATA_FLOPPY:-$repo_root/data/floppy}"
 
 rm -rf "$out"
 mkdir -p "$out" "$run_root/saves"

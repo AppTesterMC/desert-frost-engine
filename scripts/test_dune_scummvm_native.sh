@@ -36,7 +36,12 @@ if [ ! -f "$source_root/.dune-local-source-ready" ]; then
 	touch "$source_root/.dune-local-source-ready"
 fi
 mkdir -p "$source_root/engines/dune"
-rsync -a "$repo_source_root/engines/dune/" "$source_root/engines/dune/"
+# Copy by content, not with the repo's dates: a file that differs gets
+# today's date, so make rebuilds it even when the build tree last held
+# a newer snapshot (rsync -a kept old dates and left stale objects).
+rsync -rlp --checksum "$repo_source_root/engines/dune/" "$source_root/engines/dune/"
+build_id=$(stamp_dune_build_id "$source_root/engines/dune")
+echo "Dune build: $build_id"
 mkdir -p "$build_root"
 cd "$build_root"
 

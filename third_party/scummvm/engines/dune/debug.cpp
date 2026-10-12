@@ -23,11 +23,14 @@
  */
 
 #include "common/config-manager.h"
+#include "common/fs.h"
 #include "common/events.h"
 #include "common/file.h"
 #include "common/savefile.h"
 #include "common/system.h"
 #include "common/ustr.h"
+
+#include "audio/mixer_intern.h"
 
 #include "graphics/font.h"
 #include "graphics/fontman.h"
@@ -37,6 +40,7 @@
 #include "image/bmp.h"
 
 #include "dune/debug.h"
+#include "dune/build_id.h"
 #include "dune/harness.h"
 
 namespace Dune {
@@ -106,6 +110,70 @@ void recordFrame(OSystem *system, uint millis) {
 		Image::writeBMP(file, *rgb);
 	rgb->free();
 	delete rgb;
+}
+
+void streamTick(OSystem *system) {
+	// The "video" pipe takes 320x200 RGB frames at kFps, the "audio.raw"
+	// file 16-bit stereo at the null mixer's 22050 Hz (the script gives
+	// ffmpeg both; tail follows the file for it). The run sets disable_sdl_audio, so these
+	// pulls are the mixer's only ones and sound and frames keep one clock: the
+	// time since the pipe opened. The sound is written first, so it is never
+	// behind the frames ffmpeg waits for.
+	enum { kFps = 30, kRate = 22050, kWidth = 320, kHeight = 200, kChunk = 1024 };
+	static Common::SeekableWriteStream *video = nullptr, *audio = nullptr;
+	static uint32 start = 0;
+	static uint64 frames = 0, samples = 0;
+	static int streaming = -1; // looked up once: this runs on every poll
+	if (streaming < 0)
+		streaming = ConfMan.hasKey("dune_stream") && !ConfMan.get("dune_stream").empty();
+	if (!streaming)
+		return;
+	const uint32 now = system->getMillis();
+	if (!video) {
+		if (!ConfMan.getBool("disable_sdl_audio") || system->getMixer()->getOutputRate() != kRate)
+			error("dune_stream needs disable_sdl_audio=true (the null mixer at %d Hz)", (int)kRate);
+		// The pipe's open waits until ffmpeg has it; the file exists before
+		// the first frame, so ffmpeg finds it. Not atomic: that would write a
+		// temporary file and rename it.
+		const Common::Path dir(ConfMan.get("dune_stream"));
+		video = Common::FSNode(dir.appendComponent("video")).createWriteStream(false);
+		audio = video ? Common::FSNode(dir.appendComponent("audio.raw")).createWriteStream(false) : nullptr;
+		if (!audio)
+			error("dune_stream: cannot open the video pipe or audio file in %s", ConfMan.get("dune_stream").c_str());
+		start = now;
+	}
+	const uint64 elapsed = now - start;
+	const uint64 samplesDue = elapsed * kRate / 1000, framesDue = elapsed * kFps / 1000;
+	static int16 mix[kChunk * 2];
+	while (samples < samplesDue) {
+		const uint n = (uint)MIN<uint64>(samplesDue - samples, kChunk);
+		memset(mix, 0, sizeof(mix)); // the mixer leaves a silent buffer as it was
+		static_cast<Audio::MixerImpl *>(system->getMixer())->mixCallback((byte *)mix, n * 4);
+		audio->write(mix, n * 4);
+		samples += n;
+	}
+	// Publish sound before a video-pipe write can block. Keeping it in the
+	// file's buffer until after video deadlocks FFmpeg during CD narration.
+	audio->flush();
+	if (frames < framesDue) {
+		// Frames missed while the game did not poll show the screen as it is now.
+		static byte rgb[kWidth * kHeight * 3];
+		byte palette[256 * 3];
+		system->getPaletteManager()->grabPalette(palette, 0, 256);
+		Graphics::Surface *screen = system->lockScreen();
+		if (!screen || screen->w != kWidth || screen->h != kHeight || screen->format.bytesPerPixel != 1)
+			error("dune_stream: the screen is not 320x200 with a palette");
+		byte *out = rgb;
+		for (int y = 0; y < kHeight; ++y) {
+			const byte *row = (const byte *)screen->getBasePtr(0, y);
+			for (int x = 0; x < kWidth; ++x, out += 3)
+				memcpy(out, palette + 3 * row[x], 3);
+		}
+		system->unlockScreen();
+		for (; frames < framesDue; ++frames)
+			video->write(rgb, sizeof(rgb));
+	}
+	video->flush();
 }
 
 void dumpScreen(OSystem *system, const char *name) {
@@ -259,41 +327,47 @@ void debugSetCursor(int x, int y) {
 }
 
 void debugOverlay(Graphics::Surface &surface) {
-#if defined(DUNE_DEBUG)
-	if (!g_debug.os || surface.format.bytesPerPixel != 1)
+	if (surface.format.bytesPerPixel != 1)
 		return;
-
-	const Common::Point cursor = g_debug.os->getEventManager()->getMousePos();
-	debugSetCursor(cursor.x, cursor.y);
-	const byte colours[6] = { 0, 0, 0, 252, 252, 252 };
-	g_debug.os->getPaletteManager()->setPalette(colours, 254, 2);
-	surface.fillRect(Common::Rect(0, 0, surface.w, 82), 254);
-	const Graphics::Font *font = FontMan.getFontByUsage(Graphics::FontManager::kGUIFont);
-	if (!font)
-		font = FontMan.getFontByUsage(Graphics::FontManager::kBigGUIFont);
-	if (font) {
-		// Keep each diagnostic field inside the 320-pixel framebuffer. In
-		// particular, sprite origin must never trail the scene name on a clipped
-		// first line: it gets the second visible row directly below DUNE_DEBUG.
-		const Common::String header = Common::String::format("DUNE_DEBUG room=%s",
-				g_debug.room < 0 ? "INTRO" : Common::String::format("%d", g_debug.room).c_str());
-		const Common::String scene = Common::String::format("scene=%s",
-				g_debug.scene.empty() ? "(none)" : g_debug.scene.c_str());
-		const Common::String sprite = Common::String::format("sprite=(%d,%d)",
-				g_debug.spriteX, g_debug.spriteY);
-		const Common::String audio = Common::String::format("audio=%s",
-				g_debug.audio.empty() ? "(none)" : g_debug.audio.c_str());
-		const Common::String cursor = Common::String::format("cursor=(%d,%d)",
-				g_debug.cursorX, g_debug.cursorY);
-		font->drawString(&surface, header, 2, 1, surface.w - 4, 255, Graphics::kTextAlignLeft);
-		font->drawString(&surface, sprite, 2, 17, surface.w - 4, 255, Graphics::kTextAlignLeft);
-		font->drawString(&surface, scene, 2, 33, surface.w - 4, 255, Graphics::kTextAlignLeft);
-		font->drawString(&surface, audio, 2, 49, surface.w - 4, 255, Graphics::kTextAlignLeft);
-		font->drawString(&surface, cursor, 2, 65, surface.w - 4, 255, Graphics::kTextAlignLeft);
+#if defined(DUNE_DEBUG)
+	if (g_debug.os) {
+		const Common::Point cursor = g_debug.os->getEventManager()->getMousePos();
+		debugSetCursor(cursor.x, cursor.y);
+		const byte colours[6] = { 0, 0, 0, 252, 252, 252 };
+		g_debug.os->getPaletteManager()->setPalette(colours, 254, 2);
+		surface.fillRect(Common::Rect(0, 0, surface.w, 82), 254);
+		const Graphics::Font *debugFont = FontMan.getFontByUsage(Graphics::FontManager::kGUIFont);
+		if (!debugFont)
+			debugFont = FontMan.getFontByUsage(Graphics::FontManager::kBigGUIFont);
+		if (debugFont) {
+			// Keep each diagnostic field inside the 320-pixel framebuffer. In
+			// particular, sprite origin must never trail the scene name on a clipped
+			// first line: it gets the second visible row directly below DUNE_DEBUG.
+			const Common::String header = Common::String::format("DUNE_DEBUG room=%s",
+					g_debug.room < 0 ? "INTRO" : Common::String::format("%d", g_debug.room).c_str());
+			const Common::String scene = Common::String::format("scene=%s",
+					g_debug.scene.empty() ? "(none)" : g_debug.scene.c_str());
+			const Common::String sprite = Common::String::format("sprite=(%d,%d)",
+					g_debug.spriteX, g_debug.spriteY);
+			const Common::String audio = Common::String::format("audio=%s",
+					g_debug.audio.empty() ? "(none)" : g_debug.audio.c_str());
+			const Common::String cursorText = Common::String::format("cursor=(%d,%d)",
+					g_debug.cursorX, g_debug.cursorY);
+			const Common::String buildId(DUNE_BUILD_ID);
+			const int buildIdWidth = debugFont->getStringWidth(buildId);
+			const int buildIdLeft = MAX(0, surface.w - buildIdWidth - 4);
+			debugFont->drawString(&surface, header, 2, 1, surface.w - 4, 255, Graphics::kTextAlignLeft);
+			debugFont->drawString(&surface, sprite, 2, 17, surface.w - 4, 255, Graphics::kTextAlignLeft);
+			debugFont->drawString(&surface, scene, 2, 33, surface.w - 4, 255, Graphics::kTextAlignLeft);
+			debugFont->drawString(&surface, audio, 2, 49, surface.w - 4, 255, Graphics::kTextAlignLeft);
+			debugFont->drawString(&surface, cursorText, 2, 65, surface.w - 4, 255, Graphics::kTextAlignLeft);
+			debugFont->drawString(&surface, buildId, buildIdLeft + 1, 1,
+					surface.w - buildIdLeft - 2, 0, Graphics::kTextAlignLeft);
+			debugFont->drawString(&surface, buildId, buildIdLeft, 0,
+					surface.w - buildIdLeft - 2, 255, Graphics::kTextAlignLeft);
+		}
+		writeState(false);
 	}
-	writeState(false);
-#else
-	(void)surface;
 #endif
 }
 

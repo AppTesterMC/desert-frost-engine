@@ -5,10 +5,11 @@
 ![Engine licence: GPL-3.0-or-later](https://img.shields.io/badge/engine-GPL--3.0--or--later-blue)
 
 # Desert Frost Spice
+**currently only Engine ;)**
 
 <div align="center">
 
-<img src="doc/STOREFRONT.png" alt="A game engine for Cryo's Dune 1992 Rebuild the classic. Power your own Dune experiences with Desert Frost Spice." width="720">
+<img src="doc/intro-paul.bmp" alt="Paul's hair on red background during the Dune intro" width="640">
 
 </div>
 

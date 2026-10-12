@@ -608,6 +608,20 @@ void GameScreen::emperorEnding() {
 		headDown("game over");
 	drawEnding();
 	dumpScreen(_system, "emperor-ending");
+	if (_endingText.empty() && ConfMan.hasKey("dune_exit_after_ending")) {
+		const uint seconds = (uint)MAX(0, ConfMan.getInt("dune_exit_after_ending"));
+		const uint32 until = _system->getMillis() + seconds * 1000;
+		while (_system->getMillis() < until && !_quitRequested) {
+			Common::Event event;
+			while (pollDuneEvent(_system, event))
+				if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER)
+					_quitRequested = true;
+			_system->updateScreen();
+			_system->delayMillis(10);
+		}
+		_log.line("Recording: final credits shown; closing the game for file finalization");
+		_quitRequested = true;
+	}
 }
 
 void GameScreen::drawEnding() {
@@ -626,6 +640,7 @@ void GameScreen::drawEnding() {
 			_panel.drawText(_surface, name.c_str(), 160 - (int)_panel.textWidth(name.c_str(), false) / 2, y,
 					Panel::kLightColour, false);
 		}
+		debugOverlay(*_surface.surfacePtr());
 		_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
 		_system->updateScreen();
 		return;
@@ -642,6 +657,7 @@ void GameScreen::drawEnding() {
 		for (uint i = 0; i < lines.size(); ++i, y += 10)
 			_panel.drawText(_surface, lines[i].c_str(), 20, y, Panel::kLightColour, false);
 	}
+	debugOverlay(*_surface.surfacePtr());
 	_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
 	_system->updateScreen();
 }
@@ -1631,7 +1647,7 @@ Common::String placeLine(World &world, uint index) {
 }
 } // namespace
 
-void GameScreen::ecologyWinSetup() {
+void GameScreen::ecologyWinSetup(bool wholePlanetGreen, bool finishPalace) {
 	// The vegetation's own route to the end (queue item 3b). Every fort but
 	// one is taken; a sietch's vegetation disc is pointed at the last fort,
 	// then at the Harkonnen palace. The disc's callback (CD seg000:653a,
@@ -1641,7 +1657,13 @@ void GameScreen::ecologyWinSetup() {
 	// (6582: cmp di, 138h); the floppy takes it, and the Baron's hall is
 	// open: Paul walks in and the game ends.
 	firstVisionForSetup();
+	speedrunActionPause(true);
+	if (_quitRequested)
+		return;
 	setGamePhase(0x58);
+	speedrunActionPause(false);
+	if (_quitRequested)
+		return;
 	_pendingScene = 0;
 	int fort = -1, sietch = -1;
 	for (uint i = 2; i < _world.locationCount(); ++i) {
@@ -1655,10 +1677,22 @@ void GameScreen::ecologyWinSetup() {
 		_log.line("Story setup: no fort or sietch");
 		return;
 	}
+	speedrunActionPause(true);
+	if (_quitRequested)
+		return;
 	const uint left = _world.takeFortsForTest(fort);
+	speedrunActionPause(false);
+	if (_quitRequested)
+		return;
 	_log.line(Common::String::format("Story setup: forts taken but place %d, %u Harkonnen place(s) left, stage %u, %s",
 			fort, left, _state.b(0xc2), placeLine(_world, (uint)fort).c_str()));
+	speedrunActionPause(true);
+	if (_quitRequested)
+		return;
 	_world.greenOverForTest((uint)sietch, (uint)fort, 2);
+	speedrunActionPause(false);
+	if (_quitRequested)
+		return;
 	_log.line(Common::String::format("Story setup: after the vegetation at place %d: stage %u, %s", fort,
 			_state.b(0xc2), placeLine(_world, (uint)fort).c_str()));
 	// Thufir's advice (DIALOGUE 2 list 1, condition 127: ds:c2 == 1).
@@ -1669,28 +1703,85 @@ void GameScreen::ecologyWinSetup() {
 	thufir[3] = 1;
 	_state.setB(World::kUnread, 0); // no COMM message waiting ("View the message before anything else.")
 	_world.setPosition(0, 10);
-	showRoom(10);
+	speedrunShowRoom(10, true);
 	Common::String logged;
+	speedrunActionPause(true);
+	if (_quitRequested)
+		return;
 	startConversation(2);
+	speedrunActionPause(false);
+	if (_quitRequested)
+		return;
 	for (uint g = 0; g < 30 && _mode == kTalk && !_talkEnded; ++g) {
 		if (_talkLastPage != logged) {
 			logged = _talkLastPage;
 			_log.line(Common::String::format("Story setup: Thufir says \"%s\"", logged.c_str()));
 		}
+		speedrunActionPause(true);
+		if (_quitRequested)
+			return;
 		advanceConversation();
+		speedrunActionPause(false);
+		if (_quitRequested)
+			return;
 	}
-	if (inConversation())
+	if (inConversation()) {
+		speedrunActionPause(true);
+		if (_quitRequested)
+			return;
 		endConversation();
+		speedrunActionPause(false);
+	}
 	// A day on: no demand from the Emperor once ds:c2 is set (seg000:20ae).
 	const uint16 shipments = _state.b(World::kShipments);
+	speedrunActionPause(true);
+	if (_quitRequested)
+		return;
 	_world.advanceTime(World::kSlotsPerDay);
+	speedrunActionPause(false);
+	if (_quitRequested)
+		return;
 	_log.line(Common::String::format("Story setup: a day later, demands %u -> %u, stage %u", shipments,
 			_state.b(World::kShipments), _state.b(0xc2)));
 	// The palace under the disc.
+	speedrunActionPause(true);
+	if (_quitRequested)
+		return;
 	_world.greenOverForTest((uint)sietch, 1, 2);
+	speedrunActionPause(false);
+	if (_quitRequested)
+		return;
 	const bool held = _world.friendlyPlace(1);
 	_log.line(Common::String::format("Story setup: after the vegetation at the Harkonnen palace: %s, %s, stage %u",
 			placeLine(_world, 1).c_str(), held ? "taken" : "still Harkonnen", _state.b(0xc2)));
+	if (wholePlanetGreen) {
+		// The normal globe renders sprouting terrain as green. Finish the
+		// assisted ecology demonstration only after the vegetation has taken
+		// the last fort and palace, so their takeover callbacks still run.
+		Common::Array<byte> &planet = _world.map();
+		for (uint cell = 0x188; cell < 0xc5f9 && cell < planet.size(); ++cell)
+			if ((planet[cell] & 0x0f) < 8)
+				planet[cell] = (byte)((planet[cell] & 0xcf) | 0x10);
+		_world.computeAreas();
+		_log.line("Ecology: all mapped desert terrain is sprouting green");
+		speedrunActionPause(true);
+		if (_quitRequested)
+			return;
+		openMap(MapScreen::kGlobe, false);
+		speedrunActionPause(false);
+		if (_quitRequested)
+			return;
+		speedrunPause(5000);
+	}
+	if (!held && finishPalace) {
+		// The CD's vegetation cannot take either palace. The watched ecology
+		// demonstration finishes with the existing assisted final-battle
+		// fixture, leaving the CD ecology rule intact. The regression setup
+		// keeps its original fatal-arrival case when finishPalace is false.
+		speedrunLog("Ecology: assisted final military attack required for the CD palace");
+		endlessPlaySetup(false);
+		return;
+	}
 	// Paul flies in (the arrival rule, seg000:503c) and walks to room 2.
 	forceRules(true);
 	_world.setPosition(1, 1);
@@ -1699,8 +1790,8 @@ void GameScreen::ecologyWinSetup() {
 		return;
 	}
 	_log.line("Story setup: Paul lands at the Harkonnen palace");
-	showRoom(1);
-	showRoom(2);
+	speedrunShowRoom(1, true);
+	speedrunShowRoom(2, true);
 	_log.line(Common::String::format("Story setup: in room 2 of the palace, phase %#x", _state.b(GameState::kPhase)));
 }
 

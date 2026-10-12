@@ -455,8 +455,24 @@ HnmPlayer::Result HnmPlayer::play(const Common::Array<byte> &data, const char *n
 		if (result == kFinished) {
 			// Let the queued tail of the soundtrack play out.
 			audio->finish();
-			while (mixer->isSoundHandleActive(audioHandle) && !audio->endOfData())
+			while (mixer->isSoundHandleActive(audioHandle) && !audio->endOfData()) {
+				// A streamed run pulls the null mixer while polling events.
+				// Sleeping alone leaves the queued narration undrained forever.
+				Common::Event event;
+				while (pollDuneEvent(_system, event)) {
+					if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER)
+						result = kQuit;
+					else if (event.type == Common::EVENT_LBUTTONDOWN || event.type == Common::EVENT_RBUTTONDOWN ||
+							(event.type == Common::EVENT_KEYDOWN && (event.kbd.keycode == Common::KEYCODE_ESCAPE ||
+							 event.kbd.keycode == Common::KEYCODE_RETURN || event.kbd.keycode == Common::KEYCODE_SPACE))) {
+						result = kSkipped;
+						_escape = event.type == Common::EVENT_KEYDOWN && event.kbd.keycode == Common::KEYCODE_ESCAPE;
+					}
+				}
+				if (result != kFinished)
+					break;
 				_system->delayMillis(10);
+			}
 		}
 		mixer->stopHandle(audioHandle);
 	}

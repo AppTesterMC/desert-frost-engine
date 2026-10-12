@@ -12,20 +12,29 @@ set -eu
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 repo_source_root="$repo_root/third_party/scummvm"
-local_root="${DUNE_LOCAL_BUILD_ROOT:-/tmp/dune-scummvm-native-build}"
+local_root="${DUNE_LOCAL_BUILD_ROOT:-$HOME/Library/Caches/Cryogenic-local/dune-scummvm-native-build}"
 . "$script_dir/scummvm_source.sh"
 source_root="$local_root/scummvm"
 build_root="$local_root/build-sdl-dune"
 # DUNE_RUN_ROOT: a private run folder (saves, dune-ios.log), so check_all.sh
 # can run the checks that use the shared one in parallel.
 run_root="${DUNE_RUN_ROOT:-$local_root/sdl-run}"
-evidence_root="$repo_root/notes/temp/dune_scummvm_engine_20260916"
+evidence_root="${DUNE_EVIDENCE_ROOT:-$repo_root/notes/temp/dune_scummvm_engine_20260916}"
 
 mkdir -p "$source_root"
-if [ ! -f "$source_root/.dune-local-source-ready" ]; then
+if [ ! -x "$source_root/configure" ] ||
+		[ ! -f "$source_root/engines/access/detection.cpp" ]; then
+	# Older streaming bundles stamped this directory ready after copying only
+	# the Dune engine. Overlay the complete upstream source before configuring
+	# or compiling, so generated Makefiles never reference absent engine files.
 	stage_scummvm_source "$source_root"
-	touch "$source_root/.dune-local-source-ready"
+	[ -x "$source_root/configure" ] &&
+		[ -f "$source_root/engines/access/detection.cpp" ] || {
+		echo "ScummVM source staging is incomplete at $source_root" >&2
+		exit 1
+	}
 fi
+touch "$source_root/.dune-local-source-ready"
 mkdir -p "$build_root" "$run_root/saves"
 # DUNE_SKIP_BUILD=1 (set by check_all.sh after its one build): use the built
 # binary as it is, so checks running in parallel never run make together.
@@ -33,13 +42,25 @@ skip_build=0
 if [ "${DUNE_SKIP_BUILD:-0}" = 1 ] && [ -x "$build_root/scummvm" ]; then
 	skip_build=1
 else
-	rsync -a "$repo_source_root/engines/dune/" "$source_root/engines/dune/"
+	# Copy by content, not with the repo's dates: a file that differs gets
+	# today's date, so make rebuilds it even when the build tree last held
+	# a newer snapshot (rsync -a kept old dates and left stale objects).
+	rsync -rlp --checksum "$repo_source_root/engines/dune/" "$source_root/engines/dune/"
+	[ -f "$source_root/engines/dune/module.mk" ] || {
+		echo "Dune engine source is incomplete at $source_root/engines/dune" >&2
+		exit 1
+	}
+	build_id=$(stamp_dune_build_id "$source_root/engines/dune")
+	echo "Dune build: $build_id"
 fi
 cd "$build_root"
 
 if [ "$skip_build" = 1 ]; then
 	:
-elif [ ! -f Makefile ]; then
+elif [ ! -f Makefile ] || ! grep -Fqx "srcdir = $source_root" Makefile; then
+	# The build directory can outlive the staged source tree. In particular,
+	# older streaming copies may have a Makefile pointing at a previous source
+	# location; make would then request prerequisites from that stale location.
 	"$source_root/configure" \
 		--backend=sdl \
 		--disable-all-engines \
@@ -48,7 +69,23 @@ elif [ ! -f Makefile ]; then
 fi
 
 if [ "$skip_build" = 0 ]; then
-	make -j"$(sysctl -n hw.ncpu)"
+	# Dependency files under .deps record absolute source paths. They survive a
+	# moved build directory even when the top-level Makefile has been refreshed,
+	# so detect the source-root change independently and rebuild cleanly once.
+	build_source_marker="$build_root/.dune-source-root"
+	if [ ! -f "$build_source_marker" ] || [ "$(cat "$build_source_marker")" != "$source_root" ]; then
+		if [ -f Makefile ]; then
+			find . -type d -name .deps -prune -exec rm -rf {} +
+			make clean
+		fi
+		printf '%s\n' "$source_root" > "$build_source_marker"
+	fi
+	if command -v getconf >/dev/null 2>&1; then
+		build_jobs=$(getconf _NPROCESSORS_ONLN)
+	else
+		build_jobs=$(sysctl -n hw.ncpu)
+	fi
+	make -j"$build_jobs"
 fi
 
 # Homebrew can replace sdl2 with sdl2-compat (SDL 3 underneath; it happened on
@@ -56,11 +93,13 @@ fi
 # headless run quits before the engine starts, with no error. When the real
 # SDL2 is still in the Cellar, the binary is pointed at it. A DYLD_LIBRARY_PATH
 # would not work because perl and env are SIP-protected and drop it.
-sdl2_real=$(ls -d /opt/homebrew/Cellar/sdl2/*/lib/libSDL2-2.0.0.dylib 2>/dev/null | tail -1)
-sdl2_linked=$(otool -L scummvm | awk '/libSDL2-2.0.0.dylib/ {print $1}')
-if [ -n "$sdl2_real" ] && [ -n "$sdl2_linked" ] && [ "$sdl2_linked" != "$sdl2_real" ]; then
-	install_name_tool -change "$sdl2_linked" "$sdl2_real" scummvm 2>/dev/null
-	codesign --force -s - scummvm >/dev/null 2>&1
+if command -v otool >/dev/null 2>&1; then
+	sdl2_real=$(ls -d /opt/homebrew/Cellar/sdl2/*/lib/libSDL2-2.0.0.dylib 2>/dev/null | tail -1)
+	sdl2_linked=$(otool -L scummvm | awk '/libSDL2-2.0.0.dylib/ {print $1}')
+	if [ -n "$sdl2_real" ] && [ -n "$sdl2_linked" ] && [ "$sdl2_linked" != "$sdl2_real" ]; then
+		install_name_tool -change "$sdl2_linked" "$sdl2_real" scummvm 2>/dev/null
+		codesign --force -s - scummvm >/dev/null 2>&1
+	fi
 fi
 
 config="$run_root/scummvm.ini"

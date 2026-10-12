@@ -305,6 +305,7 @@ uint takeDuneHarnessPeriods() {
 }
 
 bool pollDuneEvent(OSystem *system, Common::Event &event) {
+	streamTick(system);
 	if (!loadScript())
 		return system->getEventManager()->pollEvent(event);
 	if (!g_harness.start)
