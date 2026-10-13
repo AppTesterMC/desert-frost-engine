@@ -216,6 +216,10 @@ void GameScreen::showFinal(uint picture) {
 		return;
 	Sprite final(_system, data);
 	final.setPalette();
+	// FINAL.HSQ's portraits use the shared character colours from PERS.HSQ.
+	// Keep the ending sheet's background colours, then restore those shared
+	// portrait ranges before drawing its frames.
+	_panel.applyPalette();
 	_surface.fillRect(Common::Rect(0, 0, 320, 152), 0);
 	if (_world.amiga()) {
 		// The Amiga's FINAL.HSQ: "THE END" (1) over the worm's head (picture
