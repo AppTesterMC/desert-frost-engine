@@ -201,6 +201,8 @@ public:
 
 	/** SEE SPICE DENSITY: circles sized by each known sietch's density, and the box's title. */
 	void setDensity(bool on) { _density = on; }
+	/** Track the density legend swatch under the pointer, or clear its label. */
+	bool setDensityHover(int x, int y);
 	/**
 	 * A troop's route over the density popup (floppy sub_AD0A, drawn while a
 	 * move order is picked): the troop's position, then each destination,
@@ -318,6 +320,7 @@ private:
 	uint16 _rotation;
 	int _tilt;
 	bool _density;
+	int _densityHover = -1;
 	Common::Array<Common::Point> _route; ///< (longitude, latitude) pairs, see setRoute
 	int _densityX = 75, _densityY = 15;  ///< the popup's place (floppy ds:426c/426e)
 	bool _densityTroop = false;

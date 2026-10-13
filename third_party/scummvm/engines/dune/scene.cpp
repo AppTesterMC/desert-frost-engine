@@ -5287,6 +5287,12 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 				return false;
 			}
 		}
+		if (!_cockpit && _map->mode() == MapScreen::kFlat && _map->density() &&
+				event.type == Common::EVENT_MOUSEMOVE) {
+			if (_map->setDensityHover(event.mouse.x, event.mouse.y))
+				drawMapScreen();
+			return false;
+		}
 		if ((event.type == Common::EVENT_LBUTTONDOWN || event.type == Common::EVENT_RBUTTONDOWN) && _map->caption()) {
 			// Either button dismisses the DUNE MAP popup (seg000:5c76, 5ce4).
 			_map->setCaption(false);

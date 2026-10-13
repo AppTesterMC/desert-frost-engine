@@ -965,6 +965,16 @@ int MapScreen::densityHit(int x, int y) const {
 	return windowHit(window, _longitude, centreLatitude(), x, y);
 }
 
+bool MapScreen::setDensityHover(int x, int y) {
+	const int px = _densityX, py = _densityY;
+	const int band = x >= px + 95 && x < px + 95 + 4 * 16 && y >= py + 99 && y < py + 104
+			? (x - (px + 95)) / 4 : -1;
+	if (_densityHover == band)
+		return false;
+	_densityHover = band;
+	return true;
+}
+
 void MapScreen::drawRoute(Graphics::ManagedSurface &surface, const Common::Rect &window, int16 centreLatitude) {
 	// sub_AD0A: each point projected (sub_D414), then a line per pair in
 	// colour 0x0C with the pattern 0x5555, clipped to the window. A pair more
@@ -1043,6 +1053,13 @@ void MapScreen::drawDensityOverlay(Graphics::ManagedSurface &surface, const Pane
 	for (int k = 0; k < 16; ++k)
 		surface.fillRect(Common::Rect(px + 95 + 4 * k, py + 99, px + 98 + 4 * k, py + 104), (uint32)(kDensityRamp + k));
 	panel.drawText(surface, "+", px + 158, py + 98, 0xfe, true);
+	if (_densityHover >= 0) {
+		const Common::String range = Common::String::format("%u-%u", (uint)_densityHover * 16,
+				(uint)_densityHover * 16 + 15);
+		const int labelWidth = panel.textWidth(range.c_str(), true);
+		const int labelX = CLIP<int>(px + 95 + 4 * _densityHover + 1 - labelWidth / 2, px + 5, px + 165 - labelWidth);
+		panel.drawText(surface, range.c_str(), labelX, py + 87, 0xfe, true);
+	}
 }
 
 void MapScreen::setFlight(bool active, uint16 longitude, int16 latitude, int destination) {
