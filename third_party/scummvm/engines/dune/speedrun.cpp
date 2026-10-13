@@ -104,8 +104,11 @@ void GameScreen::speedrunPause(uint millis, bool scaleToPace) {
 void GameScreen::speedrunActionPause(bool before) {
 	const char *key = before ? "dune_speedrun_pause_before" : "dune_speedrun_pause_after";
 	const int seconds = MAX(0, ConfMan.getInt(key));
-	if (seconds)
+	if (seconds && ConfMan.hasKey("dune_speedrun_watch")) {
+		_log.line(Common::String::format("Action pause %s: %d seconds",
+				before ? "before" : "after", seconds));
 		speedrunPause((uint)seconds * 1000, false);
+	}
 }
 
 void GameScreen::speedrunStartConversation(uint character) {

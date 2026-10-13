@@ -21,6 +21,7 @@
 #   --action-pause SECONDS  hold the screen before and after each scripted action/click
 #   --action-pause-before SECONDS  hold the screen before each scripted action/click
 #   --action-pause-after SECONDS   hold the screen after each scripted action/click
+#   defaults: 4 seconds before, 5 seconds after, and a 6-second flight skip
 #   --intro   play the intro first (skipped by default)
 #   --auto-stop  exit the game when the route reaches its endpoint
 #   --cd      shorthand for --release cd
@@ -56,9 +57,9 @@ stream_format=flv
 auto_stop=0
 stream_session=0
 room_wait=0
-skip_flight_after=0
-pause_before=0
-pause_after=0
+skip_flight_after=6
+pause_before=4
+pause_after=5
 validate_seconds() {
 	seconds_option=$1
 	seconds_value=$2
@@ -137,6 +138,22 @@ if ! SDL_AUDIODRIVER=dummy DUNE_DATA="$data" DUNE_SKIP_BUILD="${DUNE_SKIP_BUILD:
 fi
 build_id_file="$local_root/scummvm/engines/dune/build_id.h"
 build_id=$(sed -n 's/^#define DUNE_BUILD_ID "\([^"]*\)"/\1/p' "$build_id_file" | head -1)
+case "$build_id" in
+	''|*unstamped*)
+		echo "The staged engine has no stamped build ID; rebuilding it before launch."
+		if ! SDL_AUDIODRIVER=dummy DUNE_DATA="$data" DUNE_SKIP_BUILD=0 \
+				bash "$script_dir/test_dune_scummvm_sdl.sh" build >"$build_log" 2>&1; then
+			echo "build failed while stamping the engine; details from $build_log:" >&2
+			tail -60 "$build_log" >&2 || true
+			exit 1
+		fi
+		build_id=$(sed -n 's/^#define DUNE_BUILD_ID "\([^"]*\)"/\1/p' "$build_id_file" | head -1)
+		;;
+esac
+if [ -z "$build_id" ] || [ "$build_id" = build_unstamped ]; then
+	echo "Could not get a stamped engine build ID from $build_id_file" >&2
+	exit 1
+fi
 
 if [ -n "$stream" ]; then
 	# Keep per-run logs and saves separate. A sequence supervisor may provide
@@ -271,6 +288,7 @@ if [ -n "$stream" ]; then
 		ffmpeg_pid=$!
 		case "$stream" in *://*) start_stream_limit ;; esac
 	fi
+	echo "Action pauses: before ${pause_before}s, after ${pause_after}s; flight skip: ${skip_flight_after}s"
 	echo "Build: ${build_id:-unknown}"
 	if [ "$stream_local" = 1 ]; then
 		if [ "$part" = endless-tour ]; then
@@ -363,6 +381,7 @@ if [ -n "$stream" ]; then
 fi
 
 echo "Build: ${build_id:-unknown}"
+echo "Action pauses: before ${pause_before}s, after ${pause_after}s; flight skip: ${skip_flight_after}s"
 echo "Watching the $part speedrun (seed $seed); close the window to stop."
 echo "Log: $run_root/saves/dune-ios.log  (grep Speedrun: for the milestones)"
 cd "$local_root/build-sdl-dune"

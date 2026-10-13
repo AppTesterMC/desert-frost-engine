@@ -15,10 +15,19 @@ SCUMMVM_REPO="${SCUMMVM_REPO:-https://github.com/scummvm/scummvm.git}"
 SCUMMVM_REF="${SCUMMVM_REF:-430653b98d75e86d15a293c0aa3b3dbed56b499d}"
 
 # Stamp each staged Dune build with an ID that is visible in its screen
-# watermark. The pid keeps two builds started in the same second distinct.
+# watermark. The counter gives each local build a readable number.
 stamp_dune_build_id() {
 	stamp_dir=$1
-	stamp_id="build_$(date +%Y%m%d_%H%M%S)_$$"
+	counter_file="$stamp_dir/.dune-build-counter"
+	counter=0
+	if [ -r "$counter_file" ]; then
+		IFS= read -r counter < "$counter_file" || true
+		case "$counter" in ''|*[!0-9]*) counter=0 ;; esac
+	fi
+	counter=$((counter + 1))
+	printf '%s\n' "$counter" > "$counter_file"
+	build_number=$(printf '%06d' "$counter")
+	stamp_id="DUNE build $(date '+%Y-%m-%d %H:%M:%S') #$build_number"
 	cat > "$stamp_dir/build_id.h" <<EOF
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #ifndef ENGINES_DUNE_BUILD_ID_H
