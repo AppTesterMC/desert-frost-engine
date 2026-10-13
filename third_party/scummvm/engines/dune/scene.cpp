@@ -3711,8 +3711,32 @@ void GameScreen::drawTroop() {
 		const uint maxLines = overlay ? 2 : 6;
 		const int area = overlay ? 0x19 : 63;
 		int y = panel.top + 3 + (area - (int)MIN<uint>(lines.size(), maxLines) * lineHeight) / 2;
-		for (uint i = 0; i < lines.size() && i < maxLines; ++i, y += lineHeight)
-			_panel.drawText(_surface, lines[i].c_str(), panel.left + 0x49 + 4, y, Panel::kDarkColour, false);
+		const int textX = panel.left + 0x49 + 4;
+		const int textWidth = 153 - 8;
+		for (uint i = 0; i < lines.size() && i < maxLines; ++i, y += lineHeight) {
+			Common::Array<Common::String> words;
+			Common::String word;
+			for (uint k = 0; k <= lines[i].size(); ++k) {
+				if (k == lines[i].size() || lines[i][k] == ' ') {
+					if (!word.empty())
+						words.push_back(word);
+					word.clear();
+				} else {
+					word += lines[i][k];
+				}
+			}
+			int used = 0;
+			for (uint k = 0; k < words.size(); ++k)
+				used += _panel.textWidth(words[k].c_str(), false);
+			const int gaps = (int)words.size() - 1;
+			const int space = i + 1 < MIN<uint>(lines.size(), maxLines) && gaps > 0
+					? MAX(3, (textWidth - used) / gaps) : _panel.textWidth(" ", false) + 1;
+			int x = textX;
+			for (uint k = 0; k < words.size(); ++k) {
+				_panel.drawText(_surface, words[k].c_str(), x, y, Panel::kDarkColour, false);
+				x += _panel.textWidth(words[k].c_str(), false) + space;
+			}
+		}
 		if (overlay)
 			_map->drawDensityOverlay(_surface, _panel);
 
