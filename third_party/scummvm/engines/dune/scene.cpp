@@ -3617,7 +3617,17 @@ void GameScreen::drawTroop() {
 			const Location l = _world.location((uint)_world.troopPlace(_troopId));
 			marker = Common::Point((int16)l.longitude, l.latitude);
 		}
-		_map->setDensityForTroop(0x5c, 0x1e, marker);
+		// Keep the contact panel clear of the troop marker, as in
+		// sub_A5E5. When the troop is in the upper half, the panel moves down
+		// and the density window moves up to (0x5c, 0x0e).
+		int popupTop = 5;
+		int densityTop = 0x1e;
+		int troopX, troopY;
+		if (_map->projectPosition((uint16)marker.x, (int16)marker.y, troopX, troopY) && troopY < 76) {
+			popupTop = 0x50;
+			densityTop = 0x0e;
+		}
+		_map->setDensityForTroop(0x5c, densityTop, marker);
 		{
 			route.push_back(position);
 			if (_troopId == World::kProspectorTroop) {
@@ -3651,7 +3661,7 @@ void GameScreen::drawTroop() {
 		// (the troop's icon is below it), a 61x61 head box (fill 0xe4, frame
 		// 0xf5) at +(4,3) and the line at +(0x49,3) in a 153x63 area, all on
 		// the popup fill 0xfb.
-		const Common::Rect panel(6, 5, 6 + 0x49 + 153 + 4, 5 + 0x43);
+		const Common::Rect panel(6, popupTop, 6 + 0x49 + 153 + 4, popupTop + 0x43);
 		_surface.fillRect(panel, 0xfb);
 		const Common::Rect head(panel.left + 4, panel.top + 3, panel.left + 4 + 0x3d, panel.top + 3 + 0x3d);
 		_surface.fillRect(head, 0xe4);
