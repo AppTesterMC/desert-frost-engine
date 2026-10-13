@@ -709,11 +709,13 @@ void FloppyIntro::creditsScene(const char *dumpName) {
 	Sprite credits(_system, creditsData), intds(_system, intdsData);
 	startSong("WORMSUIT.HSQ");
 
-	runScene(dumpName, 54000, kFade, 2000, kNoTransition, 0, 6000, [&](uint32 elapsed, Graphics::Surface &view) {
+	runScene(dumpName, 17000, kFade, 3000, kNoTransition, 0, 6000, [&](uint32 elapsed, Graphics::Surface &view) {
 		drawSkyView(view, kSkyNarrow, 320, kSkyNight);
 		credits.setPalette(); // Turns the sky red: CREDITS owns 128-190.
 		intds.drawFrame(0, &view, 0, 60);
-		const int scroll = (int)(1936 * progress256(elapsed, 2000, 52000) / 256);
+		// The intro ends after "Programming Remi Herbulot"; later credits
+		// belong to the end sequence. The original scroll covers about 500 px.
+		const int scroll = (int)(500 * progress256(elapsed, 3000, 14000) / 256);
 		for (uint i = 0; i < ARRAYSIZE(lines); ++i)
 			credits.drawFrame(lines[i][0], &view, lines[i][1], 152 - scroll + lines[i][2]);
 	});
