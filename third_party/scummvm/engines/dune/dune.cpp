@@ -37,6 +37,7 @@
 #include "dune/cursor.h"
 #include "dune/debug.h"
 #include "dune/dune.h"
+#include "dune/demo.h"
 #include "dune/intro.h"
 #include "dune/harness.h"
 #include "dune/music.h"
@@ -70,6 +71,11 @@ static void startSong(Music &music, Resource &resources, StartupLog &log, const 
 
 Common::Error DuneEngine::run() {
 	StartupLog log;
+	DemoSession demo(_system, log);
+	const uint demoRelease = _gameDescription->platform == Common::kPlatformSegaCD ? 3 :
+		_gameDescription->platform == Common::kPlatformAmiga ? 2 : (_gameDescription->flags & ADGF_CD) ? 1 : 0;
+	Common::Error demoError = demo.begin(demoRelease);
+	if (demoError.getCode() != Common::kNoError) return demoError;
 	setDuneHarnessLog(&log);
 	struct HarnessLogGuard {
 		~HarnessLogGuard() { setDuneHarnessLog(nullptr); }
@@ -169,6 +175,7 @@ Common::Error DuneEngine::run() {
 		log.line("Option: dune_fix_celimyn_tuek on (Celimyn-Tuek can be found from phase 0x58)");
 	}
 	screen.startNewGame();
+	duneDemoGameplay();
 	log.line("Startup complete: throne room displayed");
 	if (ConfMan.hasKey("dune_test_flight")) {
 		// Developer key: fly to place <n> in real time and stop (with

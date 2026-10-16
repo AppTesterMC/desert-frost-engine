@@ -30,6 +30,7 @@
 #include "dune/cursor.h"
 #include "dune/debug.h"
 #include "dune/harness.h"
+#include "dune/demo.h"
 #include "dune/palace.h"
 #include "dune/resource.h"
 #include "dune/segacd_game.h"
@@ -824,6 +825,7 @@ Common::Error runSegaCd(OSystem *system, StartupLog &log) {
 		debugEnd();
 		return Common::kNoGameDataFoundError;
 	}
+	duneDemoGameplay();
 	showGameCursor();
 	Common::Event event;
 	while (!Engine::shouldQuit()) {

@@ -20,7 +20,7 @@ game, including its command rows, dialogue, book and intro text resources.
 | SAF, VSF | DOS rendering-driver compatibility paths; no equivalent alternate driver in this engine |
 | ADP, ADG / AGD, MID | Original Sound Blaster Pro, AdLib Gold and MT-32 music drivers are not implemented; they are not offered as working choices |
 | NOM | Original mouse-driver disable is not exposed until the keyboard can reach every pointer-only action; disabling touch currently would make the game unusable on a phone |
-| REC, DEM | Original floppy event recorder/player not yet ported; the developer input-script harness is a different format |
+| REC, DEM | ScummVM supports its versioned `DUNEREC1` engine input recordings; these are not compatible with the original DOS floppy `REC`/`DEM` files |
 | MON | Original monochrome mode remains deferred; the user currently prioritizes functionality over colour changes |
 | ALN | Not present in either game executable's argument table examined here |
 

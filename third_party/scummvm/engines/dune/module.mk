@@ -9,6 +9,7 @@ MODULE_OBJS := \
 	cursor.o \
 	cockpit.o \
 	debug.o \
+	demo.o \
 	desert.o \
 	detection.o \
 	dialogue.o \

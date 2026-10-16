@@ -39,6 +39,7 @@
 
 #include "dune/debug.h"
 #include "dune/harness.h"
+#include "dune/demo.h"
 
 namespace Dune {
 
@@ -281,7 +282,7 @@ bool makeEvent(const Step &step, Common::Event &event) {
 } // namespace
 
 bool isDuneHarnessRun() {
-	return checkpointing();
+	return checkpointing() && !duneDemoActive();
 }
 
 bool isDuneFastHarness() {
@@ -295,6 +296,7 @@ void captureDuneCheckpoint(OSystem *system, const Common::String &name) {
 }
 
 void setDuneHarnessLog(StartupLog *log) {
+	if (log && !g_harness.log) g_harness = HarnessState();
 	g_harness.log = log;
 }
 
@@ -304,8 +306,7 @@ uint takeDuneHarnessPeriods() {
 	return n;
 }
 
-bool pollDuneEvent(OSystem *system, Common::Event &event) {
-	streamTick(system);
+static bool pollInput(OSystem *system, Common::Event &event) {
 	if (!loadScript())
 		return system->getEventManager()->pollEvent(event);
 	if (!g_harness.start)
@@ -331,6 +332,31 @@ bool pollDuneEvent(OSystem *system, Common::Event &event) {
 		return makeEvent(step, event);
 	}
 	return system->getEventManager()->pollEvent(event);
+}
+
+bool pollDuneEvent(OSystem *system, Common::Event &event) {
+	streamTick(system);
+	if (duneDemoPlayback()) {
+		// Real input cannot disturb playback. Quit and Escape remain usable.
+		while (system->getEventManager()->pollEvent(event)) {
+			if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER)
+				return true;
+			if (event.type == Common::EVENT_KEYDOWN && event.kbd.keycode == Common::KEYCODE_ESCAPE) {
+				event.type = Common::EVENT_QUIT;
+				return true;
+			}
+		}
+		return pollDuneDemo(event);
+	}
+	recordDuneDemo(Common::Event());
+	if (!pollInput(system, event)) return false;
+	if (duneDemoActive() && event.type == Common::EVENT_KEYDOWN && event.kbd.keycode == Common::KEYCODE_F12) {
+		event.type = Common::EVENT_QUIT;
+		recordDuneDemo(event);
+		return true;
+	}
+	recordDuneDemo(event);
+	return true;
 }
 
 } // namespace Dune

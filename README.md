@@ -95,6 +95,34 @@ results apply to the tested build and do not certify an untested IPA.
 The reverse-engineering record, with a source and confidence for each fact, is
 in [`FINDINGS.md`](third_party/scummvm/engines/dune/FINDINGS.md).
 
+## Input recording and playback
+
+The engine can record and replay timestamped input for DOS floppy, DOS CD, Amiga
+and Sega CD runs. `DUNEREC1` recordings store the game release, build identifier
+and relevant startup settings. Press **F12** to finish a recording; **Escape**
+aborts playback. This engine format is separate from the original DOS floppy
+REC/DEM files and cannot play those native recordings.
+
+Use `scripts/engine_demo.py` with a ScummVM build and legally obtained game data:
+
+```sh
+python3 scripts/engine_demo.py rec ~/Movies/dune-run.drec \
+  --engine /path/to/scummvm --data /path/to/dune-data
+python3 scripts/engine_demo.py dem ~/Movies/dune-run.drec \
+  --engine /path/to/scummvm --data /path/to/dune-data
+```
+
+The recorder was exercised in headless record/replay checks for all four game
+releases. Use the same engine build and release data for the closest replay;
+time-dependent animation can still differ between captures.
+
+## Live campaign dashboard
+
+Follow a live Dune run or explore available archives on the
+[Desert Frost live dashboard](https://desert-frost-engine-livestreaming.vercel.app/live/).
+It presents discovered places on an interactive Arrakis globe, campaign events
+and timeline plots when the run data provides them.
+
 ## Game options
 
 The two story fixes below are **off by default**. Turn them on per game in ScummVM's
