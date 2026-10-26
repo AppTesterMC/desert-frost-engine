@@ -396,6 +396,7 @@ private:
 	void checkIdle(uint32 now);
 	void presentVision(bool dream);
 	void emperorEnding();
+	void endingCreditsSlideshow();
 	void waterOfLifeWakeUp();
 	void waterOfLifeSetup();
 	void ecologyWinSetup(bool wholePlanetGreen = false, bool finishPalace = false);

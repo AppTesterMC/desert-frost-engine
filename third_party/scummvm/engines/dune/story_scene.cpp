@@ -42,6 +42,7 @@
 #include "dune/palace.h"
 #include "dune/resource.h"
 #include "dune/scene.h"
+#include "dune/music.h"
 #include "dune/sky.h"
 #include "dune/sprite.h"
 #include "dune/text.h"
@@ -180,11 +181,11 @@ void GameScreen::sceneStep() {
 			drawRoom();
 			dumpScreen(_system, "final-1");
 			return;
-		case 0x16: // action 0b (seg000:167c): the cast list, then the game is over
+		case 0x16: // action 0b (seg000:167c): the end-credits slideshow, then the game is over
 			_sceneActive = false;
 			_finalPicture = 0;
 			_endingText.clear();
-			emperorEnding();
+			endingCreditsSlideshow();
 			return;
 		default:
 			_log.line(Common::String::format("Scene: action byte %#x not built", op));
@@ -667,6 +668,151 @@ void GameScreen::drawEnding() {
 }
 
 // ---- FIND PROSPECTORS ---------------------------------------------------------------
+
+void GameScreen::endingCreditsSlideshow() {
+    // Port of dune-re ending.rs sequence_action_0b_ending_credits: clear the
+    // scene state, play WORMSUIT, compose the 16 end scenes, caption each,
+    // then leave the cast list on screen. Backdrops come from the normal room
+    // tables, exterior palette and title sheets the engine already renders.
+    _log.line("Credits: slideshow (16 scenes)");
+    _ending = true;
+    _state.setW(GameState::kPersonsInRoom, 0);
+    _state.setW(GameState::kPersonsWith, 0);
+    Common::Array<byte> song;
+    if (_music && _resources.load("WORMSUIT.HSQ", song))
+        _music->play(song);
+
+    auto findPalace = [&]() -> uint { return 0; };
+    auto findFortress = [&]() -> uint {
+        for (uint i = 0; i < _world.locationCount(); ++i)
+            if (_world.location(i).type >= Location::kFortressMin && _world.location(i).type <= Location::kHarkonnenPalace)
+                return i;
+        return 0;
+    };
+    auto findSietch = [&]() -> uint {
+        for (uint i = 0; i < _world.locationCount(); ++i)
+            if (_world.location(i).type <= Location::kSietchMax)
+                return i;
+        return 0;
+    };
+
+    auto drawRoomBackdrop = [&](uint locationIndex, uint room) {
+        _world.setPosition(locationIndex, room);
+        refreshRooms();
+        updateRoomVars();
+        _mode = kRoom;
+        _menu = kMenuNone;
+        _palacePlan = false;
+        _desert = false;
+        _walking = false;
+        _commList = -1;
+        drawRoom(-1, -1);
+    };
+
+    const uint16 kynes = _panel.findCommand("Liet Kynes");
+    const uint16 first = (kynes != 0xffff && kynes >= 12) ? (uint16)(kynes - 12) : 0xffff;
+
+    for (uint scene = 0; scene < 16; ++scene) {
+        _surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
+        _panel.applyPalette();
+        switch (scene) {
+        case 0: {
+            Common::Array<byte> data;
+            if (_resources.load("FINAL.HSQ", data)) {
+                Sprite final(_system, data);
+                final.setPalette();
+                final.drawFrame(5, _surface.surfacePtr(), 0x40, 0x34);
+            }
+            break;
+        }
+        case 1: {
+            drawSky(_system, _resources, *_surface.surfacePtr(), kSkyNarrow, 320, skyPalette(), true);
+            Common::Array<byte> intdsData;
+            if (_resources.load("INTDS.HSQ", intdsData)) {
+                Sprite intds(_system, intdsData);
+                intds.setPalette();
+                intds.drawFrame(0, _surface.surfacePtr(), 0, 0x3c);
+            }
+            break;
+        }
+        case 2:
+            drawRoomBackdrop(findPalace(), 0x0a);
+            break;
+        case 3:
+            drawRoomBackdrop(findPalace(), 3);
+            break;
+        case 4:
+            drawRoomBackdrop(findPalace(), 6);
+            break;
+        case 5:
+            drawRoomBackdrop(findPalace(), 4);
+            break;
+        case 6:
+            drawRoomBackdrop(findFortress(), 2);
+            break;
+        case 7:
+            drawRoomBackdrop(findSietch(), 3);
+            break;
+        case 8:
+            drawRoomBackdrop(findPalace(), 8);
+            break;
+        case 9:
+            drawRoomBackdrop(findSietch(), 2);
+            break;
+        case 10: {
+            Common::Array<byte> backData;
+            if (_resources.load("BACK.HSQ", backData)) {
+                Sprite back(_system, backData);
+                back.setPalette();
+                back.drawFrame(4, _surface.surfacePtr(), 0, 0);
+                back.drawFrame(4, _surface.surfacePtr(), 236, 0);
+                back.drawFrame(3, _surface.surfacePtr(), 83, 0);
+            }
+            break;
+        }
+        case 11:
+            drawRoomBackdrop(findFortress(), 2);
+            break;
+        case 12:
+            drawRoomBackdrop(findSietch(), 3);
+            break;
+        case 13:
+            drawRoomBackdrop(findSietch(), 5);
+            break;
+        case 14:
+            break;
+        case 15: {
+            Common::Array<byte> data;
+            if (_resources.load("FINAL.HSQ", data)) {
+                Sprite final(_system, data);
+                final.setPalette();
+                for (uint16 f = 0; f < 3; ++f)
+                    final.drawFrame(f, _surface.surfacePtr(), 0, 0);
+            }
+            break;
+        }
+        default:
+            break;
+        }
+
+        if (first != 0xffff) {
+            const uint16 nameId = (uint16)(first + (scene < 13 ? scene : scene - 13));
+            if (nameId < first + 13) {
+                const Common::String name = _panel.commandString(nameId);
+                if (!name.empty())
+                    _panel.drawText(_surface, name.c_str(),
+                            160 - (int)_panel.textWidth(name.c_str(), false) / 2,
+                            157, Panel::kLightColour, false);
+            }
+        }
+        debugOverlay(*_surface.surfacePtr());
+        _system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
+        _system->updateScreen();
+        if (!fastCapture())
+            _system->delayMillis(100);
+    }
+    drawEnding();
+}
 
 void GameScreen::findProspectors() {
 	// seg000:5b1e: troop 3, the prospectors: the map centres on them and,

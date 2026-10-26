@@ -2400,7 +2400,12 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 	uint step = 0;
 	_lastProbeStep = 0xffff;
 	const uint32 kTurnRepeatMillis = 250; // 0x32 ticks between repeats of a held turn
-	bool skipping = isFastCapture();
+	const bool watchTelemetryFast = ConfMan.hasKey("dune_speedrun_watch") && (
+		(ConfMan.hasKey("dune_speedrun_skip_flight_after") &&
+		 ConfMan.getInt("dune_speedrun_skip_flight_after") == 0) ||
+		ConfMan.hasKey("dune_speedrun_telemetry") ||
+		ConfMan.hasKey("dune_speedrun_no_pauses"));
+	bool skipping = isFastCapture() || watchTelemetryFast;
 	if (!skipping) {
 		if (!_map)
 			_map = new MapScreen(_system, _resources, _log, _world);
