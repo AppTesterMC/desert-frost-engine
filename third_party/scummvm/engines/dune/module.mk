@@ -40,6 +40,7 @@ MODULE_OBJS := \
 	story.o \
 	story_scene.o \
 	ecology.o \
+	live_state.o \
 	battle.o \
 	troops.o \
 	speedrun.o \

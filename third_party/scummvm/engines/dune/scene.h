@@ -53,6 +53,7 @@ class SentenceBank;
 class NightAttack;
 class Sprite;
 class StartupLog;
+class LiveStateExporter;
 
 /**
  * The globe's colour for a map cell (bits 0-3 terrain, 4-5 stage): the VGA
@@ -797,6 +798,7 @@ private:
 	uint _talkFrame;
 	uint32 _talkStart;
 	bool _talkAnimating;
+	LiveStateExporter *_liveState = nullptr;
 };
 
 } // namespace Dune

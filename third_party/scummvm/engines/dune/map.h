@@ -181,6 +181,13 @@ public:
 	int hitLocation(int x, int y) const;
 	/** A hired troop under the pointer, using the displayed icon bounds, or 0. */
 	uint hitTroop(int x, int y) const;
+	/** The troop whose icon carries the selection ring (0 = none). */
+	void setFocusedTroop(uint id) { _focusedTroop = id; }
+	uint focusedTroop() const { return _focusedTroop; }
+	/** The troop whose info popup is open (0 = none). */
+	void setTroopInfo(uint id) { _troopInfoTroop = id; }
+	uint troopInfo() const { return _troopInfoTroop; }
+	const Common::Rect &troopInfoRect() const { return _troopInfoPopup; }
 	/** Floppy CS:78ce: every fourth 15-tick task advances the troop scripts. */
 	bool tickTroopIcons(uint32 now);
 	bool hasTroopIcon(uint id) const;
@@ -200,7 +207,10 @@ public:
 	int16 pointLatitude() const { return _pointLatitude; }
 
 	/** SEE SPICE DENSITY: circles sized by each known sietch's density, and the box's title. */
-	void setDensity(bool on) { _density = on; }
+	void setDensity(bool on) { _density = on; if (on) _densityMode = false; }
+	/** Toggle the density panel between spice density and troop occupation. */
+	void setDensityMode(bool on) { _densityMode = on; }
+	bool densityMode() const { return _densityMode; }
 	/** Track the density legend swatch under the pointer, or clear its label. */
 	bool setDensityHover(int x, int y);
 	/**
@@ -290,6 +300,7 @@ private:
 	void drawFlight(Graphics::ManagedSurface &surface, const Panel &panel);
 	void drawVegetation(Graphics::ManagedSurface &surface, const Panel &panel);
 	void drawLocationPopup(Graphics::ManagedSurface &surface, const Panel &panel, const SentenceBank *sentences, uint index);
+	void drawTroopInfoPopup(Graphics::ManagedSurface &surface, const Panel &panel, const SentenceBank *sentences, uint troopId);
 public:
 	/** Draw ONMAP sprite @p sprite at (x, y) (the equipment icons, ds:192f). */
 	void drawOnmap(Graphics::ManagedSurface &surface, uint sprite, int x, int y) const;
@@ -320,7 +331,10 @@ private:
 	uint16 _rotation;
 	int _tilt;
 	bool _density;
+	bool _densityMode = false;
 	int _densityHover = -1;
+	int _densityMarker = -1;
+	const SentenceBank *_sentences = nullptr;
 	Common::Array<Common::Point> _route; ///< (longitude, latitude) pairs, see setRoute
 	int _densityX = 75, _densityY = 15;  ///< the popup's place (floppy ds:426c/426e)
 	bool _densityTroop = false;
@@ -351,6 +365,10 @@ private:
 	byte _troopIconPhase = 0;
 	uint16 _iconSeed = 1; ///< local animation phases, independent of gameplay RNG
 	Common::Rect _placePopup;
+	Common::Rect _troopInfoPopup;
+	uint _focusedTroop = 0;
+	uint _ringFocusedTroop = 0;
+	uint _troopInfoTroop = 0;
 	byte _index[320 * 152];
 };
 

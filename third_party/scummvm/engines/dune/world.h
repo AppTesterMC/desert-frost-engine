@@ -125,6 +125,13 @@ struct Troop {
 	bool hired() const { return !(occupation & kNotHired); }
 };
 
+/** The figures available to the player on SEE RESULTS (spice and men in units, not tens). */
+struct ResultsSummary {
+	uint atreidesArea = 0, harkonnenArea = 0;
+	uint atreidesSpice = 0, harkonnenSpice = 0;
+	uint atreidesMen = 0, harkonnenMen = 0;
+};
+
 /**
  * The game world as the executable's data segment describes it: locations,
  * room tables, characters, the player's position. Everything lives in
@@ -327,6 +334,7 @@ public:
 	/** Advance the clock by time periods, running each period's events (seg000:1b23). */
 	void advanceTime(uint slots);
 	uint day() const;         ///< 1-based
+	uint displayDay() const;  ///< 1-based day shown by the original game panels
 	uint timeSlot() const;    ///< 0-15
 	uint spiceStock() const;  ///< kg
 	/** First arrival at a hidden place (seg000:425b): it becomes known. */
@@ -376,6 +384,8 @@ public:
 	};
 	/** The live map (MAP.HSQ with its stage bits): 0x10 vegetation, 0x20 Atreides, 0x30 Harkonnen area. */
 	Common::Array<byte> &map();
+	/** Irrigated crop footprint reconstructed from the saved native disc history. */
+	Common::Array<byte> vegetationMap();
 	/** A new game's map: MAP.HSQ as shipped, each place's cell marked with bit 6 (seg000:01a1). */
 	void resetMap();
 	/** Mark the places' cells again (bit 6) after a save's stage bits were applied. */
@@ -388,6 +398,7 @@ public:
 	void runEcologyJob(uint id, uint index);
 	/** The new day's ecology walk (seg000:63f0): water behind wind traps, the vegetation promotion. */
 	void ecologyNewDay();
+	void resetEcologyLfsr() { _ecologyLfsr = 1; }
 	/** seg000:6515: stamp the place's vegetation disc on the map. */
 	void spreadVegetation(uint index);
 	/** location_is_Atreides (seg000:5d36): a sietch or village, or a place held by the Atreides. */
@@ -396,6 +407,8 @@ public:
 	void countHostiles(uint index, uint &harkonnen, uint &attacking) const;
 	/** compute_area_controlled_percentages (seg000:bfe3): ds:a2 Atreides, ds:a4 Harkonnen. */
 	void computeAreas();
+	/** Read the same totals as the results screen without changing game state. */
+	ResultsSummary resultsSummary() const;
 	/** A troop's own equipment (bit 7 harvester .. bit 1 bulbs) and the place's free stock (seg000:7f27). */
 	void placeFreeEquipment(uint index, byte counts[7]) const;
 	/** MODIFY EQUIPMENT: move one item of @p type (0 harvester .. 6 bulbs) between the troop and its place. */

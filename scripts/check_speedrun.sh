@@ -14,7 +14,10 @@
 # Sega CD uses a separate frontend without the completion bot and is rejected.
 # DUNE_SPEEDRUN_ALLOW_ORDER_BYPASSES=1 permits legacy bot shortcuts for engine
 # investigation only; output and evidence.json always disclose the bypasses.
-# DUNE_SPEEDRUN_REQUIRE_PLAYER_UI=1 fails: current bot coverage is assisted.
+# DUNE_SPEEDRUN_REQUIRE_PLAYER_UI=1 requires a player-ui-v1 coverage declaration
+# (see notes/player-input-coverage-contract.md); assisted runs still fail it.
+# DUNE_SPEEDRUN_UNINTERRUPTED=1 (or DUNE_SPEEDRUN_REQUIRE_UNINTERRUPTED=1)
+# enables uninterrupted mode: no save/reload retries and player-UI completion.
 
 set -u
 
@@ -25,6 +28,24 @@ run_base="${DUNE_RUN_ROOT:-$local_root/sdl-run}/speedrun"
 part=${1:-campaign}
 [ "$#" -eq 0 ] || shift
 case "$part" in campaign|full) ;; *) echo "FAIL speedrun: expected campaign or full"; exit 2 ;; esac
+# Optional uninterrupted mode flag.
+uninterrupted_mode=0
+case "${1:-}" in --uninterrupted|--require-uninterrupted|uninterrupted)
+	uninterrupted_mode=1
+	shift
+	;;
+esac
+if [ "${DUNE_SPEEDRUN_UNINTERRUPTED:-0}" = 1 ] || [ "${DUNE_SPEEDRUN_REQUIRE_UNINTERRUPTED:-0}" = 1 ]; then
+	uninterrupted_mode=1
+fi
+
+# Player-UI mode: emit player-ui-v1 coverage. It does not imply uninterrupted
+# (save/reload retries remain allowed) unless uninterrupted mode is requested.
+player_ui_mode=0
+if [ "${DUNE_SPEEDRUN_PLAYER_UI:-0}" = 1 ] || [ "${DUNE_SPEEDRUN_REQUIRE_PLAYER_UI:-0}" = 1 ]; then
+	player_ui_mode=1
+fi
+
 seeds=${*:-1}
 releases=${DUNE_SPEEDRUN_RELEASES:-floppy cd}
 status=0
@@ -51,15 +72,33 @@ for seed in $seeds; do
 		# Never reuse a log or save from an earlier run, even if a launch fails.
 		run=$(mktemp -d "$run_base/$part-$release-seed$seed.XXXXXX") || exit 1
 		code=0
-		DUNE_SKIP_BUILD=1 DUNE_RUN_ROOT="$run" DUNE_DATA="$data" \
-			"$script_dir/test_dune_scummvm_sdl.sh" speedrun "$part" "$seed" >"$run/runner.log" 2>&1 || code=$?
+		export DUNE_SKIP_BUILD=1
+		export DUNE_RUN_ROOT="$run"
+		export DUNE_DATA="$data"
+		if [ "$player_ui_mode" = 1 ]; then
+			export DUNE_SPEEDRUN_PLAYER_UI=1
+		else
+			unset DUNE_SPEEDRUN_PLAYER_UI
+		fi
+		if [ "$uninterrupted_mode" = 1 ]; then
+			export DUNE_SPEEDRUN_UNINTERRUPTED=1
+		else
+			unset DUNE_SPEEDRUN_UNINTERRUPTED
+		fi
+		"$script_dir/test_dune_scummvm_sdl.sh" speedrun "$part" "$seed" >"$run/runner.log" 2>&1 || code=$?
 		log="$run/saves/dune-ios.log"
 		set -- "$script_dir/dune_speedrun_evidence.py" "$log" --part "$part" \
 			--process-exit "$code" --release "$release" --seed "$seed" --json "$run/evidence.json" \
 			--binary "$local_root/build-sdl-dune/scummvm"
 		[ "${DUNE_SPEEDRUN_ALLOW_ORDER_BYPASSES:-0}" != 1 ] || set -- "$@" --allow-order-bypasses
 		[ "${DUNE_SPEEDRUN_REQUIRE_PLAYER_UI:-0}" != 1 ] || set -- "$@" --require-player-ui
+		[ "$uninterrupted_mode" != 1 ] || set -- "$@" --require-uninterrupted
 		python3 "$@" || status=1
+		if [ -f "$run/evidence.json" ]; then
+			cls=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('classification','unknown'))" "$run/evidence.json")
+			rc=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('reload_count',0))" "$run/evidence.json")
+			echo "     classification: $cls (reload_count=$rc)"
+		fi
 		echo "     evidence: $run"
 	done
 done

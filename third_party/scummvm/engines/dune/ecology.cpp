@@ -41,6 +41,32 @@
 
 namespace Dune {
 
+ResultsSummary World::resultsSummary() const {
+	ResultsSummary result;
+	uint cells = 0, harkonnen = 0, atreides = 0;
+	for (uint i = 0; i + 0x187 < _map.size(); ++i, ++cells) {
+		const byte stage = _map[i] & 0x30;
+		if (stage == 0x30)
+			++harkonnen;
+		else if (stage)
+			++atreides;
+	}
+	result.harkonnenArea = cells ? (harkonnen * 100 + cells / 2) / cells : 0;
+	result.atreidesArea = cells ? (atreides * 100 + cells / 2) / cells + 1 : 0;
+	for (uint id = 1; id <= kTroops; ++id) {
+		const Troop t = troop(id);
+		if (!t.id)
+			continue;
+		if (t.harkonnen())
+			result.harkonnenMen += (t.population / 10) * 10;
+		else if (!(t.occupation & 0xa0))
+			result.atreidesMen += (t.population / 10) * 10;
+	}
+	result.harkonnenSpice = _state.w(0xa8) * 10;
+	result.atreidesSpice = _state.w(0xa6) * 10;
+	return result;
+}
+
 namespace {
 
 enum {
@@ -422,6 +448,36 @@ bool World::giveEquipment(uint id, uint type) {
 		return false;
 	eq &= (byte)~(0x80 >> type);
 	return true;
+}
+
+Common::Array<byte> World::vegetationMap() {
+	Common::Array<byte> &m = map();
+	Common::Array<byte> footprint;
+	footprint.resize(m.size(), 0);
+	for (uint i = 0; i < locationCount(); ++i) {
+		const byte *l = _state.vars + Location::kTableOffset + i * Location::kRecordSize;
+		if (!(l[10] & kStatusVegetation))
+			continue;
+		const uint16 longitude = READ_LE_UINT16(l + kDiscLongitude);
+		const int initialLatitude = (int8)l[4];
+		const int currentLatitude = (int8)l[kDiscLatitude];
+		const uint currentRadius = l[kDiscRadius];
+		if (currentRadius < 4 || initialLatitude < currentLatitude)
+			continue;
+		uint growth = 0;
+		for (int latitude = initialLatitude; latitude >= currentLatitude; latitude -= 2, ++growth) {
+			const uint radius = MIN<uint>(12, 4 + growth);
+			forDisc(longitude, (int16)latitude, radius, 0x56, [&](uint offset, byte &) {
+				if (offset < m.size() && (m[offset] & 0x0f) >= 4)
+					footprint[offset] = 1;
+			});
+		}
+		forDisc(longitude, (int16)currentLatitude, currentRadius, 0x56, [&](uint offset, byte &) {
+			if (offset < m.size() && (m[offset] & 0x0f) >= 4)
+				footprint[offset] = 1;
+		});
+	}
+	return footprint;
 }
 
 } // namespace Dune

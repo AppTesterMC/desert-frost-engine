@@ -106,5 +106,46 @@ class EvidenceTests(unittest.TestCase):
             self.assertFalse(result["player_ui_completion_verified"])
 
 
+
+    def test_player_ui_complete_run_certifies_completion(self):
+        cats = "navigation, dialogue, orders, combat, map, save-load, options, equipment, espionage, worm"
+        log = ("Speedrun: day 1: coverage player-ui-v1: " + cats + "\n" + END)
+        result = evidence.assess(log, require_player_ui=True)
+        self.assertTrue(result["passed"])
+        self.assertTrue(result["player_ui_completion_verified"])
+        self.assertFalse(result["player_ui_missing_categories"])
+
+    def test_player_ui_incomplete_declaration_fails_ui_gate(self):
+        result = evidence.assess("Speedrun: day 1: coverage player-ui-v1: navigation, dialogue\n" + END,
+                                 require_player_ui=True)
+        self.assertFalse(result["passed"])
+        self.assertFalse(result["player_ui_completion_verified"])
+        self.assertTrue(result["player_ui_missing_categories"])
+
+    def test_player_ui_v1_without_require_flag_still_marks_verified(self):
+        cats = "navigation, dialogue, orders, combat, map, save-load, options, equipment, espionage, worm"
+        log = ("Speedrun: day 1: coverage player-ui-v1: " + cats + "\n" + END)
+        result = evidence.assess(log)
+        self.assertTrue(result["passed"])
+        self.assertTrue(result["player_ui_completion_verified"])
+
+
+    def test_battle_save_reload_retry_is_interrupted(self):
+        result = evidence.assess('Story: the ending "Winning a battle..."\nSaves: slot 1 loaded\n' + END)
+        self.assertTrue(result["passed"])
+        self.assertFalse(result["uninterrupted"])
+        self.assertTrue(result["interrupted"])
+        self.assertEqual(result["classification"], "interrupted")
+        self.assertEqual(result["reload_count"], 1)
+
+    def test_uninterrupted_mode_requires_no_reload_and_player_ui(self):
+        cats = "navigation, dialogue, orders, combat, map, save-load, options, equipment, espionage, worm"
+        log = "Speedrun: day 1: coverage player-ui-v1: " + cats + "\n" + END
+        result = evidence.assess(log, require_uninterrupted=True)
+        self.assertTrue(result["passed"])
+        self.assertTrue(result["uninterrupted"])
+        self.assertEqual(result["classification"], "uninterrupted")
+        self.assertEqual(result["reload_count"], 0)
+
 if __name__ == "__main__":
     unittest.main()

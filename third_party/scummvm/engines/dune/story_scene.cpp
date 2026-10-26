@@ -2429,16 +2429,20 @@ bool GameScreen::equipmentTap(int x, int y) {
 // ---- The ecology test (dump tour and regression) -------------------------------------
 
 void GameScreen::prepareEcologyTest(bool showMap) {
-	// Kynes met (ds:0a bit 5); place 12's troop is rallied, the place gets a
-	// wind trap, 200 water and 16 bulbs; the troop takes bulbs (MODIFY
-	// EQUIPMENT), specializes in ecology, and 120 days pass.
+	// Natural ecology route (no assisted fixtures): Kynes met (ds:0a bit 5);
+	// place 12's troop is rallied, takes bulbs (MODIFY EQUIPMENT), builds
+	// its wind trap through the native job (seg000:7711), then irrigates;
+	// 120 days of the native daily ecology routine (seg000:63f0/6515) pass,
+	// with dated 0x10 (sprouting) cell counts logged along the way.
+	_log.line("Ecology route: natural vegetation growth (wind trap + irrigation; no wholePlanetGreen/ecologyWinSetup)");
 	_state.setB(World::kPaulEvents, (byte)(_state.b(World::kPaulEvents) | 0x21));
 	_state.setB(GameState::kPhase, 0x58);
+	_world.resetEcologyLfsr();
 	const uint place = 12;
 	byte *l = _state.vars + Location::kTableOffset + place * Location::kRecordSize;
-	l[10] |= 0x20;
-	l[27] = 200;
-	l[26] = 16;
+	l[10] &= (byte)~0x20; // no wind trap yet: it must be assembled
+	l[27] = 0;            // no water yet: the trap provides it
+	l[26] = 16;           // bulbs in the place's stock
 	Common::Array<uint> ids;
 	_world.troopsAt(place, ids);
 	uint id = 0;
@@ -2451,9 +2455,30 @@ void GameScreen::prepareEcologyTest(bool showMap) {
 	}
 	if (!_world.troop(id).hired())
 		_world.rallyTroop(id);
-	_world.takeEquipment(id, 6);
-	_world.setTroopOccupation(id, Troop::kIrrigation);
-	_log.line(Common::String::format("Ecology test: troop %u irrigates place %u (equipment %#x)", id, place,
+	if (!_world.takeEquipment(id, 6)) {
+		_log.line(Common::String::format("Ecology: troop %u could not take bulbs", id));
+	}
+	_world.setTroopOccupation(id, Troop::kWindTrap);
+	_log.line(Common::String::format("Ecology: troop %u builds a wind trap at place %u (equipment %#x)", id, place,
+			_world.troop(id).equipment));
+	// Native wind-trap assembly (seg000:7711): advance days until the trap
+	// is built (status bit 5) or a cap is reached.
+	bool built = false;
+	for (uint day = 0; day < 120 && !built; ++day) {
+		if (day % 7 == 0)
+			_world.troopContacted(id);
+		_world.advanceTime(World::kSlotsPerDay);
+		built = (l[10] & 0x20) != 0;
+	}
+	if (!built) {
+		_log.line(Common::String::format("Ecology: BLOCKED wind trap not built after 120 days (water %u, status %#x)",
+				l[27], l[10]));
+		return;
+	}
+	_log.line(Common::String::format("Ecology: wind-trap assembled at place %u (water %u)", place, l[27]));
+	if ((_world.troop(id).occupation & 0x0f) != Troop::kIrrigation)
+		_world.setTroopOccupation(id, Troop::kIrrigation);
+	_log.line(Common::String::format("Ecology: troop %u irrigates place %u (equipment %#x)", id, place,
 			_world.troop(id).equipment));
 	for (uint day = 0; day < 120; ++day) {
 		// A player keeps in touch: a map contact a week (7b89), or the
@@ -2461,6 +2486,14 @@ void GameScreen::prepareEcologyTest(bool showMap) {
 		if (day % 7 == 0)
 			_world.troopContacted(id);
 		_world.advanceTime(World::kSlotsPerDay);
+		// Dated growth checkpoint: native count of 0x10 (sprouting) cells.
+		if (day % 15 == 14 || day == 0) {
+			uint spr = 0;
+			for (uint i = 0; i < _world.map().size(); ++i)
+				if ((_world.map()[i] & 0x30) == 0x10)
+					++spr;
+			_log.line(Common::String::format("Ecology checkpoint: day %u, %u sprouting cells (0x10)", day + 1, spr));
+		}
 	}
 	_world.computeAreas();
 	uint sprouting = 0, atreides = 0;

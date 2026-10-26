@@ -31,6 +31,7 @@
 
 #include "dune/amiga.h"
 #include "dune/map.h"
+#include "dune/live_state.h"
 
 #include "common/algorithm.h"
 #include "common/endian.h"
@@ -709,6 +710,13 @@ void MapScreen::drawTroopIcons(Graphics::ManagedSurface &surface) {
 		if (_renderer->project(_latitude, _longitude, (int16)READ_LE_UINT16(r + 8), READ_LE_UINT16(r + 6), x, y, true))
 			spawn(id, r, x, y);
 	}
+	uint16 prevRingCursor = 0;
+	bool hadRing = false;
+	for (uint i = 0; i < _troopIcons.size(); ++i)
+		if (_troopIcons[i].id == 0 && _troopIcons[i].script == 0x18fd) {
+			prevRingCursor = _troopIcons[i].cursor;
+			hadRing = true;
+		}
 	_troopIcons = icons;
 	Common::Array<uint> order;
 	for (uint i = 0; i < icons.size(); ++i)
@@ -724,6 +732,40 @@ void MapScreen::drawTroopIcons(Graphics::ManagedSurface &surface) {
 	for (uint i = 0; i < order.size(); ++i) {
 		const TroopIcon &icon = icons[order[i]];
 		_icons->drawFrame(icon.sprite, &view, icon.left - 4, icon.top - 4);
+	}
+	// Selected-troop highlight ring (floppy CS:697c).
+	if (_focusedTroop) {
+		bool found = false;
+		int cx = 0, cy = 0;
+		for (uint i = 0; i < icons.size(); ++i)
+			if (icons[i].id == _focusedTroop) {
+				found = true;
+				cx = icons[i].left + icons[i].width / 2;
+				cy = icons[i].top + icons[i].height / 2;
+				break;
+			}
+		if (found) {
+			if (_focusedTroop != _ringFocusedTroop) {
+				hadRing = false;
+				_ringFocusedTroop = _focusedTroop;
+			}
+			TroopIcon ring;
+			ring.id = 0;
+			ring.script = 0x18fd;
+			ring.cursor = hadRing ? prevRingCursor : 0x18fd;
+			uint16 sprite = iconData(ring.cursor);
+			uint16 w = 0, h = 0;
+			if (sprite && _icons->frameSize(sprite, w, h) && w && h) {
+				ring.sprite = sprite;
+				ring.left = ring.anchorLeft = cx - w / 2;
+				ring.top = ring.anchorTop = cy - h / 2;
+				ring.width = w;
+				ring.height = h;
+				ring.animated = iconData(ring.cursor + 3) != 0;
+				_icons->drawFrame(ring.sprite, &view, ring.left - 4, ring.top - 4);
+				_troopIcons.push_back(ring);
+			}
+		}
 	}
 	if (isDuneHarnessRun())
 		for (uint i = 0; i < icons.size(); ++i) {
@@ -748,6 +790,8 @@ uint MapScreen::hitTroop(int x, int y) const {
 	// CS:76e0: reverse insertion order and strict inequalities, not alpha.
 	for (uint i = _troopIcons.size(); i > 0; --i) {
 		const TroopIcon &ic = _troopIcons[i - 1];
+		if (ic.id == 0)
+			continue;
 		if (x > ic.left && x < ic.left + ic.width && y > ic.top && y < ic.top + ic.height)
 			return _world.troop(ic.id).hired() ? ic.id : 0;
 	}
@@ -830,12 +874,67 @@ void MapScreen::drawZoomedWindow(Graphics::ManagedSurface &surface, const Common
 	// place's field: flat grey until prospected, then its density's shade.
 	byte xlat[256];
 	memset(xlat, kBackdrop, sizeof(xlat));
-	if (density)
+	if (density) {
+		if (_densityMode) {
+			for (uint i = 0; i < _world.locationCount(); ++i) {
+				const Location l = _world.location(i);
+				if (l.hidden())
+					continue;
+				uint spice = 0, military = 0, ecology = 0;
+				Common::Array<uint> ids;
+				_world.troopsAt(i, ids);
+				auto tally = [&](byte occ) {
+					if (occ & 0x80)
+						return;
+					const byte job = occ & 0x0f;
+					if (job == Troop::kWaitingForOrders)
+						return;
+					switch (job >> 2) {
+					case 0: ++spice; break;
+					case 1: ++military; break;
+					default: ++ecology; break;
+					}
+				};
+				for (uint k = 0; k < ids.size(); ++k)
+					tally(_world.troop(ids[k]).occupation);
+				for (uint id = 1; id <= World::kTroops; ++id) {
+					const Troop t = _world.troop(id);
+					if (!(t.occupation & 0x40))
+						continue;
+					byte &raw = _world.troopByteForTest(id, (t.occupation & 3) == 3 ? 0x0c : 0x04);
+					const uint16 off = READ_LE_UINT16(&raw);
+					if (_world.placeIndex(off) != (int)i)
+						continue;
+					tally(t.occupation);
+				}
+				byte colour = 0;
+				const byte bits = (spice ? 1 : 0) | (military ? 2 : 0) | (ecology ? 4 : 0);
+				switch (bits) {
+				case 0: colour = 0x00; break;
+				case 1: colour = 0x55; break;
+				case 2: colour = 0xaa; break;
+				case 4: colour = 0xff; break;
+				case 3: colour = spice == military ? 0x66 : (spice < military ? 0x9a : 0x65); break;
+				case 5: colour = spice == ecology ? 0x77 : (spice < ecology ? 0xdf : 0x75); break;
+				case 6: colour = military == ecology ? 0xbb : (military < ecology ? 0xef : 0xba); break;
+				default:
+					if (spice < military)
+						colour = military < ecology ? 0xde : 0x9b;
+					else if (spice < ecology)
+						colour = 0x7b;
+					else
+						colour = 0x67;
+					break;
+				}
+				xlat[l.spiceField] = colour;
+			}
+		} else
 		for (uint i = 0; i < _world.locationCount(); ++i) {
 			const Location l = _world.location(i);
 			if (!l.hidden())
 				xlat[l.spiceField] = (l.status & 0x40) ? (byte)(kDensityRamp + (l.spiceDensity >> 4)) : (byte)kUnprospected;
 		}
+	}
 	// One source row (plus one below it for the density's interior test).
 	auto source = [&](int row, int column) -> int {
 		int start, cells;
@@ -966,13 +1065,27 @@ int MapScreen::densityHit(int x, int y) const {
 }
 
 bool MapScreen::setDensityHover(int x, int y) {
+	bool changed = false;
 	const int px = _densityX, py = _densityY;
+	const Common::Rect panelRect(px, py, px + 170, py + 108);
+	const Common::Rect window(px + 5, py + 7, px + 5 + 0xa0, py + 7 + 0x59);
+	int marker = -1;
+	if (panelRect.contains(x, y)) {
+		const int hit = windowHit(window, _longitude, centreLatitude(), x, y);
+		if (hit >= 0)
+			marker = hit;
+	}
+	if (_densityMarker != marker) {
+		_densityMarker = marker;
+		changed = true;
+	}
 	const int band = x >= px + 95 && x < px + 95 + 4 * 16 && y >= py + 99 && y < py + 104
 			? (x - (px + 95)) / 4 : -1;
-	if (_densityHover == band)
-		return false;
-	_densityHover = band;
-	return true;
+	if (_densityHover != band) {
+		_densityHover = band;
+		changed = true;
+	}
+	return changed;
 }
 
 void MapScreen::drawRoute(Graphics::ManagedSurface &surface, const Common::Rect &window, int16 centreLatitude) {
@@ -1048,17 +1161,71 @@ void MapScreen::drawDensityOverlay(Graphics::ManagedSurface &surface, const Pane
 		}
 		drawRoute(surface, window, centreLatitude);
 	}
-	panel.drawText(surface, "SPICE DENSITY", px + 14, py + 98, 0xfe, true);
-	panel.drawText(surface, "-", px + 89, py + 98, 0xfe, true);
-	for (int k = 0; k < 16; ++k)
-		surface.fillRect(Common::Rect(px + 95 + 4 * k, py + 99, px + 98 + 4 * k, py + 104), (uint32)(kDensityRamp + k));
-	panel.drawText(surface, "+", px + 158, py + 98, 0xfe, true);
-	if (_densityHover >= 0) {
-		const Common::String range = Common::String::format("%u-%u", (uint)_densityHover * 16,
-				(uint)_densityHover * 16 + 15);
-		const int labelWidth = panel.textWidth(range.c_str(), true);
-		const int labelX = CLIP<int>(px + 95 + 4 * _densityHover + 1 - labelWidth / 2, px + 5, px + 165 - labelWidth);
-		panel.drawText(surface, range.c_str(), labelX, py + 87, 0xfe, true);
+	if (_densityMarker >= 0 && _sentences) {
+		const int li = _densityMarker;
+		panel.drawText(surface, _world.locationName((uint)li, *_sentences).c_str(), px + 6, py + 98, 0xfe, true);
+		const Location l = _world.location((uint)li);
+		if (li >= 2 && l.type != Location::kVillageMin) {
+			uint spice = 0, military = 0, ecology = 0;
+			Common::Array<uint> ids;
+			_world.troopsAt((uint)li, ids);
+			auto tally = [&](byte occ) {
+				if (occ & 0x80)
+					return;
+				const byte job = occ & 0x0f;
+				if (job == Troop::kWaitingForOrders)
+					return;
+				switch (job >> 2) {
+				case 0: ++spice; break;
+				case 1: ++military; break;
+				default: ++ecology; break;
+				}
+			};
+			for (uint k = 0; k < ids.size(); ++k)
+				tally(_world.troop(ids[k]).occupation);
+			for (uint id = 1; id <= World::kTroops; ++id) {
+				const Troop t = _world.troop(id);
+				if (!(t.occupation & 0x40))
+					continue;
+				byte &raw = _world.troopByteForTest(id, (t.occupation & 3) == 3 ? 0x0c : 0x04);
+				const uint16 off = READ_LE_UINT16(&raw);
+				if (_world.placeIndex(off) != li)
+					continue;
+				tally(t.occupation);
+			}
+			if (spice == 0 && military == 0 && ecology == 0) {
+				panel.drawText(surface, "no troops", px + 0x71, py + 98, 0xfb, true);
+			} else {
+				int x = px + 0x71;
+				const uint counts[3] = { spice, military, ecology };
+				for (int cls = 0; cls < 3; ++cls) {
+					if (!counts[cls])
+						continue;
+					if (_icons) {
+						_icons->drawFrame((uint16)(0x82 + cls), surface.surfacePtr(), x, py + 98);
+					}
+					panel.drawText(surface, ":", x + 6, py + 98, (byte)(0xfe - 3), true);
+					Common::String num = Common::String::format("%u", counts[cls]);
+					panel.drawText(surface, num.c_str(), x + 9, py + 98, (byte)(0xfe - 3), true);
+					x += 0x12;
+				}
+			}
+		}
+	} else if (_densityMode) {
+		panel.drawText(surface, "TROOP OCCUPATION", px + 14, py + 98, 0xfe, true);
+	} else {
+		panel.drawText(surface, "SPICE DENSITY", px + 14, py + 98, 0xfe, true);
+		panel.drawText(surface, "-", px + 89, py + 98, 0xfe, true);
+		for (int k = 0; k < 16; ++k)
+			surface.fillRect(Common::Rect(px + 95 + 4 * k, py + 99, px + 98 + 4 * k, py + 104), (uint32)(kDensityRamp + k));
+		panel.drawText(surface, "+", px + 158, py + 98, 0xfe, true);
+		if (_densityHover >= 0) {
+			const Common::String range = Common::String::format("%u-%u", (uint)_densityHover * 16,
+					(uint)_densityHover * 16 + 15);
+			const int labelWidth = panel.textWidth(range.c_str(), true);
+			const int labelX = CLIP<int>(px + 95 + 4 * _densityHover + 1 - labelWidth / 2, px + 5, px + 165 - labelWidth);
+			panel.drawText(surface, range.c_str(), labelX, py + 87, 0xfe, true);
+		}
 	}
 }
 
@@ -1296,6 +1463,8 @@ void MapScreen::patchRalliedCount(Common::String &text, uint rallied) {
 }
 
 void MapScreen::draw(Graphics::ManagedSurface &surface, const Panel &panel, const SentenceBank *sentences, uint rallied) {
+	liveStateGlobeView(globePhase(), _tilt, _mode == kGlobe);
+	_sentences = sentences;
 	Graphics::Surface *target = surface.surfacePtr();
 	surface.fillRect(Common::Rect(0, 0, 320, 152), 0);
 	if (_icons)
@@ -1327,6 +1496,7 @@ void MapScreen::draw(Graphics::ManagedSurface &surface, const Panel &panel, cons
 		drawTroopIcons(surface);
 	}
 	_placePopup = Common::Rect();
+	_troopInfoPopup = Common::Rect();
 	drawFlight(surface, panel);
 	if (_mode == kFlat && _destination == -2 && _renderer) {
 		int x, y;
@@ -1335,6 +1505,8 @@ void MapScreen::draw(Graphics::ManagedSurface &surface, const Panel &panel, cons
 	}
 	if (_mode == kFlat && _destination >= 0 && !_flying)
 		drawLocationPopup(surface, panel, sentences, (uint)_destination);
+	if (_mode == kFlat && _troopInfoTroop)
+		drawTroopInfoPopup(surface, panel, sentences, _troopInfoTroop);
 	if (_mode == kFlat && (_caption || _density))
 		drawInfoBox(surface, panel, sentences, rallied);
 }
@@ -1368,6 +1540,104 @@ void MapScreen::drawPanelExtras(Graphics::ManagedSurface &surface, const Panel &
 		panel.drawIcon(surface, 52, 20, 168);
 		panel.drawIcon(surface, 53, 36, 172);
 	}
+}
+
+void MapScreen::drawTroopInfoPopup(Graphics::ManagedSurface &surface, const Panel &panel, const SentenceBank *sentences,
+		uint troopId) {
+	if (!sentences || !_renderer)
+		return;
+	const Troop t = _world.troop(troopId);
+	if (!t.hired())
+		return;
+	// Find the troop's icon on the map.
+	int ix = 0, iy = 0;
+	bool found = false;
+	for (uint i = 0; i < _troopIcons.size(); ++i)
+		if (_troopIcons[i].id == troopId) {
+			ix = _troopIcons[i].left;
+			iy = _troopIcons[i].top;
+			found = true;
+			break;
+		}
+	if (!found)
+		return;
+	const int height = 100;
+	int x = ix + 16;
+	if (x > 210)
+		x = ix - 114;
+	x = CLIP(x, 4, 316 - 106);
+	const int y = CLIP(iy - height / 2, 4, 148 - height);
+	const Common::Rect box(x, y, x + 106, y + height);
+	_troopInfoPopup = box;
+	surface.fillRect(box, 0xfb);
+	surface.frameRect(box, 0xf5);
+	byte pal[256 * 3];
+	_system->getPaletteManager()->grabPalette(pal, 0, 256);
+	auto nearest = [&](int r, int g, int b) -> byte {
+		uint best = 0, bestD = 0xffffffff;
+		for (uint i = 1; i < 256; ++i) {
+			const int dr = pal[3 * i] - r, dg = pal[3 * i + 1] - g, db = pal[3 * i + 2] - b;
+			const uint d = (uint)(dr * dr + dg * dg + db * db);
+			if (d < bestD) { bestD = d; best = i; }
+		}
+		return (byte)best;
+	};
+	const byte ink = nearest(200, 200, 200);
+	int px = x + 4;
+	int py = y + 4;
+	const uint loc = (uint)_world.troopPlace(troopId);
+	Common::String header = (t.occupation & 0x40) ? panel.commandString(0x3b) : panel.commandString(0x3a);
+	if (header.empty())
+		header = (t.occupation & 0x40) ? Common::String("Going to") : Common::String("Settled in");
+	panel.drawText(surface, header.c_str(), px + 8, py, ink, false);
+	py += 9;
+	if (loc < _world.locationCount()) {
+		Common::String name = _world.locationName(loc, *sentences);
+		panel.drawText(surface, name.c_str(), px, py, ink, false);
+	}
+	py += 10;
+	const uint jobBase = panel.findCommand("Spice Mining");
+	Common::String job = jobBase != 0xffff ? panel.commandString(jobBase + (t.occupation & 0x0f)) : Common::String();
+	if (job.empty())
+		job = Common::String("Spice Mining");
+	Common::String line = Common::String::format("%s  %u men  Motiv. %u%%", job.c_str(), t.population, t.motivation);
+	panel.drawText(surface, line.c_str(), px, py, ink, false);
+	py += 15;
+	byte r[World::kTroopSize] = {};
+	_world.saveTroopRecord(troopId, r);
+	const uint16 bits = READ_LE_UINT16(r + 0x10);
+	const byte dissat = t.dissatisfaction;
+	if (!(t.occupation & 0x40)) {
+		Common::String status;
+		if (bits & 0x200)
+			status = panel.commandString(0x3f);
+		else if (!(bits & 0x100) || (dissat & 0x30))
+			status = panel.commandString(0x40);
+		if (status.empty() && (bits & 0x200))
+			status = Common::String("Repairing");
+		if (status.empty() && (!(bits & 0x100) || (dissat & 0x30)))
+			status = Common::String("Inactive");
+		if (!status.empty())
+			panel.drawText(surface, status.c_str(), px, py, ink, false);
+		py += 17;
+	}
+	// Equipment row.
+	py += 4;
+	panel.drawText(surface, "Equipment:", px, py, ink, false);
+	py += 8;
+	int ex = px;
+	const int bottom = box.bottom;
+	static const uint16 kEquipmentSprites[7] = { 0x63, 0x68, 0x71, 0x72, 0x73, 0x74, 0x77 };
+	for (uint k = 0; k < 7; ++k) {
+		if (!(t.equipment & (0x80 >> k)))
+			continue;
+		uint16 sprite = kEquipmentSprites[k];
+		int w = (int)onmapWidth(sprite);
+		drawOnmap(surface, sprite, ex, py);
+		ex += w + 3;
+	}
+	if (ex == px)
+		panel.drawText(surface, "none", px + 12, py + 5, ink, false);
 }
 
 } // namespace Dune

@@ -69,7 +69,8 @@ for f in \
 	ScummVM-iOS.xcscheme PREFLIGHT.md README-local-builds.md \
 	dune_regress.py dune_accept_golden.py dune_audio_level.py \
 	dune_sprite_sheet.py dune_hnm_frames.py dune_room.py dune_dat.py dune_unlzexe.py chani_grep.py dune_disasm.py asm_range.py dune_dialogue_dump.py dune_script_trace.py dune_save_patch.py globe_ref.py dune_amiga_extract.py segacd_iso.py segacd_img.py segacd_bitmaps.py segacd_sprites.py segacd_ds_align.py segacd_ds_convert.py segacd_portrait_match.py segacd_portrait_pose.py \
-	prepare_engine_package.sh; do
+	prepare_engine_package.sh \
+	engine_demo.py; do
 	put "scripts/$f"
 done
 tree scripts/patches

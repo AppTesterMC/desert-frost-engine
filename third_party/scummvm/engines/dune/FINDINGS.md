@@ -2010,7 +2010,7 @@ losses").
     15) / 32) and its spice, water and equipment lines;
   - the map's troop icons (6827, 68d2: the icon scripts at ds:1672-1935,
     about 800 lines in dune-re's troop_icons.rs);
-  - the density panel's TROOP OCCUPATION overlay (ds:4722, 563e/57b5).
+  - the density panel's TROOP OCCUPATION overlay (ds:4722, 563e/57b5): built. The panel's footer toggles between spice density and troop occupation; fields are coloured by the class mix of troops at or travelling to each place (0x55 spice, 0xaa military, 0xff ecology, mixed shades), with the title "TROOP OCCUPATION"; hovering a place shows its name and per-class counts, as in the original floppy.
 
 ## The characters, the room scans and the desert collapse (2026-09-30)
 
@@ -2062,8 +2062,12 @@ After 0x37 unrested steps the CD plays desert_collapse_cutscene (3757 ->
 0e77): DEAD3.HNM's first frame, then its five other frames, each revealed
 by transition 0x3c. That transition is the slow dissolve (segvga 2a10): a
 15-bit LFSR walks the game area, 80 pixels a tick. Then the head goes down.
-The WORMSUIT score is not built. The floppy has no cutscene; its 3a06 path
-(ds:15cf / 15d1, 11c7) is not traced.
+The WORMSUIT score is not built. The floppy has no cutscene: after 0x37
+unrested steps it runs the 3a06 path instead - a text line
+(sub_3097 with ds:15cf = 5, ds:15d1 = 1), sub_326F with cx = 5, then a
+message (sub_DEBF, bp = 0xBFA3, al = 0x34), ds:0E7 is incremented, and Paul
+faints (ds:11c7 is the unrest counter). Confirmed floppy-only; the engine
+skips desertCollapse() on floppy, matching the absence of DEAD3.HNM.
 
 ### The night battle: sound and MASSIVE ATTACK
 
@@ -2083,7 +2087,10 @@ whenever it is not Paul's place and the voices do not speak alone.
 - The line's place is a vision message's place when a chief delivers it in
   person, and the ill place for "We have to go to - to stem the epidemic".
 - The dream already drew the window. The floppy's event 13 (a9ce) only sets
-  ds:42ce to 600, which is not built.
+  ds:42ce to 600 (0x258): a threshold for the shared timer test
+  (ds:42cc - ds:42ca >= ds:42ce) that fires sub_E611 / sub_E61E; it draws no
+  map window. Confirmed floppy-only; the engine does not build it (CD path
+  only).
 
 ### Closing a map contact
 
@@ -3010,8 +3017,9 @@ required; it and the screenshots are not distributed as engine source.
 Known limits: original and engine animation phases are independent. The existing
 march simulation takes a slightly different intermediate longitude (two screen
 pixels on the checked route); the icon displays the actual engine GPS, and the
-arrival and stationed position agree. Selected-troop rings and animation timing
-fidelity remain separate work.
+arrival and stationed position agree. The selected-troop highlight ring is now
+drawn over the selected troop (floppy CS:697c); animation timing fidelity remains
+separate work.
 
 
 ## Liet Kynes phrase banks and room-entry introduction

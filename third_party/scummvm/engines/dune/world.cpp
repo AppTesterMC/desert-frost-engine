@@ -1536,6 +1536,12 @@ uint World::day() const {
 	return 1 + _state.w(GameState::kGameTime) / kSlotsPerDay;
 }
 
+uint World::displayDay() const {
+	// get_ingame_day_3_periods_later (seg000:1ad1): the original panels
+	// advance the displayed day three periods before the simulation boundary.
+	return (uint)((_state.w(GameState::kGameTime) + 3) >> 4) % 365 + 1;
+}
+
 uint World::timeSlot() const {
 	return _state.w(GameState::kGameTime) % kSlotsPerDay;
 }

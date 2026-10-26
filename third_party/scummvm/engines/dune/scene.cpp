@@ -41,6 +41,7 @@
 #include "dune/debug.h"
 #include "dune/dialogue.h"
 #include "dune/harness.h"
+#include "dune/live_state.h"
 #include "dune/hnm.h"
 #include "dune/music.h"
 #include "dune/palace.h"
@@ -440,9 +441,11 @@ GameScreen::GameScreen(OSystem *system, Resource &resources, StartupLog &log) :
 		_rowActions[i] = kRowNone;
 		_rowArguments[i] = 0;
 	}
+	_liveState = new LiveStateExporter(_world, resources, log);
 }
 
 GameScreen::~GameScreen() {
+	delete _liveState;
 	endNightBattle();
 	delete _talkSheet;
 	delete _saves;
@@ -1876,6 +1879,10 @@ void GameScreen::openMap(MapScreen::Mode mode, bool selectDestination, bool from
 		return;
 	}
 	_mode = kMap;
+	if (_map) {
+		_map->setFocusedTroop(0);
+		_map->setTroopInfo(0);
+	}
 	_voiceMode = 1; // ui_show_globe_map_view forces voice_subtitle_mode 1 (5a1a)
 	debugSetScene(mode == MapScreen::kFlat ? "map/flat" : "map/globe");
 	drawMapScreen();
@@ -2002,6 +2009,8 @@ void GameScreen::mapTap(int x, int y) {
 			// otherwise only the troop at Paul's current place can answer.
 			if (_world.contactRange() < 2 && _world.troopPlace(troop) != (int)_world.currentLocation())
 				return;
+			_map->setTroopInfo(0);
+			_map->setFocusedTroop(troop);
 			_lastContacted = troop;
 			_recruiting = false;
 			_log.line(Common::String::format("Map: troop %u selected by icon", troop));
@@ -2016,13 +2025,17 @@ void GameScreen::mapTap(int x, int y) {
 		if (_map->selecting() && _map->selectPoint(x, y)) {
 			_log.line(Common::String::format("Map: desert point %u/%d selected", _map->pointLongitude(), _map->pointLatitude()));
 			drawMapScreen();
-		} else if (!_map->selecting() && _map->destination() >= 0) {
-			// A tap on empty map space closes the place's popup (seg000:5c76).
-			_map->select(-1);
+		} else if (!_map->selecting()) {
+			// A tap on empty map space closes the open popups (seg000:5c76).
+			_map->setTroopInfo(0);
+			if (_map->destination() >= 0) {
+				_map->select(-1);
+			}
 			drawMapScreen();
 		}
 		return;
 	}
+	_map->setTroopInfo(0);
 	_map->select(hit);
 	_log.line(Common::String::format("Map: place %u (%s) selected", hit,
 			_sentences ? _world.locationName((uint)hit, *_sentences).c_str() : "?"));
@@ -2031,6 +2044,10 @@ void GameScreen::mapTap(int x, int y) {
 }
 
 void GameScreen::leaveMap() {
+	if (_map) {
+		_map->setFocusedTroop(0);
+		_map->setTroopInfo(0);
+	}
 	_cockpit = false;
 	_panel.setLeftPanel(Panel::kLeftBook);
 	_panel.setCompanions(_world.companion(0), _world.companion(1));
@@ -3466,6 +3483,7 @@ void GameScreen::endTroopPick(int dest) {
 		_log.line(Common::String::format("Troops: troop %u answers \"%s\"", _troopId, _troopLine.c_str()));
 	drawTroop();
 	dumpScreen(_system, "troop-moving");
+	if (_map) _map->setFocusedTroop(0);
 	_mode = kMap;
 	drawMapScreen();
 }
@@ -3560,6 +3578,7 @@ void GameScreen::searchForEquipment() {
 	drawTroop();
 	dumpScreen(_system, "troop-search");
 	if (_troopFromMap) {
+		if (_map) _map->setFocusedTroop(0);
 		_mode = kMap;
 		drawMapScreen();
 	}
@@ -4533,7 +4552,7 @@ void GameScreen::storyEvent(void *context, byte event, bool wasSaid, uint speake
 		// speak alone (ds:28e7 == 1) or the line's place (ds:47e6) is Paul's,
 		// a window on the map round that place (drawPlaceInset); the dream
 		// draws it itself. The floppy's event 13 (a9ce) only sets ds:42ce
-		// to 600 (not built).
+		// to 600 (0x258) (confirmed floppy-only; not built, CD path only).
 		if (!screen->_world.floppy() && screen->_linePlace >= 0 && (uint)screen->_linePlace != screen->_world.currentLocation()) {
 			screen->_insetPlace = screen->_linePlace;
 			screen->_log.line(Common::String::format("Talk: action 13, the map window on place %d", screen->_linePlace));
@@ -5323,6 +5342,24 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 			if (event.type == Common::EVENT_RBUTTONDOWN)
 				drawMapScreen();
 		}
+		if (!_cockpit && event.type == Common::EVENT_RBUTTONDOWN && _map->mode() == MapScreen::kFlat && event.mouse.y < 152) {
+			const uint troop = _map->hitTroop(event.mouse.x, event.mouse.y);
+			if (troop) {
+				if (_map->troopInfo() == troop)
+					_map->setTroopInfo(0);
+				else {
+					_map->setTroopInfo(0);
+					_map->select(-1);
+					_map->setTroopInfo(troop);
+				}
+			} else if (_map->troopInfo() && _map->troopInfoRect().contains(event.mouse.x, event.mouse.y)) {
+				_map->setTroopInfo(0);
+			} else {
+				_map->setTroopInfo(0);
+			}
+			drawMapScreen();
+			return false;
+		}
 		if (event.type == Common::EVENT_LBUTTONDOWN) {
 			const int arrow = _cockpit ? cockpitArrow(event.mouse.x, event.mouse.y) : _map->hitArrow(event.mouse.x, event.mouse.y);
 			if (arrow >= 0) {
@@ -5411,6 +5448,8 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 						if (!_world.troop(ids[i]).harkonnen() && _world.troop(ids[i]).hired())
 							id = ids[i];
 					if (id) {
+						_map->setTroopInfo(0);
+						_map->setFocusedTroop(id);
 						_recruiting = false;
 						openTroop(id, true);
 					}
@@ -5452,6 +5491,8 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 							id = next;
 					}
 					if (id) {
+						_map->setTroopInfo(0);
+						_map->setFocusedTroop(id);
 						_lastContacted = id;
 						_recruiting = false;
 						openTroop(id, true);
@@ -5535,6 +5576,13 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 					Common::Rect(75, 15, 85, 25).contains(event.mouse.x, event.mouse.y)) {
 				// The SPICE DENSITY panel's close box (ONMAP 0x8D's corner).
 				_map->setDensity(false);
+				drawMapScreen();
+				return false;
+			}
+			if (_map->density() && _map->mode() == MapScreen::kFlat &&
+					Common::Rect(75, 111, 245, 121).contains(event.mouse.x, event.mouse.y)) {
+				// The panel's footer toggles between spice density and troop occupation.
+				_map->setDensityMode(!_map->densityMode());
 				drawMapScreen();
 				return false;
 			}
@@ -5761,6 +5809,7 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 			applyStory();
 		}
 		if (_troopFromMap && !_troopFromRoom) {
+			if (_map) _map->setFocusedTroop(0);
 			_mode = kMap;
 			drawMapScreen();
 		} else {

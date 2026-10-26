@@ -495,7 +495,8 @@ void GameScreen::thirstCheck() {
 }
 
 void GameScreen::desertCollapse() {
-	// desert_collapse_cutscene (CD 0e77-0ea3; the floppy has none): the
+	// desert_collapse_cutscene (CD 0e77-0ea3; the floppy has none, it runs the
+	// confirmed 3a06 path: text line, sub_326F, message, ds:0E7++, then faint): the
 	// WORMSUIT score (not built here), DEAD3.HNM's first frame into the game
 	// area, then its five other frames, each revealed by transition 0x3c
 	// (segvga 2a10: the slow dissolve, a 15-bit LFSR walking the game area,

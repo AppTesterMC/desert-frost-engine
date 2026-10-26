@@ -39,6 +39,7 @@
 
 #include "dune/debug.h"
 #include "dune/harness.h"
+#include "dune/live_state.h"
 #include "dune/demo.h"
 
 namespace Dune {
@@ -336,6 +337,7 @@ static bool pollInput(OSystem *system, Common::Event &event) {
 
 bool pollDuneEvent(OSystem *system, Common::Event &event) {
 	streamTick(system);
+	liveStateTick(system);
 	if (duneDemoPlayback()) {
 		// Real input cannot disturb playback. Quit and Escape remain usable.
 		while (system->getEventManager()->pollEvent(event)) {

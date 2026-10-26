@@ -106,9 +106,9 @@ REC/DEM files and cannot play those native recordings.
 Use `scripts/engine_demo.py` with a ScummVM build and legally obtained game data:
 
 ```sh
-python3 scripts/engine_demo.py rec ~/Movies/dune-run.drec \
+python3 scripts/engine_demo.py rec "$HOME/Movies/dune-run.drec" \
   --engine /path/to/scummvm --data /path/to/dune-data
-python3 scripts/engine_demo.py dem ~/Movies/dune-run.drec \
+python3 scripts/engine_demo.py dem "$HOME/Movies/dune-run.drec" \
   --engine /path/to/scummvm --data /path/to/dune-data
 ```
 

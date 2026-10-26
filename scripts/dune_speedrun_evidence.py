@@ -11,8 +11,29 @@ from pathlib import Path
 import re
 
 
+
+REQUIRED_PLAYER_UI_CATEGORIES = {
+    "navigation", "dialogue", "orders", "combat", "map", "save-load",
+    "options", "equipment", "espionage", "worm",
+}
+
+def _player_ui_categories(declarations):
+    cats = set()
+    for line in declarations:
+        if "player-ui-v1" not in line:
+            continue
+        idx = line.find("player-ui-v1")
+        tail = line[idx + len("player-ui-v1"):]
+        if ":" in tail:
+            tail = tail.split(":", 1)[1]
+        for part in tail.replace(";", ",").split(","):
+            name = part.strip().lower()
+            if name:
+                cats.add(name)
+    return cats
+
 def assess(text, part="full", process_exit=0, allow_order_bypasses=False,
-           require_player_ui=False):
+           require_player_ui=False, require_uninterrupted=False):
     lines = text.splitlines()
     speedrun = [line for line in lines if line.startswith("Speedrun:")]
     fallback = [line for line in speedrun
@@ -25,6 +46,24 @@ def assess(text, part="full", process_exit=0, allow_order_bypasses=False,
     blocked = [line for line in speedrun if "BLOCKED" in line]
     endings = [line for line in speedrun if "step 56 OK" in line]
     declarations = [line for line in speedrun if "coverage " in line]
+    player_ui_declarations = [line for line in declarations if "player-ui-v1" in line]
+    player_ui_categories = _player_ui_categories(player_ui_declarations)
+    player_ui_declared = bool(player_ui_declarations)
+    player_ui_complete = player_ui_declared and REQUIRED_PLAYER_UI_CATEGORIES.issubset(player_ui_categories)
+    reload_lines = []
+    slot0_reload_lines = []
+    for line in lines:
+        lowered = line.lower()
+        # A battle save/reload retry is the slot-1 reload used by speedrunFight.
+        # Slot-0 reloads are troop-approach retries and are disclosed separately;
+        # uninterrupted mode disables the slot-1 retry path.
+        if re.search(r"saves:\s*slot\s*1\s*loaded", lowered):
+            reload_lines.append(line)
+        if re.search(r"saves:\s*slot\s*0\s*loaded", lowered):
+            slot0_reload_lines.append(line)
+    reload_count = len(reload_lines)
+    slot0_reload_count = len(slot0_reload_lines)
+    interrupted = reload_count > 0
     failures = []
     if process_exit:
         failures.append(f"engine exited with status {process_exit}")
@@ -40,15 +79,54 @@ def assess(text, part="full", process_exit=0, allow_order_bypasses=False,
         failures.append(f"{len(progression)} FORCED progression shortcut(s) in {part} run")
     if fallback and not allow_order_bypasses:
         failures.append(f"{len(fallback)} direct order fallback(s) bypassed a missing or refused command")
-    if require_player_ui:
+    if require_player_ui and not player_ui_complete:
         failures.append("player-UI completion is not certified by this bot")
+    if require_uninterrupted:
+        if reload_count:
+            failures.append(f"{reload_count} battle save/reload retry/retries")
+        if not player_ui_complete:
+            failures.append("player-UI completion is not certified by this bot")
+    if interrupted:
+        classification = "interrupted"
+    elif player_ui_complete and not failures:
+        classification = "uninterrupted"
+    elif declarations and any("engine-assisted" in d for d in declarations):
+        classification = "assisted"
+    else:
+        classification = "unknown"
+    uninterrupted = classification == "uninterrupted"
     return {
         "schema": 1,
         "part": part,
         "process_exit": process_exit,
         "passed": not failures,
-        "coverage": "engine-assisted",
-        "player_ui_completion_verified": False,
+        "coverage": "player-ui-v1" if player_ui_declared else ("engine-assisted" if declarations else "unknown"),
+        "player_ui_completion_verified": bool(player_ui_complete and not failures),
+        "player_ui_declared": player_ui_declared,
+        "player_ui_categories": sorted(player_ui_categories),
+        "required_player_ui_categories": sorted(REQUIRED_PLAYER_UI_CATEGORIES),
+        "player_ui_missing_categories": sorted(REQUIRED_PLAYER_UI_CATEGORIES - player_ui_categories),
+        "reload_count": reload_count,
+        "reloads": reload_count,
+        "reload_retries": reload_count,
+        "battle_reloads": reload_count,
+        "battle_reload_count": reload_count,
+        "save_reloads": reload_count,
+        "save_reload_count": reload_count,
+        "save_reload_retries": reload_count,
+        "retries": reload_count,
+        "reload_lines": reload_lines,
+        "reload_markers": reload_lines,
+        "slot0_reload_count": slot0_reload_count,
+        "slot0_reload_lines": slot0_reload_lines,
+        "slot0_reloads": slot0_reload_lines,
+        "troop_approach_retries": slot0_reload_count,
+        "interrupted": interrupted,
+        "uninterrupted": uninterrupted,
+        "classification": classification,
+        "run_classification": classification,
+        "interruption_status": classification,
+        "status": classification,
         "coverage_declaration": declarations,
         "legacy_coverage_unknown": not declarations,
         "direct_order_fallbacks": len(fallback),
@@ -80,11 +158,16 @@ def main():
                         help="engine-logic investigation only; keeps assisted label and bypass count")
     parser.add_argument("--require-player-ui", action="store_true",
                         help="fails until a complete player-input coverage contract exists")
+    parser.add_argument("--require-uninterrupted", action="store_true",
+                        help="fails unless the run had no save/reload retries and complete player-UI coverage")
+    parser.add_argument("--uninterrupted", action="store_true",
+                        help=argparse.SUPPRESS)
     parser.add_argument("--json", type=Path)
     args = parser.parse_args()
     raw = args.log.read_bytes() if args.log.is_file() else b""
     result = assess(raw.decode("utf-8", errors="replace"), args.part,
-                    args.process_exit, args.allow_order_bypasses, args.require_player_ui)
+                    args.process_exit, args.allow_order_bypasses, args.require_player_ui,
+                    args.require_uninterrupted or args.uninterrupted)
     result.update(release=args.release, seed=args.seed,
                   log_sha256=hashlib.sha256(raw).hexdigest() if raw else None)
     if args.binary:
@@ -92,8 +175,12 @@ def main():
     if args.json:
         args.json.write_text(json.dumps(result, indent=2) + "\n")
     if result["passed"]:
-        detail = f"{result['forts']} forts, assisted engine completion; " \
-                 f"{result['direct_order_fallbacks']} direct order fallback(s); player-UI completion unverified"
+        if result["player_ui_completion_verified"]:
+            detail = f"{result['forts']} forts, player-UI completion verified; " \
+                     f"{result['direct_order_fallbacks']} direct order fallback(s)"
+        else:
+            detail = f"{result['forts']} forts, assisted engine completion; " \
+                     f"{result['direct_order_fallbacks']} direct order fallback(s); player-UI completion unverified; {result['classification']}"
         if result["forced_setup_shortcuts"]:
             detail += f"; {result['forced_setup_shortcuts']} declared FORCED setup(s)"
         if args.allow_order_bypasses:

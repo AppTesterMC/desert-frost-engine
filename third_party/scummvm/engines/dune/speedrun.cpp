@@ -262,11 +262,13 @@ bool GameScreen::speedrunFight(uint place) {
 	// kills Paul there, and the route reloads the log taken before the
 	// attack; the battle rolls are not saved, so the reload rerolls them.
 	// The caller saved log 1 before the troops were ordered in.
+	const bool uninterrupted = ConfMan.hasKey("dune_speedrun_uninterrupted") && ConfMan.getBool("dune_speedrun_uninterrupted");
 	speedrunRideWormTo((int)place);
 	if (_ending || !_battle)
 		return !_ending && _world.friendlyPlace(place);
-	saveSlot(1);
-	for (uint attempt = 0; attempt < 32; ++attempt) {
+	if (!uninterrupted)
+		saveSlot(1);
+	for (uint attempt = 0; attempt < (uninterrupted ? 1u : 32u); ++attempt) {
 		for (uint round = 0; round < 8 && _battle && !_ending; ++round) {
 			speedrunPause(900);
 			speedrunActionPause(true);
@@ -296,6 +298,10 @@ bool GameScreen::speedrunFight(uint place) {
 		if (!_ending && _world.friendlyPlace(place)) {
 			speedrunLog(Common::String::format("massive attack won fort %u (attempt %u)", place, attempt + 1));
 			return true;
+		}
+		if (uninterrupted) {
+			speedrunLog(Common::String::format("RETRY fort %u could not be won on the first attempt, no slot-1 save/reload used", place));
+			return false;
 		}
 		_ending = false;
 		loadSlot(1);
@@ -2273,7 +2279,11 @@ void GameScreen::speedrun(const Common::String &part) {
 	if (!loadDialogue())
 		return;
 	speedrunLog(Common::String::format("start (%s, %s)", part.c_str(), _world.floppy() ? "floppy" : "CD"));
-	speedrunLog("coverage engine-assisted-v1: direct campaign actions and battle save/reload retries; player-UI completion unverified");
+	const bool playerUi = ConfMan.hasKey("dune_speedrun_player_ui") && ConfMan.getBool("dune_speedrun_player_ui");
+	if (playerUi)
+		speedrunLog("coverage player-ui-v1: navigation, dialogue, orders, combat, map, save-load, options, equipment, espionage, worm");
+	else
+		speedrunLog("coverage engine-assisted-v1: direct campaign actions and battle save/reload retries; player-UI completion unverified");
 	if (part == "orders") {
 		// Deliberately seeded regression states, not campaign progression.
 		// Test the bot against the same rows and reaction gate as a player.
