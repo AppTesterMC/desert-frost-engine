@@ -7,7 +7,6 @@ Scope: desktop ScummVM engine, DOS floppy release as the reference (`data/floppy
 - Regression harness: `cd.script` and `floppy.script` completed, all manifest checkpoints captured (cd 16, floppy 42) with exit status 0.
 - Campaign: `check_speedrun.sh campaign 1` -> PASS (floppy, assisted completion; 0 direct order fallbacks; 2 declared FORCED setup markers).
 - Ecology win: `check_ecology_win.sh` -> PASS (floppy + CD): vegetation takes the last fort, final-attack stage 1, Thufir's line, no Emperor demand; floppy palace taken and Baron's hall ends the game; CD palace spared and Paul shot.
-- Live telemetry: `engine_demo`/`live_state` captures accompany the campaign runs under `sdl-run/`.
 
 ## Feature status (floppy-original first)
 | Feature | Status | Notes |

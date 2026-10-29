@@ -31,7 +31,6 @@
 
 #include "dune/amiga.h"
 #include "dune/map.h"
-#include "dune/live_state.h"
 
 #include "common/algorithm.h"
 #include "common/endian.h"
@@ -1463,7 +1462,6 @@ void MapScreen::patchRalliedCount(Common::String &text, uint rallied) {
 }
 
 void MapScreen::draw(Graphics::ManagedSurface &surface, const Panel &panel, const SentenceBank *sentences, uint rallied) {
-	liveStateGlobeView(globePhase(), _tilt, _mode == kGlobe);
 	_sentences = sentences;
 	Graphics::Surface *target = surface.surfacePtr();
 	surface.fillRect(Common::Rect(0, 0, 320, 152), 0);

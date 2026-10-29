@@ -41,7 +41,6 @@
 #include "dune/debug.h"
 #include "dune/dialogue.h"
 #include "dune/harness.h"
-#include "dune/live_state.h"
 #include "dune/hnm.h"
 #include "dune/music.h"
 #include "dune/palace.h"
@@ -441,11 +440,9 @@ GameScreen::GameScreen(OSystem *system, Resource &resources, StartupLog &log) :
 		_rowActions[i] = kRowNone;
 		_rowArguments[i] = 0;
 	}
-	_liveState = new LiveStateExporter(_world, resources, log);
 }
 
 GameScreen::~GameScreen() {
-	delete _liveState;
 	endNightBattle();
 	delete _talkSheet;
 	delete _saves;
@@ -2403,7 +2400,6 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 	const bool watchTelemetryFast = ConfMan.hasKey("dune_speedrun_watch") && (
 		(ConfMan.hasKey("dune_speedrun_skip_flight_after") &&
 		 ConfMan.getInt("dune_speedrun_skip_flight_after") == 0) ||
-		ConfMan.hasKey("dune_speedrun_telemetry") ||
 		ConfMan.hasKey("dune_speedrun_no_pauses"));
 	bool skipping = isFastCapture() || watchTelemetryFast;
 	if (!skipping) {
