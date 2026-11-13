@@ -28,18 +28,21 @@ ROUTE = "wait 800\nclick left 160 163\nwait 300\nclick left 45 170\nwait 300\n"
 COUNT = 0
 
 
-def play(name, release, saves, action, data=None):
+def play(name, release, saves, action, data=None, route=ROUTE, config=""):
     target = OUT / name
     target.mkdir()
     frames = target / "frames"
     frames.mkdir()
-    script = ROUTE + ("click left 160 179\n" if action == "save" else "click left 160 187\n")
-    script += "wait 200\ncheckpoint menu\nclick left 160 163\nwait 500\ncheckpoint after\nquit\n"
+    script = route + ("click left 160 179\n" if action == "save" else "click left 160 187\n")
+    script += "wait 200\ncheckpoint menu\nclick left 160 163\nwait 500\ncheckpoint after\n"
+    if action == "load-save":
+        script += "click left 160 179\nwait 200\nclick left 160 163\nwait 500\ncheckpoint resaved\n"
+    script += "quit\n"
     (target / "input.script").write_text(script)
     ini = target / "game.ini"
     ini.write_text("[scummvm]\nsavepath=" + str(saves) + "\ndune_input=" + str(target / "input.script") +
         "\ndune_checkpoint_dir=" + str(frames) +
-        "\ndune_floppy_start=99\ndune_intro_start=6\ndune_no_music=true\n")
+        "\ndune_floppy_start=99\ndune_intro_start=6\ndune_no_music=true\n" + config)
     with (target / "stdout.log").open("w") as stdout:
         subprocess.run([str(BINARY), "-c", str(ini), "--gfx-mode=surface", "--no-fullscreen",
             "--path=" + str(data or DATA[release]), "dune"], env=ENV, stdout=stdout,
@@ -75,6 +78,19 @@ def load_case(name, release, payload, accepted, filename=None):
     return saves
 
 
+def check_saved_position(payload, release, location, pointer):
+    # The original DOS loader dereferences DS:114E, independently of the
+    # 1-based location byte at DS:7. Check the real menu-produced save body.
+    size = 4718 if release == "floppy" else 4705
+    state = unpack(payload)[-size:]
+    actual = struct.unpack_from("<H", state, 0x114e)[0]
+    assert state[7] == location + 1, (release, "saved location", state[7] - 1, location)
+    assert actual == pointer, (release, "location", location, "saved current-location pointer",
+                               hex(actual), "expected", hex(pointer))
+    assert state[actual + 8] == state[5], (release, "pointer does not address the current place type")
+    passed(f"{release} location {location} serializes current-location pointer {pointer:#06x}")
+
+
 def changed_body(source, body):
     return bytes(pack(body, source[:6]))
 
@@ -90,6 +106,7 @@ def main():
         log = play("save-" + release, release, shared, "save")
         assert "Saves: " + NAMES[release] + " written" in log
         canonical[release] = (shared / NAMES[release]).read_bytes()
+        check_saved_position(canonical[release], release, 0, 0x0100)
         assert all(digest_files(shared)[n] == h for n, h in before.items()), release
         passed(release + " writes a separate slot without replacing another version")
     assert canonical["amiga"][2:4] == bytes((0xf7, 0xa1))
@@ -97,6 +114,31 @@ def main():
         log = play("roundtrip-" + release, release, shared, "load")
         assert "Saves: slot 0 loaded, time 2, place 0 room 10" in log, release
         passed(release + " own slot restores game time, place and room")
+
+    # Earlier engine saves left the original's location pointer unset.
+    # Loading must preserve their files; saving again without travel repairs
+    # the pointer in the newly serialized state through the normal menus.
+    for release in ("floppy", "cd"):
+        size = 4718 if release == "floppy" else 4705
+        body = unpack(canonical[release])
+        struct.pack_into("<H", body, len(body) - size + 0x114e, 0xffff)
+        name = "stale-location-pointer-" + release
+        saves = load_case(name, release, changed_body(canonical[release], body), True)
+        log = play(name + "-resave", release, saves, "load-save")
+        assert "Saves: slot 0 loaded" in log and "Saves: " + NAMES[release] + " written" in log
+        check_saved_position((saves / NAMES[release]).read_bytes(), release, 0, 0x0100)
+
+    # Existing ecology setup moves Paul to Carthag-Tuek (place 12). Open
+    # the globe from its flat map and save through the same real slot menu.
+    # This is a serializer regression, not proof of natural ecology growth.
+    for release in ("floppy", "cd"):
+        saves = OUT / ("position-" + release + "-saves")
+        saves.mkdir()
+        log = play("position-" + release, release, saves, "save",
+                   route="wait 800\nclick left 35 176\nwait 300\n",
+                   config="dune_story_setup=ecology\ndune_ecology_days=0\n")
+        assert "Saves: " + NAMES[release] + " written" in log
+        check_saved_position((saves / NAMES[release]).read_bytes(), release, 12, 0x0250)
 
     legacy_amiga = bytearray(canonical["amiga"])
     legacy_amiga[3] = 0

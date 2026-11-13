@@ -422,6 +422,8 @@ void World::setPosition(uint locationIndex, uint room) {
 	_state.setB(GameState::kLocationAndRoom, (byte)room);
 	_state.setB(GameState::kLocationAndRoom + 1, l.type);
 	_state.setB(7, (byte)(locationIndex + 1));
+	// The original loader also reads this record pointer, not just DS:7.
+	_state.setW(GameState::kCurrentLocation, (uint16)(Location::kTableOffset + locationIndex * Location::kRecordSize));
 	_state.setB(8, l.type);
 	_state.setB(0x0b, (byte)room);
 	// The name table words 1 and 2 feed the text codes 0x81 and 0x82

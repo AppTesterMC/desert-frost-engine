@@ -62,6 +62,7 @@ struct GameState {
 		kPhase = 0x2a,            ///< story phase; dialogue actions 11 and 12 advance it
 		kDaysToShipment = 0xcf,
 		kHeadIndex = 0xe8,
+		kCurrentLocation = 0x114e, ///< DS pointer to the current location record, shared by floppy/CD saves
 		kNameTable = 0x11eb       ///< 16 sentence ids used by text codes 0x81-0x8F
 	};
 
