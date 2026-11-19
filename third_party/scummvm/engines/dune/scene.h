@@ -275,7 +275,7 @@ private:
 		kRowStatus      ///< anything not implemented: shows its name
 	};
 
-	void composeView();
+	void composeView(bool includeOccupants = true);
 	bool drawVideoBackdrop(byte placeType);
 	bool drawBackdropStill(byte placeType);
 	Common::String _lastBackdrop; ///< logged when it changes

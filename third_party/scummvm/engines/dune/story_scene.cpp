@@ -726,7 +726,7 @@ void GameScreen::floppyEndingCreditsSlideshow() {
         _desert = false;
         _walking = false;
         _commList = -1;
-        composeView();
+        composeView(false); // The cast portrait is the sole actor in the ending plate.
     };
     // Floppy portrait HSQ sprites per scene (dune-re intro_setup_talking_head IDs
     // 0-6=Leto/Jess/Hawa/Idah/Gurn/Stil/Kyne, 7=Chan, 8=Hara, 0xa=Feyd, 0xb=Empr,

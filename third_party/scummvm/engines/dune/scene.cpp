@@ -935,7 +935,7 @@ void GameScreen::setRows(const RowAction *actions, const int *arguments, const u
 	_panel.setCommandRows(rows, Panel::kCommandRows);
 }
 
-void GameScreen::composeView() {
+void GameScreen::composeView(bool includeOccupants) {
 	for (uint p = 0; p < ARRAYSIZE(_personPos); ++p)
 		_personPos[p] = Common::Point(-1, -1); // only a drawn room places people
 	if (_finalPicture) {
@@ -1051,7 +1051,8 @@ void GameScreen::composeView() {
 		Common::Array<uint16> markerSprites;
 		{
 			Common::Array<byte> people;
-			_world.peopleInRoom(people);
+			if (includeOccupants)
+				_world.peopleInRoom(people);
 			const uint markers = MIN<uint>(Room(roomData).markerCount(salRoom), 23);
 			byte slots[23];
 			memset(slots, 0xff, sizeof(slots));
