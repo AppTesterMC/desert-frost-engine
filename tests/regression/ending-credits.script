@@ -1,0 +1,67 @@
+# DES-252 assisted fixture: endingCreditsSlideshow in fastCapture mode.
+# endlessPlaySetup(false) + forceRules(true) + showRoom(2) triggers the
+# Baron's hall ending (phase 0xc8, pendingScene 0x128f → action 0x16).
+# Scene 0x128f has ~15 dialogue lines before action 0x16; click through each.
+# In fastCapture mode all 16 slides emit ending-slide-NN.png instantly.
+wait 15000
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 300
+click left 160 80
+wait 10000
+quit

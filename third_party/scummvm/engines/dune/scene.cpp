@@ -997,6 +997,8 @@ void GameScreen::composeView() {
 		const bool outdoors = palace ? (salRoom == 10 || salRoom == 11)
 									 : _world.amiga() ? (slot == 6 || slot == 9 || slot == 15 || record->code == 0xb7)
 									 : (floppy ? (slot == 6 || slot == 8 || slot == 9) : slot == 0);
+		// The window in Liet's room (0x1005) reveals SKY.HSQ behind the SAL.
+		const bool lietWindow = floppy && !_world.amiga() && placeType == 0x10 && _room == 5;
 		const bool video = !floppy && outdoors && !(palace && salRoom == 10);
 		if (video) {
 			// CD draw_outdoor_backdrop (380c): the place kind's still under
@@ -1012,7 +1014,7 @@ void GameScreen::composeView() {
 				_surface.fillRect(Common::Rect(0, 0, 320, 78), 1);
 				_surface.fillRect(Common::Rect(0, 78, 320, 152), 2);
 			}
-		} else if (outdoors) {
+		} else if (outdoors || lietWindow) {
 			if (palace && salRoom == 11)
 				drawSky(_system, _resources, *_surface.surfacePtr(), kSkyLarge, 200, skyPalette(), true);
 			else
@@ -1021,7 +1023,7 @@ void GameScreen::composeView() {
 			// tiles (loc_139EC): the balcony under SKYDN (ds:22e3 = 1), 0x1005
 			// under SKY (13A18); the floppy always SKY.
 			setSkyPalette(!floppy && ((uint)(placeType << 8) | _room) != 0x1005);
-			if (!palace) {
+			if (!palace && !lietWindow) {
 				_surface.fillRect(Common::Rect(0, 77, 320, 152), 0xbf); // floppy 3AF8
 				const bool landscape = floppy && _room == 1 &&
 						(placeType <= Location::kSietchMax ||

@@ -669,7 +669,439 @@ void GameScreen::drawEnding() {
 
 // ---- FIND PROSPECTORS ---------------------------------------------------------------
 
+void GameScreen::floppyEndingCreditsSlideshow() {
+    // Floppy ending action 0x0b enters from the final battle. Release the
+    // night-battle renderer before composing the room plates for the cast.
+    _battle = false;
+    _log.line("Credits: slideshow (16 scenes)");
+    _ending = true;
+    _state.setW(GameState::kPersonsInRoom, 0);
+    _state.setW(GameState::kPersonsWith, 0);
+    Common::Array<byte> song;
+    if (_music && _resources.load("WORMSUIT.HSQ", song))
+        _music->play(song);
+
+    auto findPalace = [&]() -> uint {
+        for (uint i = 0; i < _world.locationCount(); ++i)
+            if (_world.location(i).type == Location::kPalace)
+                return i;
+        return 0;
+    };
+    auto findFortress = [&]() -> uint {
+        for (uint i = 0; i < _world.locationCount(); ++i)
+            if (_world.location(i).type >= Location::kFortressMin && _world.location(i).type <= Location::kHarkonnenPalace)
+                return i;
+        return 0;
+    };
+    auto findSietch = [&]() -> uint {
+        for (uint i = 0; i < _world.locationCount(); ++i)
+            if (_world.location(i).type <= Location::kSietchMax)
+                return i;
+        return 0;
+    };
+    // dune-re 0x703/0x802/0x803/0x1005: upper byte = exact sietch type, lower = room.
+    auto findSietchByType = [&](uint type) -> uint {
+        for (uint i = 0; i < _world.locationCount(); ++i)
+            if (_world.location(i).type == type)
+                return i;
+        return findSietch();
+    };
+    // dune-re 0x3002: Harkonnen palace (kHarkonnenPalace = 0x30) must match exactly;
+    // findFortress() scans [kFortressMin, kHarkonnenPalace] and may return a fortress first.
+    auto findHarkonnenPalace = [&]() -> uint {
+        for (uint i = 0; i < _world.locationCount(); ++i)
+            if (_world.location(i).type == Location::kHarkonnenPalace)
+                return i;
+        return findFortress();
+    };
+
+    auto drawRoomBackdrop = [&](uint locationIndex, uint room) {
+        _world.setPosition(locationIndex, room);
+        _room = room;
+        refreshRooms();
+        updateRoomVars();
+        _mode = kRoom;
+        _menu = kMenuNone;
+        _palacePlan = false;
+        _desert = false;
+        _walking = false;
+        _commList = -1;
+        composeView();
+    };
+    // Floppy portrait HSQ sprites per scene (dune-re intro_setup_talking_head IDs
+    // 0-6=Leto/Jess/Hawa/Idah/Gurn/Stil/Kyne, 7=Chan, 8=Hara, 0xa=Feyd, 0xb=Empr,
+    // 0x2d=Paul). Scene 10 (Baron) uses BACK.HSQ backdrop; scene 15 handled inline.
+    // Null = no portrait for that scene (blank castle, credits, Baron backdrop).
+    static const char *const kEndingHeads[15] = {
+        nullptr,      // 0: castle night (FINAL.HSQ frame 5)
+        "PAUL.HSQ",   // 1: Paul Atreides
+        "LETO.HSQ",   // 2: Duke Leto
+        "JESS.HSQ",   // 3: Jessica
+        "GURN.HSQ",   // 4: Gurney
+        "IDAH.HSQ",   // 5: Duncan Idaho (room 0x2004; head=3=Idaho)
+        "EMPR.HSQ",   // 6: Shaddam IV (Harkonnen palace; head=0x0b=Emperor)
+        "HARA.HSQ",   // 7: Harah
+        "HAWA.HSQ",   // 8: Thufir Hawat (room 0x2008; head=2=Hawat)
+        "STIL.HSQ",   // 9: Stilgar
+        "BARO.HSQ",   // 10: Baron Harkonnen (BACK.HSQ stage_26; head=9, dx=0x52)
+        "FEYD.HSQ",   // 11: Feyd
+        "CHAN.HSQ",   // 12: Chani
+        "KYNE.HSQ",   // 13: Liet Kynes
+        nullptr,      // 14: production credits scroll
+    };
+    static const int16 kEndingHeadDx[15] = {
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0x52, // 10: Baron
+        0x3a, // 11: Feyd
+        0, 0, 0
+    };
+    auto drawEndingHead = [&](const char *sheetName, int16 dx, int16 dy) {
+        Common::Array<byte> headData;
+        if (!sheetName || !_resources.load(sheetName, headData))
+            return;
+        Sprite head(_system, headData);
+        head.setPalette();
+        const byte black[3] = { 0, 0, 0 };
+        _system->getPaletteManager()->setPalette(black, 0, 1);
+        if (!head.drawAnimationFrame(0, 0, _surface.surfacePtr(), dx, dy))
+            head.drawFrame(0, _surface.surfacePtr(), dx, dy);
+    };
+
+    // The original DOS game rendered to a framebuffer with an 18-row top bar
+    // (y=0..17 reserved), so all game content started at screen y=18. Shift the
+    // surface content down by this amount before each capture so the resulting
+    // PNGs match the original passive-capture layout (confirmed by DES-271).
+    static const int16 kFbOffset = 18;
+    auto shiftDown = [&]() {
+        byte *px = static_cast<byte *>(_surface.getPixels());
+        memmove(px + kFbOffset * _surface.pitch, px, (200 - kFbOffset) * (uint)_surface.pitch);
+        memset(px, 0, kFbOffset * (uint)_surface.pitch);
+    };
+    // Caption gold: VGA register (63,55,32) × 4 as used by the original
+    // DOS/DOSBox captures (DES-271 passive scene 0 pixel 167,70 = 255,223,130;
+    // engine VGA-to-8bit rounds to 252,220,128). Restore this after every
+    // backdrop/head palette change so caption text stays gold at kLightColour.
+    byte kLightRgb[3] = { 252, 220, 128 };
+
+    const bool playSlides = (!fastCapture() && !ConfMan.hasKey("dune_speedrun")) ||
+            ConfMan.hasKey("dune_speedrun_watch");
+    auto advanceRequested = [&]() {
+        bool advance = false;
+        Common::Event event;
+        while (pollDuneEvent(_system, event)) {
+            if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER)
+                _quitRequested = true;
+            else if (event.type == Common::EVENT_KEYDOWN || event.type == Common::EVENT_LBUTTONDOWN ||
+                    event.type == Common::EVENT_RBUTTONDOWN)
+                advance = true;
+        }
+        return advance || _quitRequested;
+    };
+    // DOS transition 0x3a fades in three banks of 85 VGA colours, with 22
+    // steps of three DAC levels and three PIT ticks per bank refresh.
+    auto fade = [&](bool reveal) {
+        byte target[256 * 3], current[256 * 3];
+        _system->getPaletteManager()->grabPalette(target, 0, 256);
+        if (reveal) {
+            memset(current, 0, sizeof(current));
+            _system->getPaletteManager()->setPalette(current, 0, 255);
+            _system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
+        }
+        const uint32 start = _system->getMillis();
+        for (int step = 1; step <= 22 && !_quitRequested; ++step) {
+            const int darken = (reveal ? 22 - step : step) * 3;
+            for (int bank = 0; bank < 3 && !_quitRequested; ++bank) {
+                const int first = bank * 85;
+                for (int i = first * 3; i < (first + 85) * 3; ++i)
+                    current[i] = MAX(0, (int)target[i] - darken * 4);
+                _system->getPaletteManager()->setPalette(current + first * 3, first, 85);
+                _system->updateScreen();
+                const int32 delay = (int32)(start + ((step - 1) * 3 + bank + 1) * 15 - _system->getMillis());
+                if (delay > 0)
+                    waitPumping(delay);
+            }
+        }
+    };
+    for (uint scene = 0; scene < 16 && !_quitRequested; ++scene) {
+        bool skipHold = false;
+        if (playSlides)
+            fade(false);
+        _surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
+        _panel.applyPalette();
+        switch (scene) {
+        case 0: {
+            Common::Array<byte> data;
+            if (_resources.load("FINAL.HSQ", data)) {
+                Sprite final(_system, data);
+                final.setPalette();
+                final.drawFrame(5, _surface.surfacePtr(), 0x40, 0x34 + kFbOffset);
+            }
+            break;
+        }
+        case 1: {
+            drawSky(_system, _resources, *_surface.surfacePtr(), kSkyNarrow, 320, skyPalette(), true);
+            Common::Array<byte> intdsData;
+            if (_resources.load("INTDS.HSQ", intdsData)) {
+                Sprite intds(_system, intdsData);
+                intds.setPalette();
+                intds.drawFrame(0, _surface.surfacePtr(), 0, 0x3c);
+            }
+            shiftDown();
+            break;
+        }
+        case 2:
+            drawRoomBackdrop(findPalace(), 0x0a);
+            shiftDown();
+            break;
+        case 3:
+            drawRoomBackdrop(findPalace(), 3);
+            shiftDown();
+            break;
+        case 4:
+            drawRoomBackdrop(findPalace(), 6);
+            shiftDown();
+            break;
+        case 5:
+            // dune-re 0x2004: palace room 4. DES-271 passive-027 confirms location_and_room=2004.
+            drawRoomBackdrop(findPalace(), 4);
+            shiftDown();
+            break;
+        case 6:
+            // dune-re 0x3002: Harkonnen palace room 2. DES-271 passive-032 confirms location_and_room=3002.
+            drawRoomBackdrop(findHarkonnenPalace(), 2);
+            shiftDown();
+            break;
+        case 7:
+            // dune-re 0x703: sietch type 7 (Harah), room 3.
+            drawRoomBackdrop(findSietchByType(7), 3);
+            shiftDown();
+            break;
+        case 8:
+            // dune-re 0x2008: palace room 8. DES-271 passive-042 confirms location_and_room=2008.
+            drawRoomBackdrop(findPalace(), 8);
+            shiftDown();
+            break;
+        case 9:
+            // dune-re 0x802: sietch type 8 (Stilgar), room 2.
+            drawRoomBackdrop(findSietchByType(8), 2);
+            shiftDown();
+            break;
+        case 10: {
+            // Capture-confirmed (DES-271): Baron Harkonnen. Icon list 0165a:
+            // panel 0x4004 (frame 4, flipX) at x=0, panel 0x0004 at x=236,
+            // panel 0x0003 at x=83. 0x4000 flag in panel id = mirror/flipX.
+            Common::Array<byte> backData;
+            if (_resources.load("BACK.HSQ", backData)) {
+                Sprite back(_system, backData);
+                back.setPalette();
+                back.drawFrame(4, _surface.surfacePtr(), 0, kFbOffset, true);
+                back.drawFrame(4, _surface.surfacePtr(), 236, kFbOffset);
+                back.drawFrame(3, _surface.surfacePtr(), 83, kFbOffset);
+            }
+            break;
+        }
+        case 11:
+            // dune-re 0x3002: Harkonnen palace room 2. DES-271 passive-056 confirms location_and_room=3002.
+            drawRoomBackdrop(findHarkonnenPalace(), 2);
+            shiftDown();
+            break;
+        case 12:
+            // dune-re 0x803: sietch type 8 (Chani), room 3.
+            drawRoomBackdrop(findSietchByType(8), 3);
+            shiftDown();
+            break;
+        case 13:
+            // dune-re 0x1005: sietch type 0x10 (Liet), room 5.
+            drawRoomBackdrop(findSietchByType(0x10), 5);
+            shiftDown();
+            break;
+        case 14: {
+            // play_credits(false): CREDITS.HSQ sprites scroll over kSkyNight + INTDS.HSQ
+            // frame 0 for ~55 s. Scroll active 3 s..52 s (0 -> 1790 px) so every
+            // production entry enters the 320x200 view. Leaves final frame in _surface.
+            Common::Array<byte> credData, intdsData;
+            if (_resources.load("CREDITS.HSQ", credData) && _resources.load("INTDS.HSQ", intdsData)) {
+                Sprite cred(_system, credData), intds(_system, intdsData);
+                static const int16 kLines[][3] = {
+                    { 0, 134, 0 }, { 1, 77, 30 }, { 2, 126, 90 }, { 3, 56, 120 }, { 4, 86, 210 },
+                    { 5, 68, 270 }, { 6, 104, 340 }, { 7, 166, 360 }, { 8, 166, 380 }, { 9, 75, 440 },
+                    { 10, 166, 460 }, { 11, 48, 540 }, { 12, 64, 570 }, { 13, 124, 585 }, { 14, 86, 615 },
+                    { 15, 88, 625 }, { 16, 96, 715 }, { 17, 166, 735 }, { 18, 166, 755 }, { 19, 67, 815 },
+                    { 20, 166, 835 }, { 21, 65, 915 }, { 22, 58, 995 }, { 23, 75, 1035 }, { 24, 92, 1075 },
+                    { 25, 166, 1095 }, { 26, 67, 1135 }, { 27, 55, 1175 }, { 28, 113, 1255 }, { 29, 166, 1275 },
+                    { 30, 166, 1295 }, { 31, 166, 1315 }, { 32, 166, 1335 }, { 33, 66, 1375 }, { 34, 60, 1415 },
+                    { 35, 108, 1505 }, { 36, 64, 1520 }, { 37, 120, 1535 }, { 38, 126, 1565 }, { 39, 59, 1580 },
+                    { 40, 96, 1595 }, { 41, 114, 1685 }, { 42, 74, 1700 }, { 43, 6, 1790 }
+                };
+                auto drawCreditsFrame = [&](int scroll) {
+                    _surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
+                    _panel.applyPalette();
+                    drawSky(_system, _resources, *_surface.surfacePtr(), kSkyNarrow, 320, kSkyNight, true);
+                    cred.setPalette(); // CREDITS supplies the sunset gradient over the sky tiles.
+                    intds.drawFrame(0, _surface.surfacePtr(), 0, 60);
+                    for (uint i = 0; i < ARRAYSIZE(kLines); ++i)
+                        cred.drawFrame(kLines[i][0], _surface.surfacePtr(), kLines[i][1], 152 - scroll + kLines[i][2]);
+                    shiftDown();
+                };
+                if (!playSlides) {
+                    auto captureScroll = [&](int scroll, const char *name) {
+                        drawCreditsFrame(scroll);
+                        _surface.fillRect(Common::Rect(0, 170, 320, 200), 0);
+                        _system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
+                        _system->updateScreen();
+                        dumpScreen(_system, name);
+                    };
+                    captureScroll(0, "ending-slide-14-begin");
+                    captureScroll(895, "ending-slide-14-middle");
+                    captureScroll(1790, "ending-slide-14-end");
+                    drawCreditsFrame(895);
+                } else {
+                    // Animated production credits: ~3 s fade-in hold, 49 s scroll
+                    // (0 -> 1790 px over the full CREDITS.HSQ range), ~3 s hold.
+                    // Total ~55 s (passive samples: scene14 174000..229000 ms).
+                    const uint32 kScrollStart = 3000, kScrollEnd = 52000, kTotal = 55000;
+                    drawCreditsFrame(0);
+                    fade(true);
+                    const uint32 start = _system->getMillis();
+                    skipHold = true;
+                    while (!_quitRequested) {
+                        const uint32 elapsed = _system->getMillis() - start;
+                        if (elapsed >= kTotal)
+                            break;
+                        const int scroll = elapsed <= kScrollStart ? 0
+                            : elapsed >= kScrollEnd ? 1790
+                            : (int)(1790u * (elapsed - kScrollStart) / (kScrollEnd - kScrollStart));
+                        drawCreditsFrame(scroll);
+                        _system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
+                        _system->updateScreen();
+                        if (advanceRequested())
+                            break;
+                        _system->delayMillis(16);
+                    }
+                    // Leave the final scroll position in _surface for the caption draw.
+                    drawCreditsFrame(1790);
+                }
+            }
+            break;
+        }
+        case 15: {
+            Common::Array<byte> data;
+            if (_resources.load("FINAL.HSQ", data)) {
+                Sprite final(_system, data);
+                final.setPalette();
+                for (uint16 f = 0; f < 3; ++f)
+                    final.drawFrame(f, _surface.surfacePtr(), 0, kFbOffset);
+            }
+            break;
+        }
+        default:
+            break;
+        }
+
+        // Draw HSQ portrait sprite for floppy ending. dune-re intro_setup_talking_head
+        // places each head at (0,0); scene 15 uses mirror_dual_head_setup:
+        // Chani y+15, Paul x+45 (0x2d).
+        if (scene < 15 && kEndingHeads[scene]) {
+            drawEndingHead(kEndingHeads[scene], kEndingHeadDx[scene], kFbOffset);
+        } else if (scene == 15) {
+            drawEndingHead("CHAN.HSQ", 0, 15 + kFbOffset);
+            drawEndingHead("PAUL.HSQ", 45, kFbOffset);
+        }
+
+        // Restore palette entry 0 (black) and entry 240 (bright gold, confirmed by
+        // DES-271 passive palettes: index 240 = VGA (63,55,32) is constant across
+        // all 16 scenes, matching the original caption colour (255,223,130)).
+        {
+            const byte kBlack3[3] = { 0, 0, 0 };
+            _system->getPaletteManager()->setPalette(kBlack3, 0, 1);
+            _system->getPaletteManager()->setPalette(kLightRgb, 240, 1);
+        }
+        // Keep the 152-row game area (screen rows 18..169) as the backdrop
+        // region; talking heads (Chani's is shifted 15 px) must not spill into
+        // the caption band at row 175. Clear rows 170..199 before captioning.
+        _surface.fillRect(Common::Rect(0, 170, 320, 200), 0);
+
+        // sequence_action_0b initializes DS:11F8 to 0x114 (c706f8111401 at
+        // CS0170:1A49 in the floppy executable), increments once before each
+        // caption, and draws at (10, 0x9d) within the framebuffer at y_offset
+        // 0x12 — screen y 175. COMMAND1 0-based indices 0x0114..0x0123
+        // (DS:11F8 IDs 0x0115..0x0124), confirmed by DES-271 captures
+        // (manifest scene.command_index_zero_based 0114..0123).
+        const Common::String caption = _panel.commandString((uint16)(0x114 + scene));
+        // Original ending_draw_caption uses GENERIC.HSQ glyphs (index = ASCII - 0x20)
+        // at (10, 0x9d) in the framebuffer (screen y 175), advancing sprite.width + 2.
+        // GENERIC.HSQ palette entries 240..253 are the original gold gradient.
+        Common::Array<byte> genericData;
+        if (!caption.empty() && _resources.load("GENERIC.HSQ", genericData)) {
+            Sprite generic(_system, genericData);
+            generic.setPalette();
+            // Original gold uses VGA promotion (v << 2) | (v >> 4), while
+            // Sprite::setPalette uses (v << 2). Expand entries 240..253.
+            byte pal[256 * 3];
+            _system->getPaletteManager()->grabPalette(pal, 0, 256);
+            for (int i = 240; i <= 253; ++i) {
+                for (int c = 0; c < 3; ++c) {
+                    const byte v = pal[i * 3 + c] >> 2;
+                    pal[i * 3 + c] = (byte)((v << 2) | (v >> 4));
+                }
+            }
+            _system->getPaletteManager()->setPalette(pal + 240 * 3, 240, 14);
+            int x = 10;
+            for (const char *p = caption.c_str(); *p; ++p) {
+                const unsigned char ch = (unsigned char)*p;
+                const uint16 glyph = (ch >= 0x20) ? (uint16)(ch - 0x20) : 0;
+                if (glyph < generic.frameCount()) {
+                    uint16 gw = 0, gh = 0;
+                    generic.frameSize(glyph, gw, gh);
+                    generic.drawFrame(glyph, _surface.surfacePtr(), x, 175);
+                    x += (gw ? gw : 1) + 2;
+                } else {
+                    x += 8;
+                }
+            }
+        }
+        debugOverlay(*_surface.surfacePtr());
+        if (playSlides && !skipHold)
+            fade(true);
+        _system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
+        _system->updateScreen();
+        dumpScreen(_system, Common::String::format("ending-slide-%02d", scene).c_str());
+        // wait_interruptable(0x258) holds each still for 600 PIT ticks.
+        // The floppy timer is about 200.3 Hz, so this is approximately 3 s.
+        if (playSlides && !skipHold) {
+            const uint32 until = _system->getMillis() + 3000;
+            while ((int32)(until - _system->getMillis()) > 0 && !advanceRequested())
+                _system->delayMillis(5);
+        }
+    }
+    // Keep the final Paul + Chani "Coming soon" card on screen until exit;
+    // drawEnding() would replace it with the black cast list.
+    // Source sequence_action_0b ends by waiting for a key, then exiting to
+    // DOS. Keep capture/harness runs non-blocking and non-quitting.
+    if (!fastCapture() && !ConfMan.hasKey("dune_speedrun")) {
+        Common::Event event;
+        while (!_quitRequested) {
+            while (pollDuneEvent(_system, event)) {
+                if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER)
+                    _quitRequested = true;
+                else if (event.type == Common::EVENT_KEYDOWN || event.type == Common::EVENT_LBUTTONDOWN)
+                    _quitRequested = true;
+            }
+            if (_quitRequested)
+                break;
+            _system->updateScreen();
+            _system->delayMillis(10);
+        }
+        _quitRequested = true;
+    }
+}
+
 void GameScreen::endingCreditsSlideshow() {
+    if (_world.floppy() && !_world.amiga()) {
+        floppyEndingCreditsSlideshow();
+        return;
+    }
+
     // Port of dune-re ending.rs sequence_action_0b_ending_credits: clear the
     // scene state, play WORMSUIT, compose the 16 end scenes, caption each,
     // then leave the cast list on screen. Backdrops come from the normal room
@@ -1667,6 +2099,16 @@ void GameScreen::storySetup(const Common::String &what) {
 	}
 	if (what == "endless-play" || what == "final-battle") {
 		endlessPlaySetup(what == "endless-play");
+		return;
+	}
+	if (what == "ending-credits") {
+		// Assisted fixture (DES-252): set up final-battle state, then enter the
+		// Baron's hall so endingCreditsSlideshow emits all 16 slides.
+		// forceRules(true) overrides skipsRules() so showRoom(2) sets the pending
+		// scene; dune_scene_scripts must also be set to let maybeStartScene run it.
+		endlessPlaySetup(false);
+		forceRules(true);
+		showRoom(2);
 		return;
 	}
 	if (what == "water-of-life") {
