@@ -28,7 +28,7 @@ set -u
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
-local_root="${DUNE_LOCAL_BUILD_ROOT:-/tmp/dune-scummvm-native-build}"
+local_root="${DUNE_LOCAL_BUILD_ROOT:-$HOME/Library/Caches/Cryogenic-local/dune-scummvm-native-build}"
 base="${DUNE_RUN_ROOT:-$local_root/sdl-run}"
 status=0
 
@@ -45,18 +45,21 @@ for release in floppy cd; do
 		rm -rf "$run_root"
 		mkdir -p "$run_root/saves" "$run_root/frames"
 		config="$run_root/raids.ini"
-		printf '[scummvm]\nsavepath=%s\ndune_input=%s\ndune_checkpoint_dir=%s\ndune_floppy_start=99\ndune_no_music=1\ndune_story_setup=%s\n' \
+		printf '[scummvm]\nsavepath=%s\ndune_input=%s\ndune_checkpoint_dir=%s\ndune_floppy_start=99\ndune_intro_start=99\ndune_no_music=1\ndune_story_setup=%s\n' \
 			"$run_root/saves" "$repo_root/tests/regression/hemispheres.script" "$run_root/frames" "$setup" > "$config"
+		run_status=0
 		(cd "$local_root/build-sdl-dune" && SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy perl -e 'alarm 120; exec @ARGV' -- \
-			./scummvm -c "$config" --gfx-mode=surface --no-fullscreen --path="$data" dune >/dev/null 2>&1)
-		python3 - "$run_root/saves/dune-ios.log" "$release" "$setup" <<'EOF' || status=1
+			./scummvm -c "$config" --gfx-mode=surface --no-fullscreen --path="$data" dune >/dev/null 2>&1) || run_status=$?
+		python3 - "$run_root/saves/dune-ios.log" "$release" "$setup" "$run_status" <<'EOF' || status=1
 import re, sys
-path, release, setup = sys.argv[1:4]
+path, release, setup, run_status = sys.argv[1:]
 try:
     log = open(path, errors="replace").read()
 except OSError:
     print(f"FAIL raids {setup} {release}: no log"); sys.exit(1)
 problems = []
+if run_status != "0":
+    problems.append(f"engine exited {run_status}")
 if setup in ("raid", "raid-paul"):
     if len(re.findall(r"Raid: Harkonnen troop \d+ from place \d+ attacks sietch", log)) != 2:
         problems.append("not two raiders")

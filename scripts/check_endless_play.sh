@@ -23,7 +23,7 @@ set -u
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
-local_root="${DUNE_LOCAL_BUILD_ROOT:-${TMPDIR:-/tmp}/dune-scummvm-native-build}"
+local_root="${DUNE_LOCAL_BUILD_ROOT:-$HOME/Library/Caches/Cryogenic-local/dune-scummvm-native-build}"
 status=0
 
 SDL_AUDIODRIVER=dummy DUNE_DATA="${DUNE_DATA_FLOPPY:-$repo_root/data/floppy}" "$script_dir/test_dune_scummvm_sdl.sh" build >/dev/null 2>&1 || {
@@ -43,7 +43,7 @@ for release in ${DUNE_ENDING_RELEASES:-floppy cd}; do
 	rm -rf "$run_root"
 	mkdir -p "$run_root/saves" "$run_root/frames"
 	config="$run_root/final-battle.ini"
-	printf '[scummvm]\nsavepath=%s\ndune_input=%s\ndune_checkpoint_dir=%s\ndune_floppy_start=99\ndune_no_music=1\ndune_rng_seed=1\ndune_story_setup=final-battle\n' \
+	printf '[scummvm]\nsavepath=%s\ndune_input=%s\ndune_checkpoint_dir=%s\ndune_floppy_start=99\ndune_intro_start=99\ndune_no_music=1\ndune_rng_seed=1\ndune_story_setup=final-battle\n' \
 		"$run_root/saves" "$repo_root/tests/regression/endless-play.script" "$run_root/frames" > "$config"
 	run_status=0
 	(cd "$local_root/build-sdl-dune" && SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy perl -e 'alarm 120; exec @ARGV' -- \
@@ -76,7 +76,7 @@ for release in ${DUNE_ENDING_RELEASES:-floppy cd}; do
 	rm -rf "$run_root"
 	mkdir -p "$run_root/saves" "$run_root/frames"
 	config="$run_root/endless-play.ini"
-	printf '[scummvm]\nsavepath=%s\ndune_input=%s\ndune_checkpoint_dir=%s\ndune_floppy_start=99\ndune_no_music=1\ndune_rng_seed=1\ndune_story_setup=endless-play\n' \
+	printf '[scummvm]\nsavepath=%s\ndune_input=%s\ndune_checkpoint_dir=%s\ndune_floppy_start=99\ndune_intro_start=99\ndune_no_music=1\ndune_rng_seed=1\ndune_story_setup=endless-play\n' \
 		"$run_root/saves" "$repo_root/tests/regression/endless-play.script" "$run_root/frames" > "$config"
 	run_status=0
 	(cd "$local_root/build-sdl-dune" && SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy perl -e 'alarm 120; exec @ARGV' -- \
