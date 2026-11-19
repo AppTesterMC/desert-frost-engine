@@ -270,15 +270,14 @@ bool GameScreen::speedrunFight(uint place) {
 		saveSlot(1);
 	for (uint attempt = 0; attempt < (uninterrupted ? 1u : 32u); ++attempt) {
 		for (uint round = 0; round < 8 && _battle && !_ending; ++round) {
-			speedrunPause(900);
-			speedrunActionPause(true);
-			if (_quitRequested)
+			// A chief can greet Paul as he enters a besieged fort.
+			if (inConversation())
+				speedrunConverse();
+			if (!speedrunClickRow(kRowMassiveAttack, -1, "selected MASSIVE ATTACK")) {
+				if (!_quitRequested)
+					speedrunLog(Common::String::format("MASSIVE ATTACK unavailable at fort %u", place));
 				return false;
-			_world.massiveAttack(place);
-			battleCheck();
-			speedrunActionPause(false);
-			if (_quitRequested)
-				return false;
+			}
 			if (_battle && !_ending && _world.captainTroop(place)) {
 				// Items 34-35, 39: the captain in room 3 tells of another fort.
 				const uint before = _world.location(place).hidden();
