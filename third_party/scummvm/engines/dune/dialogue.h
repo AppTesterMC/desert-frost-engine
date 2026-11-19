@@ -177,6 +177,7 @@ public:
 	 */
 	void start(uint character, uint list = 0, byte mask = 0x80, bool oneList = false, bool single = false);
 	bool active() const { return _active; }
+	bool endedRoomGreeting() const { return _single && _list == 4 && _mask == 0x80 && _answered && !_endAfter; }
 	uint character() const { return _character; }
 	/** The next page of text; false when the conversation is over. */
 	bool next(Common::String &page, bool &newSentence);

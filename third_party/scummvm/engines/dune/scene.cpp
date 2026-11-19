@@ -4345,6 +4345,13 @@ void GameScreen::advanceConversation() {
 			_wakeResume.valid = false;
 			more = _conversation->next(page, newSentence);
 		}
+		if (!more && !_talkEnded && !_pendingScene && _talkKind == kTalkNormal &&
+				_conversation->endedRoomGreeting()) {
+			// CD 35a6 installs the speaker's normal dialogue after their room
+			// greeting. Duncan's shipment acknowledgement is in that dialogue.
+			_conversation->start(MIN<uint>(_talkWho, World::kFremenChief));
+			more = _conversation->next(page, newSentence);
+		}
 		if (!more) {
 			if (!_talkEnded && _conversation->paused()) {
 				// Events 4 / 5: the bargaining menu (ds:1ffe) under the room.

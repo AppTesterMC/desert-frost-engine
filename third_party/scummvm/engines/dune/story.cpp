@@ -415,6 +415,13 @@ bool World::shipmentReady() const {
 
 void World::shipSpice(uint16 amount) {
 	// sub_12566 (the animation is the host's).
+	// 2566 calls 40e6 on Duncan's record before debiting the stock.
+	const uint duncan = 3;
+	if ((_state.b(kCharacterTable + duncan * kCharacterSize + 15) & 0x42) == 0x42) {
+		settleCharacter(duncan);
+		setTravelling(duncan, false);
+		removeCompanion(duncan);
+	}
 	const uint16 stock = _state.w(kSpiceStock);
 	amount = MIN(amount, stock);
 	_state.setW(kSpiceStock, (uint16)(stock - amount));
