@@ -31,6 +31,7 @@
  */
 
 #include "common/config-manager.h"
+#include "common/ptr.h"
 #include "common/system.h"
 
 #include "graphics/paletteman.h"
@@ -1001,7 +1002,36 @@ void GameScreen::floppyEndingCreditsSlideshow() {
         // Draw HSQ portrait sprite for floppy ending. dune-re intro_setup_talking_head
         // places each head at (0,0); scene 15 uses mirror_dual_head_setup:
         // Chani y+15, Paul x+45 (0x2d).
-        if (scene < 15 && kEndingHeads[scene]) {
+        // The original intro head task picks lively animations for named
+        // actors every time a group ends. Its 120-tick idle budget exceeds
+        // this cast card's 600-PIT-tick hold (one animation tick per 16 PIT).
+        Common::ScopedPtr<Sprite> idleHead;
+        Common::Array<byte> backdrop;
+        uint idleAnimation = 0, idleFrame = 0;
+        Graphics::Surface picture = _surface.surfacePtr()->getSubArea(Common::Rect(0, kFbOffset, 320, 170));
+        auto chooseAnimation = [&]() {
+            const uint count = idleHead->animationCount();
+            // The last table entry contains speech shapes, never an idle group.
+            idleAnimation = MIN<uint>(_world.randMasked(6) >> 1, count - 2);
+            idleFrame = 0;
+        };
+        if (playSlides && scene >= 2 && scene <= 13) {
+            Common::Array<byte> data;
+            if (_resources.load(kEndingHeads[scene], data)) {
+                idleHead.reset(new Sprite(_system, data));
+                if (idleHead->animationCount() < 2) {
+                    idleHead.reset();
+                } else {
+                    backdrop.resize(picture.h * picture.pitch);
+                    memcpy(backdrop.data(), picture.getPixels(), backdrop.size());
+                    idleHead->setPalette();
+                    chooseAnimation();
+                }
+            }
+        }
+        if (idleHead) {
+            idleHead->drawAnimationFrame(idleAnimation, idleFrame, &picture, kEndingHeadDx[scene], 0);
+        } else if (scene < 15 && kEndingHeads[scene]) {
             drawEndingHead(kEndingHeads[scene], kEndingHeadDx[scene], kFbOffset);
         } else if (scene == 15) {
             drawEndingHead("CHAN.HSQ", 0, 15 + kFbOffset);
@@ -1069,9 +1099,25 @@ void GameScreen::floppyEndingCreditsSlideshow() {
         // wait_interruptable(0x258) holds each still for 600 PIT ticks.
         // The floppy timer is about 200.3 Hz, so this is approximately 3 s.
         if (playSlides && !skipHold) {
-            const uint32 until = _system->getMillis() + 3000;
-            while ((int32)(until - _system->getMillis()) > 0 && !advanceRequested())
+            const uint32 start = _system->getMillis();
+            uint32 nextTick = 80;
+            while (!advanceRequested()) {
+                const uint32 elapsed = _system->getMillis() - start;
+                if (elapsed >= 3000)
+                    break;
+                if (idleHead && elapsed >= nextTick) {
+                    do {
+                        if (++idleFrame >= idleHead->animationFrameCount(idleAnimation))
+                            chooseAnimation();
+                        nextTick += 80;
+                    } while (elapsed >= nextTick);
+                    memcpy(picture.getPixels(), backdrop.data(), backdrop.size());
+                    idleHead->drawAnimationFrame(idleAnimation, idleFrame, &picture, kEndingHeadDx[scene], 0);
+                    _system->copyRectToScreen(picture.getPixels(), picture.pitch, 0, kFbOffset, picture.w, picture.h);
+                    _system->updateScreen();
+                }
                 _system->delayMillis(5);
+            }
         }
     }
     // Keep the final Paul + Chani "Coming soon" card on screen until exit;
