@@ -339,9 +339,9 @@ void FloppyIntro::drawDuneField(Sprite &dunes, Sprite &dunes2, Graphics::Surface
 		drawScaled(dunes, 4, view, 243, 77, 20);
 		drawScaled(dunes, 4, view, 83, 77, 10);
 		drawScaled(dunes, 2, view, 62, 78, 15);
-		dunes2.drawFrame(16, &view, 160, 12);
-		dunes.drawFrame(0, &view, 210, 72);
-		dunes.drawFrame(4, &view, 10, 76);
+		dunes2.drawFrame(16, &view, 156, 12);
+		dunes.drawFrame(0, &view, 206, 72);
+		dunes.drawFrame(4, &view, 6, 76);
 	} else {
 		drawScaled(dunes, 0, view, 62, 77, 10);
 		drawScaled(dunes, 6, view, 174, 77, 20);
@@ -529,7 +529,7 @@ void FloppyIntro::desertWalkScene(const char *dumpName, uint skyPalette, uint32 
 	runScene(dumpName, duration, in, inMillis, out, outMillis, duration / 2, [&](uint32 elapsed, Graphics::Surface &view) {
 		(void)elapsed;
 		drawSkyView(view, kSkyNarrow, 320, skyPalette);
-		fillView(view, Common::Rect(0, 76, 320, 152), kDesertFloor);
+		fillView(view, Common::Rect(0, 77, 320, 152), 0xbf);
 		drawDuneField(dunes, dunes2, view, false);
 		if (subtitle)
 			drawSubtitle(subtitle);
