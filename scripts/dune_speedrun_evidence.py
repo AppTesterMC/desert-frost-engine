@@ -33,7 +33,7 @@ def _player_ui_categories(declarations):
     return cats
 
 def assess(text, part="full", process_exit=0, allow_order_bypasses=False,
-           require_player_ui=False, require_uninterrupted=False):
+           require_player_ui=False, require_uninterrupted=False, require_no_rewinds=False):
     lines = text.splitlines()
     speedrun = [line for line in lines if line.startswith("Speedrun:")]
     fallback = [line for line in speedrun
@@ -64,7 +64,10 @@ def assess(text, part="full", process_exit=0, allow_order_bypasses=False,
     reload_count = len(reload_lines)
     slot0_reload_count = len(slot0_reload_lines)
     interrupted = reload_count > 0
+    save_loads = sum(bool(re.search(r"^Saves:\s*slot\s+\d+\s+loaded\b", line, re.I)) for line in lines)
     failures = []
+    if require_no_rewinds and save_loads:
+        failures.append(f"{save_loads} saved-game load(s) during a no-rewinds run")
     if process_exit:
         failures.append(f"engine exited with status {process_exit}")
     if not lines:
@@ -106,6 +109,7 @@ def assess(text, part="full", process_exit=0, allow_order_bypasses=False,
         "player_ui_categories": sorted(player_ui_categories),
         "required_player_ui_categories": sorted(REQUIRED_PLAYER_UI_CATEGORIES),
         "player_ui_missing_categories": sorted(REQUIRED_PLAYER_UI_CATEGORIES - player_ui_categories),
+        "total_saved_game_loads": save_loads,
         "reload_count": reload_count,
         "reloads": reload_count,
         "reload_retries": reload_count,
@@ -158,6 +162,8 @@ def main():
                         help="engine-logic investigation only; keeps assisted label and bypass count")
     parser.add_argument("--require-player-ui", action="store_true",
                         help="fails until a complete player-input coverage contract exists")
+    parser.add_argument("--require-no-rewinds", action="store_true",
+                        help="fail if any save slot was loaded during this run")
     parser.add_argument("--require-uninterrupted", action="store_true",
                         help="fails unless the run had no save/reload retries and complete player-UI coverage")
     parser.add_argument("--uninterrupted", action="store_true",
@@ -167,7 +173,7 @@ def main():
     raw = args.log.read_bytes() if args.log.is_file() else b""
     result = assess(raw.decode("utf-8", errors="replace"), args.part,
                     args.process_exit, args.allow_order_bypasses, args.require_player_ui,
-                    args.require_uninterrupted or args.uninterrupted)
+                    args.require_uninterrupted or args.uninterrupted, args.require_no_rewinds)
     result.update(release=args.release, seed=args.seed,
                   log_sha256=hashlib.sha256(raw).hexdigest() if raw else None)
     if args.binary:

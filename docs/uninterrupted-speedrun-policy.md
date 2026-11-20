@@ -37,3 +37,11 @@ Evidence:
 - Platforms: DOS floppy (18 forts), DOS CD (13 forts), Amiga (18 forts).
 - Artifacts: notes/speedrun/uninterrupted-evidence/seed30/{floppy,cd,amiga}/evidence.json
 - WS1 PASS captured in notes/speedrun/uninterrupted-evidence/seed30/ws1-pass-lines.txt
+
+## Run a fresh floppy campaign without reloading
+
+```sh
+DUNE_SPEEDRUN_RELEASES=floppy scripts/check_speedrun.sh full --no-rewinds 30
+```
+
+The bot gathers a larger force before attacking and accepts the outcome of each battle. The checker creates a new save directory and rejects a log containing a load from any slot. A loss is a valid game outcome and fails the completion check. The resulting `evidence.json` includes the seed, the executable and log hashes, and `total_saved_game_loads`. The bot still uses engine calls for some orders and movement. A controls-only playthrough requires separate input evidence.

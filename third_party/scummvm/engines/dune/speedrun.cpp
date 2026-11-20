@@ -262,7 +262,8 @@ bool GameScreen::speedrunFight(uint place) {
 	// kills Paul there, and the route reloads the log taken before the
 	// attack; the battle rolls are not saved, so the reload rerolls them.
 	// The caller saved log 1 before the troops were ordered in.
-	const bool uninterrupted = ConfMan.hasKey("dune_speedrun_uninterrupted") && ConfMan.getBool("dune_speedrun_uninterrupted");
+	const bool uninterrupted = (ConfMan.hasKey("dune_speedrun_uninterrupted") && ConfMan.getBool("dune_speedrun_uninterrupted")) ||
+			(ConfMan.hasKey("dune_speedrun_no_rewinds") && ConfMan.getBool("dune_speedrun_no_rewinds"));
 	speedrunRideWormTo((int)place);
 	if (_ending || !_battle)
 		return !_ending && _world.friendlyPlace(place);
@@ -323,6 +324,7 @@ void GameScreen::speedrunEquip(uint place) {
 }
 
 void GameScreen::speedrunCampaign() {
+	const bool noRewinds = ConfMan.hasKey("dune_speedrun_no_rewinds") && ConfMan.getBool("dune_speedrun_no_rewinds");
 	// Route items 30-54: worms, espionage, the forts one by one, the palace.
 	if (_state.b(GameState::kPhase) < 0x4f) {
 		speedrunLog("BLOCKED CALL A WORM is greyed (phase below 0x4f)");
@@ -692,11 +694,12 @@ void GameScreen::speedrunCampaign() {
 				// MASSIVE ATTACK with reloads wins from 70 % of the fort's
 				// strength (balance about 73, 28 % a roll, 32 reloads).
 				// A fort its raiders left empty (CD 1f64) still needs one troop to walk in.
-				for (uint k = 0; k < army.size() && (group.empty() || sum * 10 < bestH * 9); ++k) {
+				const uint desiredStrength = bestH * (noRewinds ? 30 : 9);
+				for (uint k = 0; k < army.size() && (group.empty() || sum * 10 < desiredStrength); ++k) {
 					group.push_back(army[k]);
 					sum += _world.troopStrength(army[k], true);
 				}
-				if (sum * 10 < bestH * 7) {
+				if (sum * 10 < bestH * (noRewinds ? 25u : 7u)) {
 					speedrunLog(Common::String::format("weakest fort %d too strong for now (Harkonnen %u, army %u)", target, bestH, sum));
 					target = -1;
 					group.clear();
@@ -748,7 +751,8 @@ void GameScreen::speedrunCampaign() {
 				// Harkonnen blow is shared among the troops at his place).
 				if (_world.currentLocation() != (uint)stage)
 					speedrunRideWormTo(stage);
-				saveSlot(0); // before the troops go in: a failed attack comes back here
+				if (!noRewinds)
+					saveSlot(0); // before the troops go in: a failed attack comes back here
 				for (uint k = 0; k < group.size(); ++k)
 					_world.issueMoveOrder(group[k], (uint)target);
 				for (uint p = 0; p < 16 && speedrunAlive(); ++p) {
@@ -768,6 +772,10 @@ void GameScreen::speedrunCampaign() {
 					speedrunLog(Common::String::format("step 33 OK: fort %d taken (%u so far)", target, won));
 					speedrunEquip((uint)target);
 				} else {
+					if (noRewinds) {
+						speedrunLog(Common::String::format("BLOCKED attack at fort %d failed on this timeline", target));
+						return;
+					}
 					speedrunLog(Common::String::format("fort %d still holds after the reloads", target));
 					_ending = false;
 					loadSlot(0); // back to before the troops went in

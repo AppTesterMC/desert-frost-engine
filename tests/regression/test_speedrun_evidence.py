@@ -130,6 +130,13 @@ class EvidenceTests(unittest.TestCase):
         self.assertTrue(result["player_ui_completion_verified"])
 
 
+    def test_no_rewinds_checks_all_slots_and_allows_saving(self):
+        self.assertTrue(evidence.assess("Saves: slot 0 saved\n" + END, require_no_rewinds=True)["passed"])
+        for slot in (0, 1, 2, 3):
+            result = evidence.assess(f"Saves: slot {slot} loaded, time 32\n" + END, require_no_rewinds=True)
+            self.assertFalse(result["passed"])
+            self.assertEqual(result["total_saved_game_loads"], 1)
+
     def test_battle_save_reload_retry_is_interrupted(self):
         result = evidence.assess('Story: the ending "Winning a battle..."\nSaves: slot 1 loaded\n' + END)
         self.assertTrue(result["passed"])

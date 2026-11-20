@@ -138,6 +138,9 @@ elif [ "${1:-}" = "speedrun" ]; then
 	fi
 	printf '[scummvm]\nsavepath=%s\ndune_speedrun=%s\ndune_rng_seed=%s\ndune_no_music=1\ndune_floppy_start=99\ndune_intro_start=99\ndune_skip_cd_story=1\n%s%s' \
 		"$run_root/saves" "$part" "$seed" "$player_ui_line" "$uninterrupted_line" > "$config"
+	if [ "${DUNE_SPEEDRUN_NO_REWINDS:-0}" = 1 ]; then
+		printf 'dune_speedrun_no_rewinds=1\n' >> "$config"
+	fi
 	log="$run_root/speedrun-$part-stdout.log"
 	run_status=0
 	SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \

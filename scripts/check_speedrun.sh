@@ -6,7 +6,8 @@
 # Battle losses may reload previously written saves; this is a completion
 # regression, not proof of a single uninterrupted playthrough.
 #
-# Usage: scripts/check_speedrun.sh [campaign|full] [seed...]
+# Usage: scripts/check_speedrun.sh [campaign|full] [--no-rewinds] [seed...]
+# --no-rewinds commits to the outcome of every attack, including the approach.
 #   campaign starts after Leto's death (only its two declared setup FORCED
 #   markers are allowed; later forced progression fails)
 #   full starts a new game and rejects every FORCED shortcut
@@ -23,11 +24,15 @@ set -u
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
-local_root="${DUNE_LOCAL_BUILD_ROOT:-/tmp/dune-scummvm-native-build}"
+local_root="${DUNE_LOCAL_BUILD_ROOT:-$HOME/Library/Caches/Cryogenic-local/dune-scummvm-native-build}"
 run_base="${DUNE_RUN_ROOT:-$local_root/sdl-run}/speedrun"
 part=${1:-campaign}
 [ "$#" -eq 0 ] || shift
 case "$part" in campaign|full) ;; *) echo "FAIL speedrun: expected campaign or full"; exit 2 ;; esac
+if [ "${1:-}" = --no-rewinds ]; then
+	export DUNE_SPEEDRUN_NO_REWINDS=1
+	shift
+fi
 # Optional uninterrupted mode flag.
 uninterrupted_mode=0
 case "${1:-}" in --uninterrupted|--require-uninterrupted|uninterrupted)
@@ -93,6 +98,7 @@ for seed in $seeds; do
 		[ "${DUNE_SPEEDRUN_ALLOW_ORDER_BYPASSES:-0}" != 1 ] || set -- "$@" --allow-order-bypasses
 		[ "${DUNE_SPEEDRUN_REQUIRE_PLAYER_UI:-0}" != 1 ] || set -- "$@" --require-player-ui
 		[ "$uninterrupted_mode" != 1 ] || set -- "$@" --require-uninterrupted
+		[ "${DUNE_SPEEDRUN_NO_REWINDS:-0}" != 1 ] || set -- "$@" --require-no-rewinds
 		python3 "$@" || status=1
 		if [ -f "$run/evidence.json" ]; then
 			cls=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('classification','unknown'))" "$run/evidence.json")
