@@ -131,24 +131,22 @@ uint depthScale(uint z) {
 	return (q << 8) | ((65536u * r / (75 * z)) >> 8);
 }
 
-} // namespace
-
-uint16 GameScreen::landRandom() {
-	_landSeed = (uint16)(_landSeed * 0xe56d + 1);
-	return _landSeed;
+uint16 landRandom(uint16 &seed) {
+	seed = (uint16)(seed * 0xe56d + 1);
+	return seed;
 }
 
-uint GameScreen::landPick(byte terrain) {
+uint landPick(uint16 &seed, byte terrain) {
 	// The pickers (floppy 5C20): by the terrain's stage bits and height.
 	const uint s = terrain & 0x30, t = terrain & 0x0f;
-	uint h = landRandom() >> 8;
+	uint h = landRandom(seed) >> 8;
 	if (s != 0x10) {
 		if (t <= 8)
 			return h & 7;
 		if (t <= 10) {
 			uint v = h & 15;
 			while (v > 11) {
-				h = landRandom() >> 8;
+				h = landRandom(seed) >> 8;
 				v = h & 15;
 			}
 			return v;
@@ -159,8 +157,12 @@ uint GameScreen::landPick(byte terrain) {
 		return (h & 0x80) ? (h & 7) : (h & 3) + 12;
 	if (t <= 10)
 		return h & 15;
-	return (h & 3) + 8 + ((_landSeed & 0x8000) ? 0 : 4);
+	return (h & 3) + 8 + ((seed & 0x8000) ? 0 : 4);
 }
+
+void drawLandObject(Graphics::Surface &view, const Common::Array<byte> &sheet, uint sprite, uint z, int x, uint height);
+
+} // namespace
 
 void GameScreen::drawLandscape(Graphics::Surface &view, uint16 longitude, int16 latitude, byte fine, uint16 key,
 		bool inPlace) {
@@ -207,18 +209,18 @@ void GameScreen::drawLandscape(Graphics::Surface &view, uint16 longitude, int16 
 	uint bl = (byte)latitude, bh = inPlace ? 0 : fine;
 	uint pending = 0;
 	for (uint z = 1; z < kRows;) {
-		_landSeed = (uint16)((((bh << 8) | bl) ^ key) + 0x301);
+		uint16 seed = (uint16)((((bh << 8) | bl) ^ key) + 0x301);
 		// emit_row (floppy 5982)
-		landRandom();
-		const int16 *xs = kXSets[((_landSeed >> 8) & 0x38) >> 3];
+		landRandom(seed);
+		const int16 *xs = kXSets[((seed >> 8) & 0x38) >> 3];
 		if (pending) {
 			emit(z, buildingX, pending);
 			pending = 0;
 		} else {
 			for (uint k = 0; k < 4; ++k) {
-				emit(z, xs[k], landPick(terrain));
+				emit(z, xs[k], landPick(seed, terrain));
 				if (rock)
-					emit(z, -xs[k], ((_landSeed >> 8) & 3) + 0x0c);
+					emit(z, -xs[k], ((seed >> 8) & 3) + 0x0c);
 			}
 		}
 		++z;
@@ -239,7 +241,9 @@ void GameScreen::drawLandscape(Graphics::Surface &view, uint16 longitude, int16 
 	}
 }
 
-void GameScreen::drawLandObject(Graphics::Surface &view, const Common::Array<byte> &sheet, uint sprite, uint z, int x,
+namespace {
+
+void drawLandObject(Graphics::Surface &view, const Common::Array<byte> &sheet, uint sprite, uint z, int x,
 		uint height) {
 	// project_and_draw (floppy 5A8D) and the scaled blit (5B00): the
 	// baseline 77 + H T[z] / 256, the left edge 160 + x T[z] / 256, the
@@ -257,13 +261,19 @@ void GameScreen::drawLandObject(Graphics::Surface &view, const Common::Array<byt
 	if (!decodeLandFrame(sheet, sprite, f))
 		return;
 	const int width = 256 * ((f.w + 3) & 0x1fc) / (int)s, frameHeight = 256 * f.h / (int)s;
+	// 5B5A advances by whole source bytes for a left-clipped sprite and
+	// resets the scaler fraction at the screen edge (two pixels per byte).
+	const int skip = MAX(0, -xl);
+	if (skip >= width || xl >= view.w)
+		return;
+	const int sourceLeft = (skip * (int)s / 256) & ~1;
 	const int top = MAX(0, yb - 256 * f.anchor / (int)s);
 	for (int y = 0; y < frameHeight; ++y) {
 		const int sy = top + y, srcY = y * (int)s / 256;
 		if (sy < 0 || sy >= 152 || sy >= view.h || srcY >= f.h)
 			continue;
-		for (int dx = 0; dx < width; ++dx) {
-			const int sx = xl + dx, srcX = dx * (int)s / 256;
+		for (int dx = skip; dx < width; ++dx) {
+			const int sx = xl + dx, srcX = sourceLeft + (dx - skip) * (int)s / 256;
 			if (sx < 0 || sx >= 320 || srcX >= f.w)
 				continue;
 			const byte v = f.pixels[srcY * f.w + srcX];
@@ -273,68 +283,68 @@ void GameScreen::drawLandObject(Graphics::Surface &view, const Common::Array<byt
 	}
 }
 
+} // namespace
+
 // ---- The flight's landscape (floppy 57FA's flight branch, 54ED; notes/orni-flight-spec.md 6) ----
 
 namespace {
 enum {
-	kFlightHeight = 0x48, ///< ds:20ED in an ornithopter
-	kFlightFar = 40,      ///< new rows come in at z 40
 	kFlightWrap = 1300    ///< x wraps at +-1300 when the view pans
 };
 } // namespace
 
 void GameScreen::flightLandscapeReseed(uint16 longitude, int16 latitude) {
 	// 5BF2 / 5963: the seed and the sprite picker from the map 5 steps ahead.
-	_landSeed = (uint16)(longitude ^ (uint16)latitude);
+	const uint16 seed = longitude ^ (uint16)latitude;
 	const int cell = _world.mapCell(longitude, latitude);
 	const Common::Array<byte> &m = _world.map();
-	_flightTerrain = cell >= 0 && (uint)cell < m.size() ? m[cell] : 0;
+	const byte terrain = cell >= 0 && (uint)cell < m.size() ? m[cell] : 0;
+	_flightLandscape.reseed(seed, terrain);
 	if (dumpEveryMillis()) // test runs: the seeds, to compare with the original's ds:20E3
-		_log.line(Common::String::format("Land: seed %04x from %04x/%d, map byte %02x", _landSeed, longitude, latitude,
-				_flightTerrain));
+		_log.line(Common::String::format("Land: seed %04x from %04x/%d, map byte %02x", seed, longitude, latitude, terrain));
 }
 
-void GameScreen::flightLandscapeRow(uint z) {
+void FlightLandscape::addRow(uint z) {
 	// emit_row (floppy 5982) without the mirrored rocks: 4 objects.
-	landRandom();
-	const int16 *xs = kXSets[((_landSeed >> 8) & 0x38) >> 3];
+	landRandom(_seed);
+	const int16 *xs = kXSets[((_seed >> 8) & 0x38) >> 3];
 	for (uint k = 0; k < 4; ++k) {
-		LandObject o;
+		Object o;
 		o.z = (int16)z;
 		o.x = xs[k];
-		o.sprite = (uint16)landPick(_flightTerrain);
-		_flightObjects.push_back(o);
+		o.sprite = (uint16)landPick(_seed, _terrain);
+		_objects.push_back(o);
 	}
 }
 
 void GameScreen::flightLandscapeStart(const uint16 *longitudes, const int16 *latitudes) {
 	// The initial fill (57FA, [20ED] != 0x14): five groups of 8 rows, z 1-40,
 	// each seeded from the route one step further on.
-	_flightObjects.clear();
+	_flightLandscape.clear();
 	for (uint g = 0; g < 5; ++g) {
 		flightLandscapeReseed(longitudes[g], latitudes[g]);
 		for (uint z = 1 + 8 * g; z < 9 + 8 * g; ++z)
-			flightLandscapeRow(z);
+			_flightLandscape.addRow(z);
 	}
 	_flightFrameAt = _system->getMillis();
 }
 
-void GameScreen::flightLandscapeTick() {
+void FlightLandscape::advance() {
 	// One frame of 54ED: every object one step nearer (those at z 0 are
 	// gone), and a new row at z 40.
-	for (uint i = 0; i < _flightObjects.size();) {
-		if (--_flightObjects[i].z <= 0)
-			_flightObjects.remove_at(i);
+	for (uint i = 0; i < _objects.size();) {
+		if (--_objects[i].z <= 0)
+			_objects.remove_at(i);
 		else
 			++i;
 	}
-	flightLandscapeRow(kFlightFar);
+	addRow(kFarDepth);
 }
 
-void GameScreen::flightLandscapePan(int direction) {
+void FlightLandscape::pan(int direction) {
 	// 5A36 (left, -1) adds 4z to every object's x, 5A0B (right, +1) takes it off.
-	for (uint i = 0; i < _flightObjects.size(); ++i) {
-		LandObject &o = _flightObjects[i];
+	for (uint i = 0; i < _objects.size(); ++i) {
+		Object &o = _objects[i];
 		int x = o.x - direction * 4 * o.z;
 		if (direction < 0 && x > kFlightWrap)
 			x = -kFlightWrap;
@@ -344,12 +354,12 @@ void GameScreen::flightLandscapePan(int direction) {
 	}
 }
 
-void GameScreen::flightLandscapeDraw(Graphics::Surface &view, const Common::Array<byte> &dunes) {
+void FlightLandscape::draw(Graphics::Surface &view, const Common::Array<byte> &dunes, uint height) const {
 	// The background (3AF8: the sand from y 77), then every object, the far ones first.
 	view.fillRect(Common::Rect(0, kHorizon, 320, MIN<int>(152, view.h)), kGroundColour);
-	for (int i = (int)_flightObjects.size() - 1; i >= 0; --i) {
-		const LandObject &o = _flightObjects[i];
-		drawLandObject(view, dunes, o.sprite, (uint)o.z, o.x, _riding ? 0x1e : kFlightHeight); // ds:20ED: 0x1e on a worm (54b0)
+	for (int i = (int)_objects.size() - 1; i >= 0; --i) {
+		const Object &o = _objects[i];
+		drawLandObject(view, dunes, o.sprite, (uint)o.z, o.x, height);
 	}
 }
 

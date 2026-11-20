@@ -23,14 +23,12 @@
  */
 
 // Second half of the floppy intro, the credits and the narrated prologue.
-// Every scene here is a transcription of the matching swift-dune node
-// (codingstyle, reuse permitted; see CREDITS.md), checked against the
-// recording of the original. Comments name the Swift file a scene follows.
+// The scenes follow the original DOS routines and the matching swift-dune
+// nodes (codingstyle, reuse permitted; see CREDITS.md).
 
 #include "common/array.h"
 #include "common/config-manager.h"
 #include "common/events.h"
-#include "common/random.h"
 #include "common/rect.h"
 #include "common/str.h"
 #include "common/system.h"
@@ -598,74 +596,42 @@ void FloppyIntro::ornithopterScene(const char *dumpName) {
 	});
 }
 
-// Flight.swift: terrain sprites stream from the vanishing point towards the
-// viewer along thirteen rays, growing as they come.
+// The floppy intro (09AF) takes off from Carthag-Tuek. The five fixed
+// look-ahead positions from 5823 seed the same rows that gameplay draws.
+// 09DD emits another far row every 16 PIT ticks, without reseeding.
 void FloppyIntro::flightScene(const char *dumpName, uint32 duration) {
 	Common::Array<byte> dunesData;
 	if (_aborted || _quit || !_resources.load("DUNES.HSQ", dunesData))
 		return;
-	Sprite dunes(_system, dunesData);
 
-	struct Terrain {
-		uint16 sprite;
-		int16 endX, endY;
-		uint32 born;
+	static const struct {
+		uint16 longitude;
+		int16 latitude;
+		byte terrain;
+	} route[] = {
+		{ 0x25af, 10, 9 }, { 0x256c, 10, 9 }, { 0x2529, 9, 8 }, { 0x24e6, 8, 9 }, { 0x24a3, 8, 9 }
 	};
-	const int originX = 160, originY = 70, radius = 300;
-	Common::Array<Terrain> terrain;
-	Common::RandomSource rng("dune-flight");
-	// A fixed seed: the pattern is pseudo-random anyway, and the harness
-	// checkpoint must not depend on the clock.
-	rng.setSeed(0x44554e45);
-	uint32 nextSpawn = 0;
-	bool evenSet = true;
+	FlightLandscape landscape;
+	for (uint g = 0; g < ARRAYSIZE(route); ++g) {
+		landscape.reseed(route[g].longitude ^ (uint16)route[g].latitude, route[g].terrain);
+		for (uint z = 1 + 8 * g; z <= 8 + 8 * g; ++z)
+			landscape.addRow(z);
+	}
 
+	uint32 frame = 0;
 	runScene(dumpName, duration, kNoTransition, 0, kFade, 2000, 3500, [&](uint32 elapsed, Graphics::Surface &view) {
+		const uint32 target = (uint64)elapsed * 1193182 / (16 * 5957 * 1000);
+		while (frame < target) {
+			// The setup projects without moving. The first callback adds a
+			// row to that view, then the projector starts moving the rows.
+			if (!frame)
+				landscape.addRow(FlightLandscape::kFarDepth);
+			else
+				landscape.advance();
+			++frame;
+		}
 		drawSkyView(view, kSkyNarrow, 320, kSkyNight);
-		fillView(view, Common::Rect(0, 78, 320, 152), kDesertFloor);
-
-		while (elapsed >= nextSpawn) {
-			// Five new pieces per second on alternating rays.
-			uint rays[7];
-			uint rayCount = 0;
-			for (uint k = evenSet ? 0 : 1; k < 13; k += 2)
-				rays[rayCount++] = k;
-			evenSet = !evenSet;
-			for (uint i = 0; i < 5 && rayCount; ++i) {
-				const uint pick = rng.getRandomNumber(rayCount - 1);
-				const uint ray = rays[pick];
-				rays[pick] = rays[--rayCount];
-				const double angle = (ray == 12 ? 11.5 : (ray == 0 ? 0.5 : (double)ray)) * M_PI / 12.0;
-				Terrain piece;
-				piece.sprite = (uint16)rng.getRandomNumber(7);
-				piece.endX = (int16)(originX + radius * cos(angle));
-				piece.endY = (int16)(originY + radius * sin(angle));
-				piece.born = nextSpawn;
-				terrain.push_back(piece);
-			}
-			nextSpawn += 1000;
-		}
-
-		for (uint i = 0; i < terrain.size();) {
-			const Terrain &piece = terrain[i];
-			// Cubic timing: progress = (t^3) / 2 over a two-second life.
-			const double t = (elapsed - piece.born) / 1000.0;
-			const double progress = MIN(1.0, t * t * t / 2.0);
-			const int x = originX + (int)((piece.endX - originX) * progress);
-			const int y = originY + (int)((piece.endY - originY) * progress);
-			if (y >= 152 || progress >= 1.0) {
-				terrain.remove_at(i);
-				continue;
-			}
-			++i;
-			if (y < 78)
-				continue;
-			const int scalePercent = (int)(120.0 * (y - 80) / 72.0);
-			uint16 width, height;
-			if (scalePercent <= 0 || !dunes.frameSize(piece.sprite, width, height))
-				continue;
-			drawScaled(dunes, piece.sprite, view, x - width * scalePercent / 100, y, (uint)scalePercent);
-		}
+		landscape.draw(view, dunesData, FlightLandscape::kOrniHeight);
 	});
 }
 

@@ -71,6 +71,28 @@ bool drawDuneGlobe(OSystem *system, Graphics::Surface &surface, Resource &resour
  */
 bool drawGlobeSphere(OSystem *system, Graphics::Surface &surface, Resource &resources, uint16 rotation, int tilt);
 
+/** The original floppy landscape shared by the intro, the ornithopter and worm travel. */
+class FlightLandscape {
+public:
+	enum { kFarDepth = 40, kOrniHeight = 0x48, kWormHeight = 0x1e };
+	void clear() { _objects.clear(); }
+	void reseed(uint16 seed, byte terrain) { _seed = seed; _terrain = terrain; }
+	void addRow(uint depth);
+	void advance();
+	void pan(int direction);
+	void draw(Graphics::Surface &view, const Common::Array<byte> &dunes, uint height) const;
+
+private:
+	struct Object {
+		int16 z;
+		int16 x;
+		uint16 sprite;
+	};
+	Common::Array<Object> _objects;
+	uint16 _seed = 0;
+	byte _terrain = 0;
+};
+
 /**
  * What the player sees after the intro: the places of Arrakis walked room
  * by room through the control panel (the palace, the sietches, villages
@@ -334,32 +356,17 @@ private:
 	void drawWalkView();
 	/** The landscape of build_landscape / project_and_draw (floppy 57FA, 5A8D) into @p view. */
 	void drawLandscape(Graphics::Surface &view, uint16 longitude, int16 latitude, byte fine, uint16 key, bool inPlace);
-	uint16 landRandom();
-	uint landPick(byte terrain);
-	void drawLandObject(Graphics::Surface &view, const Common::Array<byte> &sheet, uint sprite, uint z, int x, uint height);
-	// The flight's landscape: the same objects, 4 a row, nearing one step a frame.
-	struct LandObject {
-		int16 z;
-		int16 x;
-		uint16 sprite;
-	};
-	Common::Array<LandObject> _flightObjects;
-	byte _flightTerrain = 0;
+	FlightLandscape _flightLandscape;
 	uint32 _flightFrameAt = 0;
 	uint _flightTicks = 0; ///< landscape frames since the last step (ds:4286)
 	void flightLandscapeStart(const uint16 *longitudes, const int16 *latitudes);
 	void flightLandscapeReseed(uint16 longitude, int16 latitude);
-	void flightLandscapeRow(uint z);
-	void flightLandscapeTick();
-	void flightLandscapePan(int direction);
-	void flightLandscapeDraw(Graphics::Surface &view, const Common::Array<byte> &dunes);
 	bool _walking = false;  ///< Paul walked out on foot (no ornithopter beside him)
 	uint16 _walkLng = 0;    ///< ds:4 in the desert: the longitude
 	int16 _walkLat = 0;     ///< ds:6 low byte: the latitude row
 	byte _walkFine = 0;     ///< ds:6 high byte: 1/256 of a row
 	byte _walkSteps = 0;    ///< the step counter (floppy ds:4291)
 	int _walkFrom = -1;     ///< last_location_ptr: the place walked out of
-	uint16 _landSeed = 0;   ///< ds:20E3
 	// ---- The orni cockpit's destination screen (cockpit.cpp, notes/orni-cockpit-spec.md) ----
 	void openCockpit(bool changing);
 	void drawCockpit();

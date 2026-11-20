@@ -2677,7 +2677,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 			// every second frame (ror [2937], 0x5555); its back every frame.
 			_wormToggle = !_wormToggle;
 			if (!_riding || _wormToggle)
-				flightLandscapeTick();
+				_flightLandscape.advance();
 			if (_riding)
 				wormAnimAdvance();
 			_flightFrameAt += kLandFrameMillis;
@@ -2692,7 +2692,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 			amigaSkyGradient(view);
 			amigaMirrorUiColours(_system);
 		} else {
-			flightLandscapeDraw(view, dunesData);
+			_flightLandscape.draw(view, dunesData, _riding ? FlightLandscape::kWormHeight : FlightLandscape::kOrniHeight);
 		}
 		if (_riding)
 			wormAnimFrame(view, false); // 5744: the worm's back over the landscape
@@ -2732,7 +2732,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 					(int16)(a.latitude + (b.latitude - a.latitude) / 3), destination);
 			startLandscape();
 			for (uint n = 0; n < 20; ++n)
-				flightLandscapeTick(); // the frame below shows the rows in flight
+				_flightLandscape.advance(); // the frame below shows the rows in flight
 			_flightTicks = 0;
 			Graphics::Surface view = _surface.surfacePtr()->getSubArea(Common::Rect(0, 0, 320, 152));
 			_surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
@@ -2746,7 +2746,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 				amigaMirrorUiColours(_system);
 			} else {
 				drawSky(_system, _resources, view, kSkyNarrow, 320, skyPalette(), true);
-				flightLandscapeDraw(view, dunesData);
+				_flightLandscape.draw(view, dunesData, _riding ? FlightLandscape::kWormHeight : FlightLandscape::kOrniHeight);
 			}
 			_map->drawMinimap(_surface, Common::Rect(202, 3, 318, 61), _panel);
 			uint16 commands[Panel::kCommandRows] = { _panel.findCommand("SKIP TO DESTINATION"), _panel.findCommand("CHANGE DESTINATION") };
@@ -2918,7 +2918,7 @@ uint GameScreen::flyToward(uint16 targetLongitude, int16 targetLatitude, int tar
 					heading = (byte)(heading + turning);
 					fixedHeading = true;
 					fraction = 0x80;
-					flightLandscapePan(turning < 0 ? -1 : 1); // the floppy pans the view 4 px a turn
+					_flightLandscape.pan(turning < 0 ? -1 : 1); // the floppy pans the view 4 px a turn
 					nextTurn = _system->getMillis() + kTurnRepeatMillis;
 				}
 				if (dunes || cdView)
