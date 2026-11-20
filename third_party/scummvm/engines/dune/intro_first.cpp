@@ -60,14 +60,29 @@ uint32 ramp256(uint32 elapsed, uint32 start, uint32 length) {
 	return MIN<uint32>(256, (elapsed - start) * 256 / length);
 }
 
-// Effects.swift zoom: the view shows the rectangle of the picture, magnified.
-void magnify(const Graphics::Surface &picture, Graphics::Surface &view, const Common::Rect &rect) {
+// DUNEPRG C74E selects CHAN's focus (88,63) and the VGA zoom kernels
+// 6,5,4,3,2,1. Crop origins are the focus minus each kernel's half extents,
+// clamped to the top and left edges of the 320x152 source.
+struct ChaniZoomStep {
+	int left, top, numerator, denominator;
+};
+
+const ChaniZoomStep kChaniZoomSteps[] = {
+	{ 48, 44, 4, 1 }, { 35, 38, 3, 1 }, { 8, 25, 2, 1 },
+	{ 0, 13, 3, 2 }, { 0, 6, 4, 3 }, { 0, 0, 8, 7 }
+};
+const uint32 kChaniZoomStepMillis = 30; // Six ticks at 200 Hz.
+
+void drawChaniZoom(const Graphics::Surface &picture, Graphics::Surface &view, uint step) {
 	for (int y = 0; y < view.h; ++y) {
-		const int sourceY = CLIP<int>(rect.top + y * rect.height() / view.h, 0, picture.h - 1);
-		for (int x = 0; x < view.w; ++x) {
-			const int sourceX = CLIP<int>(rect.left + x * rect.width() / view.w, 0, picture.w - 1);
-			*(byte *)view.getBasePtr(x, y) = *(const byte *)picture.getBasePtr(sourceX, sourceY);
-		}
+		// The VGA 3:2 kernel writes complete groups of three rows. Its
+		// final two rows therefore still show the preceding 2:1 frame.
+		const ChaniZoomStep &scale = kChaniZoomSteps[step == 3 && y >= 150 ? 2 : step];
+		const int sourceY = scale.top + (y * scale.denominator + scale.denominator - 1) / scale.numerator;
+		const byte *source = (const byte *)picture.getBasePtr(scale.left, sourceY);
+		byte *dest = (byte *)view.getBasePtr(0, y);
+		for (int x = 0; x < view.w; ++x)
+			dest[x] = source[x * scale.denominator / scale.numerator];
 	}
 }
 
@@ -304,9 +319,7 @@ void FloppyIntro::sunriseScene(const char *dumpName, uint32 duration) {
 	});
 }
 
-// Intro.swift: Chani under the day palette, seen through the rectangle
-// (48,48,80,38) magnified to the full view; one frozen frame, a hard cut in
-// and out. Recording: 1.75 s.
+// DUNEPRG's intro zoom sequence holds its first step for another 300 ticks.
 void FloppyIntro::chaniCloseUpScene(const char *dumpName) {
 	Common::Array<byte> backgroundData, characterData;
 	if (_aborted || _quit || !_resources.load("SUNRS.HSQ", backgroundData) || !_resources.load("CHAN.HSQ", characterData))
@@ -315,18 +328,17 @@ void FloppyIntro::chaniCloseUpScene(const char *dumpName) {
 	background.setPalette();
 	Graphics::ManagedSurface picture;
 	picture.create(320, kViewHeight, Graphics::PixelFormat::createFormatCLUT8());
-	runScene(dumpName, 1750, kNoTransition, 0, kNoTransition, 0, 900, [&](uint32, Graphics::Surface &view) {
+	runScene(dumpName, kChaniZoomStepMillis + 1500, kNoTransition, 0, kNoTransition, 0, 900, [&](uint32, Graphics::Surface &view) {
 		background.setPaletteRecord(8 + 2);
 		drawSunrise(background, *picture.surfacePtr(), false, false);
 		character.setPalette();
 		character.drawAnimationFrame(0, 0, picture.surfacePtr(), 0, 0);
-		magnify(*picture.surfacePtr(), view, Common::Rect(48, 48, 128, 86));
+		drawChaniZoom(*picture.surfacePtr(), view, 0);
 	});
 	picture.free();
 }
 
-// Intro.swift: the same picture zooms out to the full view in 0.25 s, then
-// Chani's animation 0 plays. Recording: 6 s in all (swift-dune 2.5 s).
+// Play the remaining five zoom steps before the full-size talking animation.
 void FloppyIntro::chaniZoomOutScene(const char *dumpName, uint32 duration) {
 	Common::Array<byte> backgroundData, characterData;
 	if (_aborted || _quit || !_resources.load("SUNRS.HSQ", backgroundData) || !_resources.load("CHAN.HSQ", characterData))
@@ -335,16 +347,14 @@ void FloppyIntro::chaniZoomOutScene(const char *dumpName, uint32 duration) {
 	background.setPalette();
 	Graphics::ManagedSurface picture;
 	picture.create(320, kViewHeight, Graphics::PixelFormat::createFormatCLUT8());
-	const uint32 zoom = 250;
+	const uint32 zoom = (ARRAYSIZE(kChaniZoomSteps) - 1) * kChaniZoomStepMillis;
 	runScene(dumpName, duration, kNoTransition, 0, kNoTransition, 0, duration / 2, [&](uint32 elapsed, Graphics::Surface &view) {
 		background.setPaletteRecord(8 + 2);
 		drawSunrise(background, *picture.surfacePtr(), false, false);
 		character.setPalette();
 		if (elapsed < zoom) {
 			character.drawAnimationFrame(0, 0, picture.surfacePtr(), 0, 0);
-			const uint32 p = ramp256(elapsed, 0, zoom);
-			magnify(*picture.surfacePtr(), view, Common::Rect((int16)(48 - 48 * p / 256), (int16)(48 - 48 * p / 256),
-					(int16)(128 + 192 * p / 256), (int16)(86 + 66 * p / 256)));
+			drawChaniZoom(*picture.surfacePtr(), view, 1 + elapsed / kChaniZoomStepMillis);
 		} else {
 			character.drawAnimation(0, elapsed - zoom, picture.surfacePtr(), 0, 0);
 			memcpy(view.getPixels(), picture.getPixels(), 320 * kViewHeight);
