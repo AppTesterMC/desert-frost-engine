@@ -149,7 +149,34 @@ void GameScreen::speedrunEnterRoom(uint room, bool wait) {
 	speedrunActionPause(true);
 	if (_quitRequested)
 		return;
-	enterRoom(room);
+	const RoomRecord *from = currentRoom();
+	int arrow = -1;
+	if (from && room > 0 && room <= _rooms.size() && _mode == kRoom && !_desert && !_battle &&
+			!_ending && !_sceneActive && !_palacePlan && _menu == kMenuNone && _commList < 0) {
+		for (uint dir = 0; dir < ARRAYSIZE(from->exits); ++dir) {
+			if (from->exits[dir] == room) { // Locked exits have their high bit set.
+				arrow = (int)dir;
+				break;
+			}
+		}
+	}
+	if (arrow >= 0) {
+		static const Common::KeyCode keys[] = {
+			Common::KEYCODE_UP, Common::KEYCODE_RIGHT, Common::KEYCODE_DOWN, Common::KEYCODE_LEFT
+		};
+		const uint previousRoom = _room;
+		Common::Event event;
+		event.type = Common::EVENT_KEYDOWN;
+		event.kbd.keycode = keys[arrow];
+		handleEvent(event);
+		speedrunLog(Common::String::format("room compass: place %u, room %u toward %u, now in room %u",
+				_world.currentLocation(), previousRoom, room, _world.room()));
+	} else {
+		// The broader campaign driver still stages rooms outside the available compass exits.
+		speedrunLog(Common::String::format("assisted room entry: place %u, room %u toward %u",
+				_world.currentLocation(), _room, room));
+		enterRoom(room);
+	}
 	speedrunActionPause(false);
 	if (wait && !_quitRequested && _mode == kRoom && _world.room() == room) {
 		speedrunPause(700);
