@@ -141,7 +141,7 @@ private:
 	void startSong(const char *name);
 	void loadSubtitles();
 	void drawSubtitle(uint16 sentenceNumber);
-	int drawSubtitleLine(const Common::Array<Common::String> &words, uint first, uint last, int y, bool justify);
+	void drawSubtitleLine(const Common::Array<Common::String> &words, uint first, uint last, int y, int space, int extra);
 	int textWidth(const Common::String &text) const;
 	/** The narration's sentence number for prologue step 0-7, resolved per release. */
 	uint16 prologueSentence(uint step) const;
@@ -232,7 +232,6 @@ private:
 	int _viewTop;
 	Common::Array<Common::String> _subtitles; ///< COMMAND1.HSQ records.
 	uint16 _prologueBase;   ///< Record of "In these times of the future..."; 0 if not found.
-	byte _subtitleColour[3]; ///< STARS.HSQ colour 25, the narration's orange.
 	Common::Array<byte> _font; ///< DNCHAR.BIN or DUNECHAR.HSQ for intro captions.
 	bool _aborted, _quit;
 	bool _skipPrologue, _manualPrologue;

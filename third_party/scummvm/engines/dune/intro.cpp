@@ -221,9 +221,6 @@ FloppyIntro::FloppyIntro(OSystem *system, Resource &resources, StartupLog &log, 
 		_aborted(false), _quit(false), _skipPrologue(false), _manualPrologue(false), _sceneNumber(0), _introStart(0), _lastTimedDump(0) {
 	_surface.create(320, 200, Graphics::PixelFormat::createFormatCLUT8());
 	memset(_palette, 0, sizeof(_palette));
-	_subtitleColour[0] = 216;
-	_subtitleColour[1] = 144;
-	_subtitleColour[2] = 40;
 	loadSubtitles();
 }
 
@@ -242,15 +239,17 @@ FloppyIntro::~FloppyIntro() {
 }
 
 void FloppyIntro::loadSubtitles() {
-	Common::Array<byte> data;
-	// COMMAND1 is the English table; COMMAND2 the French one. The narration
-	// sits at different record numbers in the CD (279-286) and floppy
-	// (267-274) tables, so it is located by its first sentence's text.
+	// Resolve the release's record index in its English bank, then use that
+	// index in the active language. It is 267 on floppy and 279 on CD.
+	Common::Array<byte> data, english;
 	if (!_resources.load("COMMAND1.HSQ", data))
 		_resources.load("COMMAND2.HSQ", data);
+	if (_resources.language() != 1)
+		_resources.loadUntranslated("COMMAND1.HSQ", english);
 	if (data.size() >= 2) {
 		const uint count = READ_LE_UINT16(data.data()) / 2;
-		if (count <= 1024 && (uint32)count * 2 <= data.size()) {
+		const uint keysCount = english.size() >= 2 ? READ_LE_UINT16(english.data()) / 2 : 0;
+		if (count <= 1024 && count * 2 <= data.size()) {
 			_subtitles.resize(count);
 			for (uint i = 0; i < count; ++i) {
 				const uint32 start = READ_LE_UINT16(data.data() + i * 2);
@@ -260,24 +259,20 @@ void FloppyIntro::loadSubtitles() {
 				while (end < data.size() && data[end] != 0xff)
 					++end;
 				_subtitles[i] = Common::String((const char *)data.data() + start, end - start);
-				if (!_prologueBase && (_subtitles[i].hasPrefix("In these times") || _subtitles[i].hasPrefix("En ces temps")))
+				if (_prologueBase)
+					continue;
+				const Common::Array<byte> &keys = i < keysCount && keysCount * 2 <= english.size() ? english : data;
+				const uint32 at = READ_LE_UINT16(keys.data() + i * 2);
+				static const char first[] = "In these times";
+				if ((at + sizeof(first) - 1 <= keys.size() &&
+						!memcmp(keys.data() + at, first, sizeof(first) - 1)) ||
+						_subtitles[i].hasPrefix("En ces temps"))
 					_prologueBase = i;
 			}
 		}
 	}
 	if (!_resources.load("DNCHAR.BIN", _font))
 		_resources.load("DUNECHAR.HSQ", _font);
-
-	// The narration's colour is STARS.HSQ palette entry 25, which stays in
-	// the palette for the whole prologue in the original.
-	Common::Array<byte> stars;
-	if (_resources.load("STARS.HSQ", stars)) {
-		Sprite sheet(_system, stars);
-		sheet.setPalette();
-		byte palette[256 * 3];
-		_system->getPaletteManager()->grabPalette(palette, 0, 256);
-		memcpy(_subtitleColour, palette + 25 * 3, 3);
-	}
 	_log.line(Common::String::format("Intro subtitles: %u records, prologue at %u, font=%u bytes",
 			_subtitles.size(), _prologueBase, _font.size()));
 }
@@ -294,80 +289,88 @@ int FloppyIntro::textWidth(const Common::String &text) const {
 	return width;
 }
 
-// Draws words[first..last] on one line. Justified lines spread the slack
-// between the words, as the original's narration does; the last line of a
-// paragraph is left-aligned.
-int FloppyIntro::drawSubtitleLine(const Common::Array<Common::String> &words, uint first, uint last, int y,
-		bool justify) {
-	const int left = 12, width = 296;
-	int wordsWidth = 0;
-	for (uint i = first; i < last; ++i)
-		wordsWidth += textWidth(words[i]);
-	const uint gaps = last - first > 1 ? last - first - 1 : 1;
-	int space = _font.size() >= 256 ? _font[' '] : 5;
-	int extra = 0;
-	if (justify && last - first > 1) {
-		space = (width - wordsWidth) / (int)gaps;
-		extra = (width - wordsWidth) - space * (int)gaps;
-	}
+// DOS uses palette entry 6 for narration, separate from the STARS picture.
+static const byte kNarrationInk = 6;
+static const int kNarrationSpace = 6;
 
-	int x = left;
+void FloppyIntro::drawSubtitleLine(const Common::Array<Common::String> &words, uint first, uint last, int y,
+		int space, int extra) {
+	int x = 0;
 	for (uint i = first; i < last; ++i) {
 		const Common::String &word = words[i];
 		for (uint c = 0; c < word.size(); ++c) {
 			const byte ch = (byte)word[c];
 			const uint32 glyph = 256 + (uint32)ch * 9;
 			if (glyph + 9 <= _font.size()) {
-				for (int row = 0; row < 9; ++row) {
+				for (int row = 0; row < 9 && y + row < _surface.h; ++row) {
 					const byte bits = _font[glyph + row];
-					for (int column = 0; column < 8; ++column)
-						if ((bits & (0x80 >> column)) && x + column >= 0 && x + column < 320 && y + row < 200)
-							*(byte *)_surface.getBasePtr(x + column, y + row) = 25;
+					for (int column = 0; column < 8 && x + column < _surface.w; ++column)
+						if (bits & (0x80 >> column))
+							*(byte *)_surface.getBasePtr(x + column, y + row) = kNarrationInk;
 				}
 			}
-			x += _font.size() >= 256 ? _font[ch] : 8;
+			x += _font[ch];
 		}
-		x += space + (extra > 0 ? 1 : 0);
-		if (extra > 0)
+		x += space;
+		if (extra > 0) {
+			++x;
 			--extra;
+		}
 	}
-	return x;
 }
 
 void FloppyIntro::drawSubtitle(uint16 sentenceNumber) {
-	if (!sentenceNumber || sentenceNumber >= _subtitles.size())
+	if (!sentenceNumber || sentenceNumber >= _subtitles.size() || _font.size() < 256)
 		return;
-	_surface.fillRect(Common::Rect(0, 152, 320, 200), 0);
-	_system->getPaletteManager()->setPalette(_subtitleColour, 25, 1);
+	const Common::Rect panel(0, 152, 320, 200);
+	_surface.fillRect(panel, 0);
+	static const byte brown[] = { 170, 85, 0 }; // VGA DAC 42, 21, 0
+	_system->getPaletteManager()->setPalette(brown, kNarrationInk, 1);
 
-	// Records may contain a stray newline; the original wraps on width.
-	Common::String sentence = _subtitles[sentenceNumber];
-	for (uint i = 0; i < sentence.size(); ++i)
-		if (sentence[i] == '\r' || sentence[i] == '\n')
-			sentence.setChar(' ', i);
-	const Common::Array<Common::String> words = Common::StringTokenizer(sentence).split();
-	const int width = 296, space = _font.size() >= 256 ? _font[' '] : 5;
-
-	// Greedy wrap into up to three lines; the recording shows two.
-	uint lineStart[4] = { 0, 0, 0, 0 };
-	uint lineCount = 0;
-	int lineWidth = 0;
-	for (uint i = 0; i < words.size(); ++i) {
-		const int w = textWidth(words[i]);
-		if (lineCount == 0 || lineWidth + space + w > width) {
-			if (lineCount == 3)
-				break;
-			lineStart[lineCount++] = i;
-			lineWidth = w;
-		} else {
-			lineWidth += space + w;
+	struct Line {
+		uint first, last;
+		int space, extra;
+	};
+	Common::Array<Line> lines;
+	Common::Array<Common::String> words;
+	bool justify = true;
+	Common::StringTokenizer paragraphs(_subtitles[sentenceNumber], "\r\n");
+	while (!paragraphs.empty()) {
+		Common::StringTokenizer tokens(paragraphs.nextToken(), " \t");
+		uint first = words.size();
+		int width = 0;
+		while (!tokens.empty()) {
+			const Common::String word = tokens.nextToken();
+			const int wordWidth = textWidth(word);
+			if (first < words.size() && width + kNarrationSpace + wordWidth > panel.width()) {
+				const int gaps = words.size() - first - 1;
+				const int slack = panel.width() - width;
+				const int space = gaps > 0 ? kNarrationSpace + slack / gaps : kNarrationSpace;
+				lines.push_back({ first, words.size(), space, gaps > 0 ? slack % gaps : 0 });
+				// DOS falls back to normal spacing for the caption if a gap is too wide.
+				if (space >= 30)
+					justify = false;
+				first = words.size();
+				width = 0;
+			}
+			if (first < words.size())
+				width += kNarrationSpace;
+			words.push_back(word);
+			width += wordWidth;
 		}
+		// A hard break in COMMAND ends the paragraph without justification.
+		if (first < words.size())
+			lines.push_back({ first, words.size(), kNarrationSpace, 0 });
 	}
-	lineStart[lineCount] = words.size();
-	// Two lines sit at 180 and 189 in the recording; a third pushes up.
-	const int firstLine = lineCount > 2 ? 180 - 9 * (int)(lineCount - 2) : 180;
-	for (uint line = 0; line < lineCount; ++line)
-		drawSubtitleLine(words, lineStart[line], lineStart[line + 1], firstLine + (int)line * 9, line + 1 < lineCount);
+	// The text window begins below the picture, at row 153. The nine-row
+	// font advances ten pixels per line, and the group is centred vertically.
+	const int lineHeight = 10;
+	int y = panel.top + 1 + MAX(0, (panel.height() - 1 - (int)lines.size() * lineHeight) / 2);
+	for (const Line &line : lines) {
+		drawSubtitleLine(words, line.first, line.last, y, justify ? line.space : kNarrationSpace,
+				justify ? line.extra : 0);
+		y += lineHeight;
+	}
 }
 
 // Sprite numbers, positions, durations and transitions below follow the intro
