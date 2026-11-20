@@ -4908,11 +4908,11 @@ void GameScreen::drawTalk() {
 	} else if (_cabinView) {
 		drawCabin();
 	} else {
-		// The CD zooms the empty room around the speaker's standing position.
-		// Wide shots still draw the people, including the scripted cast.
-		const bool cdPortrait = !_world.floppy() && !_talkEnded &&
-				(_talkKind == kTalkNormal || _talkKind == kTalkScene);
-		composeView(!cdPortrait);
+		// DOS zooms the empty room around an ordinary speaker's standing
+		// position. The CD uses the same backdrop during scripted speeches.
+		const bool emptyBackdrop = !_talkEnded &&
+				((_talkKind == kTalkNormal && !_world.amiga()) || (_talkKind == kTalkScene && !_world.floppy()));
+		composeView(!emptyBackdrop);
 	}
 	if (!_talkEnded) {
 		// While a line is spoken the view zooms twice onto the speaker (the
