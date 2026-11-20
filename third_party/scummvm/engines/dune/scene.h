@@ -195,6 +195,7 @@ private:
 		kTalk,
 		kBook,
 		kTroop, ///< a troop's orders: its figures in a box over the room or the map
+		kMixer, ///< the CD room mixer music commands
 		kMirror ///< the palace bedroom's mirror: Paul's reflection and the game menu
 	};
 
@@ -618,6 +619,8 @@ private:
 	byte defaultVoiceMode() const;
 	void openMirror();
 	void drawMirror();
+	void drawCdMusicMenu();
+	void cdMusicCommand(int row);
 	void drawResults();
 	void openTroop(uint troopId, bool fromMap);
 	void drawTroop();

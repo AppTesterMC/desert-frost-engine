@@ -1609,10 +1609,9 @@ void GameScreen::panelAction(Panel::Action action, int row, int arrow) {
 			drawRoom();
 			return;
 		case kRowMixer:
-			// menu_callback_choice_mixer_panel (CD seg000:a3f0): the volume
-			// sliders and subtitle buttons; not built yet.
-			_log.line("Mixer Panel: not built");
-			showStatus("Dune: the Mixer Panel is not built yet");
+			_mode = kMixer;
+			_menu = kMenuOptions;
+			drawCdMusicMenu();
 			return;
 		case kRowOrnithopter:
 			openCockpit(false);
@@ -2292,6 +2291,85 @@ void GameScreen::openMirror() {
 	_log.line("Mirror: Paul looks at himself");
 	drawMirror();
 	dumpScreen(_system, "mirror");
+}
+
+// Music commands on the original CD room overlay (DNCDPRG DS:201a).
+void GameScreen::drawCdMusicMenu() {
+	composeView();
+	Common::Array<byte> data;
+	if (_resources.load("MIXR.HSQ", data)) {
+		Sprite mixer(_system, data);
+		mixer.setPalette();
+		mixer.drawFrame(0, _surface.surfacePtr(), 40, 1);
+	}
+	RowAction actions[Panel::kCommandRows];
+	int arguments[Panel::kCommandRows];
+	uint16 commands[Panel::kCommandRows];
+	uint count = 0;
+	auto add = [&](RowAction action, int argument, const char *label, bool prefix = false) {
+		const uint16 id = _panel.findCommand(label, prefix);
+		if (id != 0xffff && count < Panel::kCommandRows) {
+			actions[count] = action;
+			arguments[count] = argument;
+			commands[count++] = id;
+		}
+	};
+	if (_menu == kMenuMusicOrder) {
+		add(kRowMusicOrder, 1, "STANDARD ORDER");
+		add(kRowMusicOrder, 3, "SHUFFLE");
+		add(kRowMenuBack, 0, "Cancel", true);
+	} else if (_menu == kMenuQuit) {
+		add(kRowConfirmExit, 0, "YES I WANT TO EXIT GAME");
+		add(kRowCancelExit, 0, "NO I WISH TO CONTINUE");
+	} else {
+		add(kRowMusic, 0, "MUSIC OFF");
+		add(kRowMusic, 1, "MUSIC ON (GAME RELATIVE)");
+		add(kRowMusicOrderMenu, 0, "MUSIC ON (CD-STYLE)");
+		add(kRowExitGame, 0, "EXIT GAME");
+		add(kRowMenuBack, 0, "Done", true);
+	}
+	setRows(actions, arguments, commands, count);
+	const bool exits[4] = {false, false, false, false};
+	const int selected = _menu == kMenuOptions ? (!_musicOn ? 0 : (_musicOrder & 1) ? 2 : 1) : -1;
+	_panel.draw(_surface, exits, selected, -1, day());
+	debugOverlay(*_surface.surfacePtr());
+	_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
+	_system->updateScreen();
+}
+
+void GameScreen::cdMusicCommand(int row) {
+	switch (_rowActions[row]) {
+	case kRowMusic:
+	case kRowMusicOrder:
+		_musicOrder = _rowActions[row] == kRowMusicOrder ? (byte)_rowArguments[row] : 0;
+		if (_musicOn != (_rowArguments[row] != 0))
+			toggleMusic();
+		break;
+	case kRowMusicOrderMenu:
+		_menu = kMenuMusicOrder;
+		drawCdMusicMenu();
+		return;
+	case kRowExitGame:
+		_menu = kMenuQuit;
+		drawCdMusicMenu();
+		return;
+	case kRowConfirmExit:
+		_quitRequested = true;
+		return;
+	case kRowCancelExit:
+	case kRowMenuBack:
+		if (_menu != kMenuOptions) {
+			_menu = kMenuOptions;
+			drawCdMusicMenu();
+			return;
+		}
+		break;
+	default:
+		return;
+	}
+	_menu = kMenuNone;
+	_mode = kRoom;
+	drawRoom();
 }
 
 void GameScreen::drawMirror() {
@@ -5339,6 +5417,18 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 		if (event.type == Common::EVENT_LBUTTONDOWN || event.type == Common::EVENT_KEYDOWN) {
 			_ending = false;
 			startNewGame();
+		}
+		return false;
+	}
+	if (_mode == kMixer) {
+		int row = -1, arrow = -1;
+		if (event.type == Common::EVENT_LBUTTONDOWN &&
+				_panel.hitTest(event.mouse.x, event.mouse.y, row, arrow) == Panel::kActionCommand && row >= 0)
+			cdMusicCommand(row);
+		else if (event.type == Common::EVENT_KEYDOWN && event.kbd.keycode == Common::KEYCODE_ESCAPE) {
+			_menu = kMenuNone;
+			_mode = kRoom;
+			drawRoom();
 		}
 		return false;
 	}
