@@ -697,34 +697,40 @@ void FloppyIntro::attackScene(const char *dumpName) {
 	});
 }
 
-// Credits.swift: the credit lines scroll up over a sunset while WORMSUIT
-// plays. Sprite numbers and positions are the sheet's own order.
+// The floppy movie scrolls the CREDITS.HSQ lettering over the sunset.
+// Positions are relative to the first line, measured in the original 320-pixel view.
+void drawFloppyProductionCredits(Sprite &credits, Graphics::Surface &view, uint32 scrollMillis) {
+	static const int16 lines[][3] = {
+		{ 0, 134, 0 }, { 1, 74, 30 }, { 2, 126, 80 }, { 3, 56, 105 }, { 4, 84, 185 },
+		{ 5, 66, 245 }, { 6, 104, 325 }, { 7, 166, 345 }, { 8, 166, 365 }, { 9, 74, 445 },
+		{ 10, 166, 465 }, { 11, 48, 545 }, { 12, 52, 569 }, { 13, 112, 583 }, { 14, 78, 608 },
+		{ 15, 78, 617 }, { 16, 96, 697 }, { 17, 166, 717 }, { 18, 166, 737 }, { 19, 66, 797 },
+		{ 20, 166, 817 }, { 21, 66, 877 }, { 22, 58, 937 }, { 23, 74, 977 }, { 24, 92, 1017 },
+		{ 25, 166, 1037 }, { 26, 66, 1077 }, { 27, 54, 1117 }, { 28, 112, 1177 }, { 29, 166, 1197 },
+		{ 30, 166, 1217 }, { 31, 166, 1237 }, { 32, 166, 1257 }, { 33, 66, 1297 }, { 34, 60, 1327 },
+		{ 35, 108, 1407 }, { 36, 66, 1419 }, { 37, 120, 1431 }, { 38, 128, 1456 }, { 39, 58, 1467 },
+		{ 40, 86, 1479 }, { 41, 114, 1539 }, { 42, 74, 1553 }, { 43, 6, 1633 }
+	};
+	// One pixel every 30 ms. The copyright block settles six rows below the top.
+	const int lastPosition = 152 + lines[ARRAYSIZE(lines) - 1][2] - 6;
+	const int scroll = MIN<int>(scrollMillis / 30, lastPosition);
+	for (uint i = 0; i < ARRAYSIZE(lines); ++i)
+		credits.drawFrame(lines[i][0], &view, lines[i][1], 152 - scroll + lines[i][2]);
+}
+
 void FloppyIntro::creditsScene(const char *dumpName) {
 	Common::Array<byte> creditsData, intdsData;
 	if (_aborted || _quit || !_resources.load("CREDITS.HSQ", creditsData) || !_resources.load("INTDS.HSQ", intdsData))
 		return;
-	static const int16 lines[][3] = {
-		{ 0, 134, 0 }, { 1, 77, 30 }, { 2, 126, 90 }, { 3, 56, 120 }, { 4, 86, 210 }, { 5, 68, 270 },
-		{ 6, 104, 340 }, { 7, 166, 360 }, { 8, 166, 380 }, { 9, 75, 440 }, { 10, 166, 460 }, { 11, 48, 540 },
-		{ 12, 64, 570 }, { 13, 124, 585 }, { 14, 86, 615 }, { 15, 88, 625 }, { 16, 96, 715 }, { 17, 166, 735 },
-		{ 18, 166, 755 }, { 19, 67, 815 }, { 20, 166, 835 }, { 21, 65, 915 }, { 22, 58, 995 }, { 23, 75, 1035 },
-		{ 24, 92, 1075 }, { 25, 166, 1095 }, { 26, 67, 1135 }, { 27, 55, 1175 }, { 28, 113, 1255 }, { 29, 166, 1275 },
-		{ 30, 166, 1295 }, { 31, 166, 1315 }, { 32, 166, 1335 }, { 33, 66, 1375 }, { 34, 60, 1415 }, { 35, 108, 1505 },
-		{ 36, 64, 1520 }, { 37, 120, 1535 }, { 38, 126, 1565 }, { 39, 59, 1580 }, { 40, 96, 1595 }, { 41, 114, 1685 },
-		{ 42, 74, 1700 }, { 43, 6, 1790 }
-	};
 	Sprite credits(_system, creditsData), intds(_system, intdsData);
 	startSong("WORMSUIT.HSQ");
 
-	runScene(dumpName, 17000, kFade, 3000, kNoTransition, 0, 6000, [&](uint32 elapsed, Graphics::Surface &view) {
+	const uint32 fadeIn = 750;
+	runScene(dumpName, 63250, kFade, fadeIn, kFade, 550, 6000, [&](uint32 elapsed, Graphics::Surface &view) {
 		drawSkyView(view, kSkyNarrow, 320, kSkyNight);
 		credits.setPalette(); // Turns the sky red: CREDITS owns 128-190.
 		intds.drawFrame(0, &view, 0, 60);
-		// The intro ends after "Programming Remi Herbulot"; later credits
-		// belong to the end sequence. The original scroll covers about 500 px.
-		const int scroll = (int)(500 * progress256(elapsed, 3000, 14000) / 256);
-		for (uint i = 0; i < ARRAYSIZE(lines); ++i)
-			credits.drawFrame(lines[i][0], &view, lines[i][1], 152 - scroll + lines[i][2]);
+		drawFloppyProductionCredits(credits, view, elapsed - fadeIn);
 	});
 }
 

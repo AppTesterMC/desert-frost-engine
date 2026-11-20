@@ -43,6 +43,9 @@ class Resource;
 class Sprite;
 class StartupLog;
 
+/** Draw the original production titles into a 320 by 152 view at the given scroll time. */
+void drawFloppyProductionCredits(Sprite &credits, Graphics::Surface &view, uint32 scrollMillis);
+
 /**
  * The CD release's recovered loader order is VIRGIN, CRYO, CRYO2, PRESENT,
  * then TITLE. It comes from the executable's play_intro table and load_*
