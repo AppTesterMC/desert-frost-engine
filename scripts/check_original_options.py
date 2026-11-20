@@ -81,12 +81,13 @@ def main():
             if not all(n in files for n in (f"COMMAND{language}.HSQ", phrase_name, f"PHRASE{language}2.HSQ")):
                 continue
             y = 179 if release == "cd" else 171
+            save_row, load_row = (187, 179) if release == "cd" else (179, 187)
             target, log = play(f"{release}-language-{language}", data,
                 {"dune_floppy_start": 99, "dune_intro_start": 6, "dune_no_music": "true", "dune_language": language},
                 f"wait 1200\ncheckpoint room\nclick left 160 {y}\nwait 700\ncheckpoint leto\n"
                 "key ESC\nwait 300\nclick left 160 163\nwait 500\ncheckpoint map\n"
-                "click left 45 170\nwait 500\ncheckpoint globe\nclick left 160 179\nwait 300\ncheckpoint save\n"
-                "click left 160 163\nwait 500\nclick left 160 187\nwait 300\n"
+                f"click left 45 170\nwait 500\ncheckpoint globe\nclick left 160 {save_row}\nwait 300\ncheckpoint save\n"
+                f"click left 160 163\nwait 500\nclick left 160 {load_row}\nwait 300\n"
                 "click left 160 163\nwait 500\ncheckpoint loaded\nquit\n")
             assert "Startup complete: throne room displayed" in log
             translated_map = sentences(unhsq(files[f"COMMAND{language}.HSQ"]))[map_command].decode("latin-1")

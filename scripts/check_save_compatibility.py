@@ -33,10 +33,12 @@ def play(name, release, saves, action, data=None, route=ROUTE, config=""):
     target.mkdir()
     frames = target / "frames"
     frames.mkdir()
-    script = route + ("click left 160 179\n" if action == "save" else "click left 160 187\n")
+    save_row, load_row = (187, 179) if release == "cd" else (179, 187)
+    row = save_row if action == "save" else load_row
+    script = route + f"click left 160 {row}\n"
     script += "wait 200\ncheckpoint menu\nclick left 160 163\nwait 500\ncheckpoint after\n"
     if action == "load-save":
-        script += "click left 160 179\nwait 200\nclick left 160 163\nwait 500\ncheckpoint resaved\n"
+        script += f"click left 160 {save_row}\nwait 200\nclick left 160 163\nwait 500\ncheckpoint resaved\n"
     script += "quit\n"
     (target / "input.script").write_text(script)
     ini = target / "game.ini"

@@ -10,11 +10,11 @@ wait 15000              # the intro plays through to the throne room
 checkpoint floppy-landing
 checkpoint floppy-room-scripted
 wait 5000               # stay in the room: the audio window
-# Paul's head opens the globe with the game menu (EXIT GLOBE, SEE RESULTS,
-# SAVE GAME, LOAD GAME, OPTIONS & QUIT GAME). SAVE GAME (third row) lists
-# Log 1, Log 2 and Cancel, as the original does; Cancel returns to the menu.
-move 160 155            # the pointer (the checkpoint records the cursor)
-click left 160 155      # the box's top edge under Paul's head: the globe
+# Open SEE DUNE MAP, then the globe from the icon on the map.
+click left 160 163
+wait 3000
+move 35 176
+click left 35 176
 wait 4000               # the globe opens
 checkpoint floppy-globe
 move 160 179

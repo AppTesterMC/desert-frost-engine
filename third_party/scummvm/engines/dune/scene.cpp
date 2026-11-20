@@ -1952,14 +1952,16 @@ void GameScreen::drawMapScreen() {
 		// EXIT GLOBE's CS:bb80 handler returns to the flat map.
 		add(kRowFlatMap, 0, "EXIT GLOBE");
 		add(kRowResults, 0, _map->results() ? "STANDARD VISION" : "SEE RESULTS");
-		add(kRowSaveMenu, 0, "SAVE GAME");
-		add(kRowLoadMenu, 0, "LOAD GAME");
-		// The CD's COMMAND1 has no "OPTIONS & QUIT GAME" (entry 181 is a
-		// placeholder): its row reads EXIT GAME and leads to the same list.
-		if (_panel.findCommand("OPTIONS & QUIT GAME") != 0xffff)
-			add(kRowOptionsMenu, 0, "OPTIONS & QUIT GAME");
-		else
-			add(kRowOptionsMenu, 0, "EXIT GAME");
+		if (!_world.floppy() && !_world.segaCd()) {
+			// DNCDPRG lists load before save and opens the quit confirmation directly.
+			add(kRowLoadMenu, 0, "LOAD GAME");
+			add(kRowSaveMenu, 0, "SAVE GAME");
+			add(kRowExitGame, 0, "EXIT GAME");
+		} else {
+			add(kRowSaveMenu, 0, "SAVE GAME");
+			add(kRowLoadMenu, 0, "LOAD GAME");
+			add(kRowOptionsMenu, 0, _panel.findCommand("OPTIONS & QUIT GAME") != 0xffff ? "OPTIONS & QUIT GAME" : "EXIT GAME");
+		}
 	} else if (_menu == kMenuSave || _menu == kMenuLoad) {
 		// Shared with the mirror's save/load menus below.
 	} else if (_menu == kMenuOptions) {
@@ -5555,7 +5557,7 @@ bool GameScreen::handleEvent(const Common::Event &event) {
 					_quitRequested = true;
 					break;
 				case kRowCancelExit:
-					openMenu(kMenuOptions);
+					openMenu(!_world.floppy() && !_world.segaCd() ? kMenuNone : kMenuOptions);
 					break;
 				case kRowNone:
 					break;

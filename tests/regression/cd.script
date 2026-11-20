@@ -11,19 +11,13 @@ move 160 163
 click left 160 163      # row 1: SEE DUNE MAP: the flat map
 wait 5000               # the map draws with its DUNE MAP popup
 checkpoint cd-after-touch
-# EXIT MAPS (the first row) returns to the throne room.
-move 160 163
-click left 160 163      # row 1: EXIT MAPS: back to the throne room
-wait 1000               # the room draws
-# Paul's head opens the globe with the game menu; SAVE GAME (third row)
-# lists Log 1, Log 2 and Cancel, as the original does. Cancel returns to the
-# menu, EXIT GLOBE (first row) to the flat map and EXIT MAPS to the room.
-move 160 155            # the pointer (the checkpoint records the cursor)
-click left 160 155      # the box's top edge under Paul's head: the globe
+# The globe icon on the map opens the same menu in DNCDPRG and the engine.
+move 35 176
+click left 35 176
 wait 4000               # the globe opens
 checkpoint cd-globe
-move 160 179
-click left 160 179      # row 3: SAVE GAME: the save list
+move 160 187
+click left 160 187      # row 4: SAVE GAME: the save list
 wait 1500               # the list opens
 checkpoint cd-menu-save
 move 160 179
