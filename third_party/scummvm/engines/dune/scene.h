@@ -502,6 +502,7 @@ private:
 	void speedrunVisitPlace(uint place, Common::Array<uint> &newTroops);
 	void speedrunCompanions(const uint *want, uint count);
 	void speedrunStory();
+	bool speedrunReadNewMessages();
 	void speedrunShipment();
 	void speedrunSpice();
 	void speedrunSpiceFields(const Common::Array<uint> &troops);

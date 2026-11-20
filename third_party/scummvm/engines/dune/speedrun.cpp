@@ -1184,14 +1184,8 @@ void GameScreen::speedrunVisitPlace(uint place, Common::Array<uint> &newTroops) 
 		if (_world.placeType() == Location::kPalace && room == 8 && _world.sightingCount()) {
 			// The COMM room: the messages first (seg000:290b); Thufir's first
 			// answer there is "View the message before anything else."
-			for (int i = (int)_world.sightingCount() - 1; i >= 0; --i) {
-				byte variant = 0;
-				const byte person = _world.viewSighting((uint)i, variant);
-				_state.setB(0x24, variant);
-				_state.setB(0xe9, person);
-				presentLine(person, person, 4, 0, kTalkComm);
-				speedrunConverse();
-			}
+			if (!speedrunReadNewMessages())
+				return;
 		}
 		speedrunTalkHere(newTroops);
 	}
@@ -1300,6 +1294,25 @@ bool GameScreen::speedrunExplore() {
 	return false;
 }
 
+bool GameScreen::speedrunReadNewMessages() {
+	if (!_state.b(World::kUnread))
+		return true;
+	if (inConversation() || _sceneActive)
+		speedrunConverse();
+	for (int i = (int)_world.sightingCount() - 1; i >= 0; --i) {
+		if (_world.sighting((uint)i) & 0x80)
+			continue; // already seen
+		if (!speedrunClickRow(kRowCommNew, -1, nullptr) ||
+				!speedrunClickRow(kRowCommPick, i, nullptr)) {
+			if (!_quitRequested)
+				speedrunLog("BLOCKED unread COMM message not selectable in the palace");
+			return false;
+		}
+		speedrunConverse();
+	}
+	return !_quitRequested;
+}
+
 void GameScreen::speedrunShipment() {
 	// The Emperor's demand (route items 10, 13): Duncan's offer is accepted,
 	// then Paul walks into the COMM room with him and the spice goes
@@ -1320,17 +1333,9 @@ void GameScreen::speedrunShipment() {
 		speedrunTravel(0);
 	speedrunEnterRoom(8, true);
 	speedrunConverse();
-	for (int i = (int)_world.sightingCount() - 1; i >= 0; --i) {
-		if (_world.sighting((uint)i) & 0x80)
-			continue; // already seen
-		if (!speedrunClickRow(kRowCommNew, -1, nullptr) ||
-				!speedrunClickRow(kRowCommPick, i, nullptr)) {
-			if (!_quitRequested)
-				speedrunLog("BLOCKED unread COMM message not selectable in the palace");
-			_speedrunShipping = false;
-			return;
-		}
-		speedrunConverse();
+	if (!speedrunReadNewMessages()) {
+		_speedrunShipping = false;
+		return;
 	}
 	if (!speedrunMeet(3)) {
 		_speedrunShipping = false;
