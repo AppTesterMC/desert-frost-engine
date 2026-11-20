@@ -957,11 +957,11 @@ void GameScreen::speedrunConverse() {
 			// ACCEPT Duncan's spice deals and Stilgar's launch of the final
 			// attack; REFUSE the rest (the Water of Life: the route never drinks).
 			const bool yes = _talkWho == 3 || _state.b(kFinalStage) == 5;
-			speedrunActionPause(true);
-			if (_quitRequested)
+			if (!speedrunClickRow(kRowBargain, yes ? 1 : 2, nullptr)) {
+				if (!_quitRequested)
+					speedrunLog("BLOCKED requested dialogue answer is missing or disabled");
 				return;
-			answerQuestion(yes ? 1 : 2);
-			speedrunActionPause(false);
+			}
 			continue;
 		}
 		if (_sceneActive) {
