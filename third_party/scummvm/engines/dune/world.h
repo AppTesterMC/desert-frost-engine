@@ -570,6 +570,7 @@ public:
 	// ---- Troop marches (troops.cpp) and battles (battle.cpp) ----
 	/** Seed the two battle generators (not saved; dune_rng_seed pins them). */
 	void seedRandom();
+	uint randMasked(uint mask) { return rollRandom(0x10000) & mask; } ///< rand_masked (seg000:e3b7)
 	/** rand (seg000:e3cc) and rand_masked (e3b7): LCGs outside the save, so a reload rerolls. */
 	uint16 lcgRand();
 	uint16 lcgRandMasked(uint16 mask);
@@ -850,7 +851,6 @@ private:
 	void prospect(uint id, uint locationIndex);
 	void raiseSpiceSkill(uint id, byte amount);
 	uint rollRandom(uint range); ///< the executable's rolling random word at ds:0 (a 16-bit LFSR here)
-	uint randMasked(uint mask) { return rollRandom(0x10000) & mask; } ///< rand_masked (seg000:e3b7)
 	uint16 word(uint cdOffset) const { return READ_LE_UINT16(&_state.vars[ds(cdOffset)]); }
 	void setWord(uint cdOffset, uint16 value) { WRITE_LE_UINT16(&_state.vars[ds(cdOffset)], value); }
 	byte &troopByte(uint id, uint offset) { return _state.vars[kTroopTable + (id - 1) * kTroopSize + offset]; }
