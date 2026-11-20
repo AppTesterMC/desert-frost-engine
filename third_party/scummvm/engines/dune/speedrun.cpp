@@ -323,7 +323,7 @@ void GameScreen::speedrunEquip(uint place) {
 		}
 }
 
-void GameScreen::speedrunCampaign() {
+void GameScreen::speedrunCampaign(bool attackPalace) {
 	const bool noRewinds = ConfMan.hasKey("dune_speedrun_no_rewinds") && ConfMan.getBool("dune_speedrun_no_rewinds");
 	// Route items 30-54: worms, espionage, the forts one by one, the palace.
 	if (_state.b(GameState::kPhase) < 0x4f) {
@@ -830,7 +830,8 @@ void GameScreen::speedrunCampaign() {
 		return;
 	}
 	speedrunLog(Common::String::format("step 46 OK: no more Harkonnen fortresses (%u won by the bot)", won));
-	speedrunFinalAttack();
+	if (attackPalace)
+		speedrunFinalAttack();
 }
 
 void GameScreen::speedrunKeepInTouch() {
@@ -2282,6 +2283,433 @@ void GameScreen::speedrunFinalAttack() {
 		speedrunLog("BLOCKED the ending did not start in the Baron's hall");
 }
 
+void GameScreen::speedrunLateCampaignEcology() {
+	// Complete the fort campaign first to pause imperial demands while the
+	// irrigation troop grows vegetation to the Harkonnen palace.
+	speedrunLog("Late-campaign ecology: military last-fort victory then ecology growth");
+	bool ecologyServiceFailed = false;
+	uint spiceServiceDay = _world.day();
+
+	auto cureEpidemic = [&]() {
+		while (!_ending && !_quitRequested && !ecologyServiceFailed && _world.illnessPlace() >= 0 &&
+				(_state.b(GameState::kPhase) == 0x5c || _state.b(GameState::kPhase) == 0x5d)) {
+			const uint place = (uint)_world.illnessPlace();
+			const Character chani = _world.character(7);
+			const bool curingHere = _state.b(GameState::kPhase) == 0x5d &&
+					!(_state.w(GameState::kPersonsWith) & (1 << 7)) && chani.locationPlusOne == place + 1;
+			if (!curingHere) {
+				if (!speedrunMeet(7) || !speedrunCompanion(7, true)) {
+					speedrunLog("BLOCKED late-campaign ecology: could not bring Chani to the epidemic");
+					ecologyServiceFailed = true;
+					return;
+				}
+				for (uint trip = 0; trip < 3 && !_ending && !_quitRequested &&
+						(_world.currentLocation() != place || _desert); ++trip)
+					speedrunTravel(place);
+				if (_world.currentLocation() != place || _desert) {
+					speedrunLog("BLOCKED late-campaign ecology: could not reach epidemic site");
+					ecologyServiceFailed = true;
+					return;
+				}
+				const Character harah = _world.character(8);
+				if (harah.locationPlusOne == place + 1 && harah.room == 2) {
+					if (!speedrunMeet(8) || !speedrunCompanion(8, true)) {
+						speedrunLog("BLOCKED late-campaign ecology: could not ask Harah to leave");
+						ecologyServiceFailed = true;
+						return;
+					}
+					speedrunEnterRoom(1, true);
+					speedrunCompanion(8, false);
+				}
+				speedrunEnterRoom(2, true);
+				if (!speedrunCompanion(7, false) || _state.b(GameState::kPhase) != 0x5d) {
+					speedrunLog("BLOCKED late-campaign ecology: could not leave Chani to cure the Fremen");
+					ecologyServiceFailed = true;
+					return;
+				}
+			}
+			if (_world.currentLocation() == place)
+				speedrunEnterRoom(1, true);
+			speedrunLog(Common::String::format("Late-campaign ecology: Chani cures epidemic at sietch %u", place));
+			for (uint slot = 0; slot < 32 && _world.illTroopAt(place) && !_ending && !_quitRequested && !ecologyServiceFailed; ++slot) {
+				passTime(1);
+				if ((_state.b(World::kShipmentFlags) & 0x10) &&
+						_state.w(World::kSpiceStock) >= _state.w(World::kDemand))
+					speedrunShipment();
+			}
+			if (_world.illTroopAt(place)) {
+				speedrunLog("BLOCKED late-campaign ecology: epidemic cure did not finish");
+				ecologyServiceFailed = true;
+				return;
+			}
+			speedrunSpice();
+		}
+	};
+
+	auto advanceEcologySlot = [&](uint contactWorker) {
+		const uint previousDay = _world.day();
+		passTime(1);
+		cureEpidemic();
+		if (ecologyServiceFailed)
+			return;
+		if (contactWorker && !_ending && !_quitRequested) {
+			const Troop w = _world.troop(contactWorker);
+			const int place = _world.troopPlace(contactWorker);
+			if ((w.occupation & 0x0f) == Troop::kIrrigation &&
+					(w.occupation & Troop::kStopped) && place >= 0 && _world.location((uint)place).water >= 12) {
+				if (speedrunOpenOrders(contactWorker)) {
+					const bool opened = speedrunClickRow(kRowEquipment, -1,
+							Common::String::format("troop %u, MODIFY EQUIPMENT", contactWorker).c_str());
+					const bool done = opened && speedrunClickRow(kRowEquipDone, -1, nullptr);
+					speedrunCloseOrders();
+					if (done && !(_world.troop(contactWorker).occupation & Troop::kStopped))
+						speedrunLog(Common::String::format("Late-campaign ecology: irrigation resumes at sietch %d", place));
+				}
+			}
+		}
+		if (_world.day() != previousDay && _world.day() != spiceServiceDay) {
+			speedrunSpice();
+			spiceServiceDay = _world.day();
+			speedrunGarrison();
+			if ((_world.day() % 7) == 0) {
+				for (uint id = 1; id <= World::kTroops && !_ending && !_quitRequested; ++id) {
+					const Troop t = _world.troop(id);
+					if (t.hired() && !t.harkonnen()) {
+						if (speedrunOpenOrders(id))
+							speedrunCloseOrders();
+					}
+				}
+			}
+		}
+		if ((_state.b(World::kShipmentFlags) & 0x10) && !_ending &&
+				(_state.w(World::kSpiceStock) >= _state.w(World::kDemand) || _world.daysSinceDemand() >= 1)) {
+			speedrunShipment();
+		}
+	};
+
+	auto cropCells = [&]() -> uint {
+		const Common::Array<byte> footprint = _world.vegetationMap();
+		uint cells = 0;
+		for (uint i = 0; i < footprint.size(); ++i)
+			if (footprint[i])
+				++cells;
+		return cells;
+	};
+
+	// === Part 1: Story phases up to the worm chapter ===
+	if (_state.b(GameState::kPhase) < 0x4f) {
+		speedrunStory();
+		if (!speedrunAlive() || (_state.b(GameState::kPhase) != 0x4f && _state.b(GameState::kPhase) != 0x50)) {
+			speedrunLog("BLOCKED late-campaign ecology: story did not reach the worm chapter");
+			return;
+		}
+	}
+
+	// === Part 2: First worm journey + ecology unlock (Thufir, Jessica, Liet Kynes) ===
+	if (_state.b(GameState::kPhase) == 0x4f) {
+		uint firstStop = 0xffff;
+		for (uint i = 1; i < _world.locationCount(); ++i)
+			if (!_world.location(i).hidden() && _world.friendlyPlace(i) && _world.location(i).isSietch()) {
+				firstStop = i;
+				break;
+			}
+		if (firstStop == 0xffff) {
+			speedrunLog("BLOCKED late-campaign ecology: no known sietch for first worm journey");
+			return;
+		}
+		speedrunRideWormTo((int)firstStop);
+		if (!speedrunAlive() || _state.b(GameState::kPhase) != 0x50) {
+			speedrunLog("BLOCKED late-campaign ecology: first worm journey did not advance the story");
+			return;
+		}
+	}
+	speedrunLog("Late-campaign ecology: first worm journey complete");
+
+	if (_state.b(GameState::kPhase) < 0x5c) {
+		if (_world.currentLocation() != 0 || _desert)
+			speedrunTravel(0);
+		if (_state.b(World::kUnread)) {
+			if (_world.currentLocation() == 0 && !_desert)
+				speedrunEnterRoom(8, true);
+			speedrunConverse();
+			for (uint i = 0; i < _world.sightingCount() && _state.b(World::kUnread) &&
+					!_ending && !_quitRequested && !ecologyServiceFailed; ++i) {
+				if (!speedrunClickRow(kRowCommNew, -1, nullptr) ||
+						!speedrunClickRow(kRowCommPick, -1, nullptr))
+					break;
+				speedrunConverse();
+			}
+			if (_state.b(World::kUnread)) {
+				speedrunLog("BLOCKED late-campaign ecology: unread COMM messages could not be cleared");
+				return;
+			}
+		}
+		if (speedrunMeet(2)) {
+			speedrunStartConversation(2);
+			speedrunConverse();
+		}
+		if (_state.b(GameState::kPhase) == 0x50 && speedrunMeet(2)) {
+			speedrunStartConversation(2);
+			speedrunConverse();
+		}
+		if (!speedrunAlive() || _state.b(GameState::kPhase) < 0x51) {
+			speedrunLog("BLOCKED late-campaign ecology: Thufir's hidden-palace hint was not reached");
+			return;
+		}
+		if (speedrunMeet(1))
+			speedrunCompanion(1, true);
+		speedrunTravel(0);
+		speedrunEnterRoom(11, true);
+		speedrunConverse();
+		speedrunStartConversation(1);
+		speedrunConverse();
+		if (_state.b(GameState::kPhase) < 0x54) {
+			speedrunLog("BLOCKED late-campaign ecology: Jessica's hidden-door line did not open the greenhouse");
+			return;
+		}
+		if (speedrunMeet(7))
+			speedrunCompanion(7, true);
+		speedrunTravel(0);
+		speedrunEnterRoom(3, true);
+		speedrunConverse();
+		speedrunStartConversation(7);
+		speedrunConverse();
+		if (_state.b(GameState::kPhase) < 0x55) {
+			speedrunLog("BLOCKED late-campaign ecology: Chani's greenhouse line did not reveal Liet's location");
+			return;
+		}
+		speedrunTravel(World::kBulbPlace);
+		const uint kynesRoom = MAX<uint>(1, _world.character(6).room);
+		speedrunEnterRoom(kynesRoom, true);
+		speedrunConverse();
+		if (_state.b(GameState::kPhase) < 0x58) {
+			speedrunLog("BLOCKED late-campaign ecology: Liet Kynes was not met through the story");
+			return;
+		}
+		speedrunEnterRoom(2, true);
+		if (speedrunMeet(6)) {
+			speedrunStartConversation(6);
+			speedrunConverse();
+		}
+		if (_state.b(GameState::kPhase) < 0x5c) {
+			speedrunLog("BLOCKED late-campaign ecology: Liet's bulb discussion did not unlock ecology jobs");
+			return;
+		}
+		speedrunLog("Late-campaign ecology: ecology jobs unlocked through Liet Kynes");
+	}
+
+	// === Part 3: Cure epidemic + ecology setup (bulbs, wind trap, irrigation start) ===
+	if (_state.b(GameState::kPhase) == 0x5c && _world.illnessPlace() < 0) {
+		const uint chani = 7;
+		speedrunCompanions(&chani, 1);
+	}
+	cureEpidemic();
+	if (ecologyServiceFailed) {
+		speedrunLog("BLOCKED late-campaign ecology: epidemic cure failed before ecology setup");
+		return;
+	}
+	speedrunSpice();
+
+	Common::Array<uint> recruits;
+	speedrunVisitPlace(World::kBulbPlace, recruits);
+	Common::Array<uint> atBulbPlace;
+	_world.troopsAt(World::kBulbPlace, atBulbPlace);
+	uint worker = 0;
+	for (uint i = 0; i < atBulbPlace.size(); ++i) {
+		const Troop t = _world.troop(atBulbPlace[i]);
+		if (t.id && !t.harkonnen() && t.hired()) {
+			worker = t.id;
+			break;
+		}
+	}
+	if (!worker) {
+		const Location nursery = _world.location(World::kBulbPlace);
+		uint nearest = 0xffff;
+		for (uint id = 1; id <= World::kTroops; ++id) {
+			const Troop t = _world.troop(id);
+			const int at = _world.troopPlace(id);
+			if (!t.id || !t.hired() || t.harkonnen() || (t.occupation & 0x60) ||
+					id == World::kProspectorTroop || (t.equipment & 0x80) || at < 0 ||
+					!_world.friendlyPlace((uint)at) ||
+					((t.occupation & 0x0f) != Troop::kSpiceMining &&
+					 (t.occupation & 0x0f) != Troop::kWaitingForOrders))
+				continue;
+			const Location from = _world.location((uint)at);
+			const uint distance = _world.cellDistance(from.longitude, from.latitude,
+					nursery.longitude, nursery.latitude);
+			if (distance < nearest) {
+				nearest = distance;
+				worker = id;
+			}
+		}
+		if (worker) {
+			speedrunLog(Common::String::format("Late-campaign ecology: troop %u moves to Sihaya-Tuek to grow bulbs", worker));
+			speedrunOrders(worker, -1, false, World::kBulbPlace);
+			for (uint slot = 0; slot < 2048 && !_ending && !_quitRequested && !ecologyServiceFailed &&
+					(_world.troop(worker).occupation & 0x40); ++slot)
+				advanceEcologySlot(worker);
+			if (!speedrunAlive() || _world.troopPlace(worker) != World::kBulbPlace) {
+				speedrunLog("BLOCKED late-campaign ecology: worker did not reach Sihaya-Tuek");
+				return;
+			}
+		}
+	}
+	if (!worker) {
+		speedrunLog("BLOCKED late-campaign ecology: no ecology troop available at Sihaya-Tuek");
+		return;
+	}
+	if (!_world.location(World::kBulbPlace).bulbs) {
+		speedrunOrders(worker, Troop::kIrrigation, false, -2);
+		speedrunLog(Common::String::format("Late-campaign ecology: troop %u starts bulb-growing job at Sihaya-Tuek", worker));
+		for (uint slot = 0; slot < 2048 && !_ending && !_quitRequested && !ecologyServiceFailed &&
+				!_world.location(World::kBulbPlace).bulbs; ++slot)
+			advanceEcologySlot(worker);
+	}
+	if (!speedrunAlive() || !_world.location(World::kBulbPlace).bulbs) {
+		speedrunLog("BLOCKED late-campaign ecology: bulb-growing job did not produce bulbs");
+		return;
+	}
+	if (!(_world.troop(worker).equipment & 0x02) && speedrunOpenOrders(worker)) {
+		if (speedrunClickRow(kRowEquipment, -1, "open the ecology troop equipment")) {
+			const Common::Rect bulbs = _equipRects[1][6]; // bulbs available in the sietch
+			if (!bulbs.isEmpty())
+				speedrunMouseClick((bulbs.left + bulbs.right) / 2, (bulbs.top + bulbs.bottom) / 2, "take bulbs");
+			speedrunClickRow(kRowEquipDone, -1, nullptr);
+		}
+		speedrunCloseOrders();
+	}
+	if (!(_world.troop(worker).equipment & 0x02)) {
+		speedrunLog("BLOCKED late-campaign ecology: worker could not take bulbs through MODIFY EQUIPMENT");
+		return;
+	}
+	speedrunLog(Common::String::format("Late-campaign ecology: troop %u takes bulbs at day %u", worker, _world.day()));
+
+	const Location palace = _world.location(1);
+	int target = -1;
+	uint bestDistance = 0xffff;
+	for (uint i = 2; i < _world.locationCount(); ++i) {
+		const Location l = _world.location(i);
+		if (!_world.friendlyPlace(i) || !l.isSietch() || l.hidden() || (l.status & 0x01))
+			continue;
+		uint nearest = 0xffff;
+		for (int north = 0; north <= 82; north += 2) {
+			const int lat = MAX(-82, (int)l.latitude - north);
+			nearest = MIN(nearest, _world.cellDistance(l.longitude, (int16)lat, palace.longitude, palace.latitude));
+		}
+		if (nearest < bestDistance) {
+			bestDistance = nearest;
+			target = (int)i;
+		}
+	}
+	if (target < 0) {
+		speedrunLog("BLOCKED late-campaign ecology: no friendly sietch can host a wind trap");
+		return;
+	}
+	if (_world.troopPlace(worker) != target) {
+		speedrunOrders(worker, -1, false, target);
+		for (uint slot = 0; slot < 2048 && !_ending && !_quitRequested && !ecologyServiceFailed &&
+				(_world.troop(worker).occupation & 0x40); ++slot)
+			advanceEcologySlot(worker);
+	}
+	if (!speedrunAlive() || _world.troopPlace(worker) != target) {
+		speedrunLog(Common::String::format("BLOCKED late-campaign ecology: worker %u did not reach sietch %d", worker, target));
+		return;
+	}
+	if (!(_world.location((uint)target).status & 0x20)) {
+		speedrunOrders(worker, Troop::kWindTrap, false, -2);
+		for (uint slot = 0; slot < 2048 && !_ending && !_quitRequested && !ecologyServiceFailed &&
+				!(_world.location((uint)target).status & 0x20); ++slot)
+			advanceEcologySlot(worker);
+	}
+	if (!speedrunAlive() || !(_world.location((uint)target).status & 0x20)) {
+		speedrunLog("BLOCKED late-campaign ecology: wind trap assembly did not finish");
+		return;
+	}
+	if ((_world.troop(worker).occupation & 0x0f) != Troop::kIrrigation)
+		speedrunOrders(worker, Troop::kIrrigation, false, -2);
+	for (uint slot = 0; slot < 12000 && !_ending && !_quitRequested && !ecologyServiceFailed &&
+			!(_world.location((uint)target).status & 0x01); ++slot)
+		advanceEcologySlot(worker);
+	if (!speedrunAlive() || !(_world.location((uint)target).status & 0x01)) {
+		speedrunLog("BLOCKED late-campaign ecology: irrigation did not start vegetation at wind-trap sietch");
+		return;
+	}
+	speedrunLog(Common::String::format("Late-campaign ecology: irrigation running at sietch %d, troop %u, day %u; starting military campaign",
+			target, worker, _world.day()));
+	saveSlot(2);
+
+	speedrunCampaign(false);
+
+	if (!speedrunAlive()) {
+		speedrunLog("BLOCKED late-campaign ecology: military campaign did not survive to stage 1");
+		return;
+	}
+	if (_state.b(kFinalStage) < 1) {
+		speedrunLog(Common::String::format("BLOCKED late-campaign ecology: stage %u after campaign, expected >=1 (demands paused)",
+				_state.b(kFinalStage)));
+		return;
+	}
+	const uint postFortDay = _world.day();
+	speedrunLog(Common::String::format("Late-campaign ecology: last fort won at day %u, stage %u, demands paused, %u vegetation cells",
+			postFortDay, _state.b(kFinalStage), cropCells()));
+
+	// === Part 5: Post-stage-1 ecology growth (demands paused, unlimited time) ===
+	// Advance time until vegetation takes the palace (floppy ending) or reaches disc limit.
+	// The ecology worker continues irrigating; garrison handles raids.
+	const uint startDay = _world.day();
+	const uint initialCrop = cropCells();
+	const uint safetyDays = 10000;
+	uint day = 0;
+	speedrunLog(Common::String::format("Late-campaign ecology: growing vegetation from sietch %d, %u cells at day %u",
+			target, initialCrop, startDay));
+	while (day < safetyDays && !_world.friendlyPlace(1) && !_world.vegetationAtLimit((uint)target) && !_ending && !_quitRequested && !ecologyServiceFailed) {
+		++day;
+		for (uint slot = 0; slot < World::kSlotsPerDay && !_ending && !_quitRequested && !ecologyServiceFailed && !_world.friendlyPlace(1); ++slot)
+			advanceEcologySlot(worker);
+		if (!_ending && !_quitRequested && !ecologyServiceFailed && (day % 100 == 0 || _world.vegetationAtLimit((uint)target) || _world.friendlyPlace(1))) {
+			const uint cells = cropCells();
+			speedrunLog(Common::String::format("Late-campaign ecology: checkpoint day %u, %u cells (%+d from start)%s",
+					_world.day(), cells, (int)cells - (int)initialCrop,
+					_world.friendlyPlace(1) ? "; palace reached" : _world.vegetationAtLimit((uint)target) ? "; disc limit reached" : ""));
+			saveSlot(2);
+		}
+	}
+	const uint finalCrop = cropCells();
+	speedrunLog(Common::String::format("Late-campaign ecology: vegetation %u -> %u cells, days %u -> %u; %s",
+			initialCrop, finalCrop, startDay, _world.day(),
+			_world.friendlyPlace(1) ? "palace reached" :
+			_world.vegetationAtLimit((uint)target) ? "disc limit reached" :
+			day == safetyDays ? "safety limit reached" : "route interrupted or ended"));
+
+	if (ecologyServiceFailed || !speedrunAlive())
+		return;
+	if (!_world.friendlyPlace(1)) {
+		speedrunLog("BLOCKED late-campaign ecology: vegetation did not take the palace");
+		return;
+	}
+	saveSlot(2);
+	speedrunLog("Ecology: Paul travels to the captured palace for the native floppy ending");
+	speedrunTravel(1);
+	if (!speedrunAlive() || _world.currentLocation() != 1 || _desert) {
+		speedrunLog("BLOCKED Paul did not land at the captured palace");
+		return;
+	}
+	speedrunShowRoom(1, true);
+	speedrunEnterRoom(2, true);
+	for (uint guard = 0; _sceneActive && guard < 400 && !_ending && !_quitRequested; ++guard) {
+		speedrunActionPause(true);
+		if (_mode == kTalk)
+			advanceConversation();
+		else
+			sceneStep();
+		speedrunActionPause(false);
+	}
+	if (_state.b(GameState::kPhase) >= 0xc8 && _ending && _endingText.empty())
+		speedrunLog("Ecology: the palace victory scene reached its ending");
+	else
+		speedrunLog("BLOCKED the palace did not reach the ending credits");
+}
+
 void GameScreen::speedrun(const Common::String &part) {
 	if (!loadDialogue())
 		return;
@@ -2369,6 +2797,14 @@ void GameScreen::speedrun(const Common::String &part) {
 					_world.troopPlace(World::kProspectorTroop) == safe && (_world.troop(World::kProspectorTroop).occupation & 0x40)
 					? "PASS" : "FAIL"));
 		}
+		speedrunLog("end");
+		return;
+	}
+	if (part == "late-ecology") {
+		if (_world.floppy() && !_world.amiga())
+			speedrunLateCampaignEcology();
+		else
+			speedrunLog("BLOCKED the late ecology campaign requires the DOS floppy release");
 		speedrunLog("end");
 		return;
 	}

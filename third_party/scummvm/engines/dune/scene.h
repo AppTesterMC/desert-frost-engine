@@ -480,7 +480,8 @@ private:
 	void speedrunMouseClick(int x, int y, const char *what);
 	bool speedrunAlive();
 	void speedrunCampaignSetup();
-	void speedrunCampaign();
+	void speedrunCampaign(bool attackPalace = true);
+	void speedrunLateCampaignEcology();
 	void speedrunFinalAttack();
 	bool speedrunFight(uint place);
 	void speedrunEquip(uint place);

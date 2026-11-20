@@ -7,10 +7,11 @@
 # show as status messages, and the full log is written to the saves folder
 # (dune-ios.log). Close the window to stop; endless exits after its tour.
 #
-# Usage: scripts/watch_speedrun.sh [campaign|full|ecology|endless] [options]
+# Usage: scripts/watch_speedrun.sh [campaign|full|ecology|late-ecology|endless] [options]
 #   campaign  from Leto's death to the ending (the default; the story before is a logged shortcut)
 #   full      from a new game to the ending (engine bot, seed 1 by default)
 #   ecology   assisted whole-planet greening and the release-specific ecology outcome
+#   late-ecology   fresh DOS floppy campaign through native irrigation and palace victory
 #   endless   bypass the ending, recruit Liet Kynes, tour the garden and
 #             every sietch room, then finish in the palace garden
 #   --release floppy|cd|amiga  select the matching local game data
@@ -63,7 +64,7 @@ validate_seconds() {
 }
 while [ $# -gt 0 ]; do
 	case "$1" in
-		campaign|full) part=$1 ;;
+		campaign|full|late-ecology) part=$1 ;;
 		green|ecology) part=green ;;
 		endless-tour|endless) part=endless-tour ;;
 		--release)
@@ -97,6 +98,10 @@ while [ $# -gt 0 ]; do
 	esac
 	shift
 done
+if [ "$part" = late-ecology ] && [ "$release" != floppy ]; then
+	echo "The late-ecology campaign requires --release floppy." >&2
+	exit 2
+fi
 
 case "${DUNE_LOCAL_BUILD_ROOT:-}" in "${TMPDIR%/}"/*|/tmp/*) unset DUNE_LOCAL_BUILD_ROOT ;; esac
 case "${DUNE_RUN_ROOT:-}" in "${TMPDIR%/}"/*|/tmp/*) unset DUNE_RUN_ROOT ;; esac

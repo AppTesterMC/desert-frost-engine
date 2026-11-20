@@ -386,6 +386,7 @@ public:
 	Common::Array<byte> &map();
 	/** Irrigated crop footprint reconstructed from the saved native disc history. */
 	Common::Array<byte> vegetationMap();
+	bool vegetationAtLimit(uint index) const;
 	/** A new game's map: MAP.HSQ as shipped, each place's cell marked with bit 6 (seg000:01a1). */
 	void resetMap();
 	/** Mark the places' cells again (bit 6) after a save's stage bits were applied. */

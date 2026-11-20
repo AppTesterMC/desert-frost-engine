@@ -178,7 +178,9 @@ bool GameScreen::maybeStartScene() {
 		return false;
 	const uint16 script = _pendingScene;
 	_pendingScene = 0;
-	if (fastCapture() && !ConfMan.hasKey("dune_scene_scripts")) {
+	const bool ecologyVictory = script == 0x128f && ConfMan.hasKey("dune_speedrun") &&
+			ConfMan.get("dune_speedrun") == "late-ecology";
+	if (fastCapture() && !ConfMan.hasKey("dune_scene_scripts") && !ecologyVictory) {
 		// Ordinary capture runs skip scenes; fidelity replays opt in.
 		_log.line(Common::String::format("Scene: script %#x skipped in a capture run", script));
 		return false;

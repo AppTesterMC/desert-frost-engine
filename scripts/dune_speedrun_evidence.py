@@ -44,7 +44,8 @@ def assess(text, part="full", process_exit=0, allow_order_bypasses=False,
         ": FORCED day 3: troops fetched the sietches' free weapons (time passes)" in line)]
     progression = [line for line in forced if line not in setup]
     blocked = [line for line in speedrun if "BLOCKED" in line]
-    endings = [line for line in speedrun if "step 56 OK" in line]
+    ending = "Ecology: the palace victory scene reached its ending" if part == "late-ecology" else "step 56 OK"
+    endings = [line for line in speedrun if ending in line]
     declarations = [line for line in speedrun if "coverage " in line]
     player_ui_declarations = [line for line in declarations if "player-ui-v1" in line]
     player_ui_categories = _player_ui_categories(player_ui_declarations)
@@ -72,6 +73,18 @@ def assess(text, part="full", process_exit=0, allow_order_bypasses=False,
         failures.append(f"engine exited with status {process_exit}")
     if not lines:
         failures.append("fresh engine log missing or empty")
+    if part == "late-ecology":
+        required = (
+            "start (late-ecology, floppy)", "Shipments: shipped ", "bulbs grown at place ",
+            "wind-trap assembled at place ", "vegetation starts at place ",
+            "last fort won at day ", "Ecology: the vegetation takes place 1 from the Harkonnens",
+            "Story: Paul enters the Baron's hall, the end", "Scene: script 0x128f starts",
+            "Credits: slideshow (16 scenes)",
+        )
+        failures.extend(f"missing ecology milestone: {token}" for token in required if token not in text)
+        growth = re.search(r"Late-campaign ecology: vegetation (\d+) -> (\d+) cells", text)
+        if not growth or int(growth[2]) <= int(growth[1]):
+            failures.append("irrigation did not increase the vegetation footprint")
     if not endings:
         failures.append("ending milestone missing")
     if not lines or not re.fullmatch(r"Speedrun: .*: end", lines[-1]):
@@ -153,7 +166,7 @@ def assess(text, part="full", process_exit=0, allow_order_bypasses=False,
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("log", type=Path)
-    parser.add_argument("--part", choices=["full", "campaign"], default="full")
+    parser.add_argument("--part", choices=["full", "campaign", "late-ecology"], default="full")
     parser.add_argument("--process-exit", type=int, default=0)
     parser.add_argument("--release", default="unknown")
     parser.add_argument("--seed", default="1")

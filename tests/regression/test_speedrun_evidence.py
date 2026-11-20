@@ -17,6 +17,28 @@ END = "Speedrun: day 87: step 56 OK: the Emperor's throne room, the end\nSpeedru
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_ecology_requires_native_growth_capture_and_credits(self):
+        log = """Speedrun: day 1: start (late-ecology, floppy)
+Shipments: shipped 1000 kg
+Ecology: 16 bulbs grown at place 62
+Ecology: wind-trap assembled at place 16
+Ecology: vegetation starts at place 16
+Speedrun: day 86: last fort won at day 86
+Ecology: the vegetation takes place 1 from the Harkonnens
+Speedrun: day 153: Late-campaign ecology: vegetation 49 -> 1925 cells
+Story: Paul enters the Baron's hall, the end
+Scene: script 0x128f starts
+Credits: slideshow (16 scenes)
+Speedrun: day 153: Ecology: the palace victory scene reached its ending
+Speedrun: day 153: end
+"""
+        self.assertTrue(evidence.assess(log, "late-ecology")["passed"])
+        for before, after in [("49 -> 1925", "49 -> 49"), ("takes place 1", "takes place 10"),
+                              ("Credits: slideshow (16 scenes)", "Scene: script 0x128f skipped in a capture run")]:
+            with self.subTest(before=before):
+                self.assertFalse(evidence.assess(log.replace(before, after), "late-ecology")["passed"])
+
+
     def test_legacy_success_is_never_player_ui_proof(self):
         result = evidence.assess(END)
         self.assertTrue(result["passed"])

@@ -88,6 +88,14 @@ Amiga can be selected explicitly. A passing result is assisted engine-logic
 coverage. It does not establish a player-controlled UI run or an uninterrupted
 campaign; the evidence report records setup, reloads and other assistance.
 
+On DOS floppy, `scripts/watch_speedrun.sh late-ecology --release floppy` plays
+from a new game. Paul meets Liet Kynes, grows bulbs, prepares a wind trap and
+wins the forts while a troop irrigates. When its vegetation captures the
+Harkonnen palace, Paul enters the Baron's hall for the victory slideshow.
+`scripts/check_speedrun.sh late-ecology 1` checks the shipment, crop growth,
+palace capture and ending in the game log. The older `ecology` command still
+runs the assisted whole-planet greening fixture.
+
 The bot still calls campaign actions directly and retries lost battles through
 save/load. Seeded campaigns are separate from new-game progression evidence;
 results apply to the tested build and do not certify an untested IPA.

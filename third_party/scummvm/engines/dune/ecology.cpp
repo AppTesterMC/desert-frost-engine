@@ -514,4 +514,13 @@ Common::Array<byte> World::vegetationMap() {
 	return footprint;
 }
 
+bool World::vegetationAtLimit(uint index) const {
+	if (index >= locationCount())
+		return false;
+	const byte *l = _state.vars + Location::kTableOffset + index * Location::kRecordSize;
+	// The native job subtracts two only when the next latitude is >= -82
+	// (CD 76f4-7703). Odd starting latitudes therefore stop at -81.
+	return (l[10] & kStatusVegetation) && (int8)l[kDiscLatitude] - 2 < -82 && l[kDiscRadius] >= 12;
+}
+
 } // namespace Dune

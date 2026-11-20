@@ -6,7 +6,7 @@
 # Battle losses may reload previously written saves; this is a completion
 # regression, not proof of a single uninterrupted playthrough.
 #
-# Usage: scripts/check_speedrun.sh [campaign|full] [--no-rewinds] [seed...]
+# Usage: scripts/check_speedrun.sh [campaign|full|late-ecology] [--no-rewinds] [seed...]
 # --no-rewinds commits to the outcome of every attack, including the approach.
 #   campaign starts after Leto's death (only its two declared setup FORCED
 #   markers are allowed; later forced progression fails)
@@ -28,7 +28,7 @@ local_root="${DUNE_LOCAL_BUILD_ROOT:-$HOME/Library/Caches/Cryogenic-local/dune-s
 run_base="${DUNE_RUN_ROOT:-$local_root/sdl-run}/speedrun"
 part=${1:-campaign}
 [ "$#" -eq 0 ] || shift
-case "$part" in campaign|full) ;; *) echo "FAIL speedrun: expected campaign or full"; exit 2 ;; esac
+case "$part" in campaign|full|late-ecology) ;; *) echo "FAIL speedrun: expected campaign, full or late-ecology"; exit 2 ;; esac
 if [ "${1:-}" = --no-rewinds ]; then
 	export DUNE_SPEEDRUN_NO_REWINDS=1
 	shift
@@ -52,7 +52,11 @@ if [ "${DUNE_SPEEDRUN_PLAYER_UI:-0}" = 1 ] || [ "${DUNE_SPEEDRUN_REQUIRE_PLAYER_
 fi
 
 seeds=${*:-1}
-releases=${DUNE_SPEEDRUN_RELEASES:-floppy cd}
+if [ "$part" = late-ecology ]; then
+	releases=${DUNE_SPEEDRUN_RELEASES:-floppy}
+else
+	releases=${DUNE_SPEEDRUN_RELEASES:-floppy cd}
+fi
 status=0
 
 if ! SDL_AUDIODRIVER=dummy "$script_dir/test_dune_scummvm_sdl.sh" build >/dev/null 2>&1; then
