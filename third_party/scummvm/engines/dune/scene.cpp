@@ -4828,7 +4828,19 @@ void GameScreen::drawTalk() {
 		// recorded as the room is drawn, CD ds:47f8/47fa) clamped to 0xf0 and
 		// 0x71 is the top-left of an 80x38 window, zoomed 4x (vga_zoom,
 		// bp = 6) over the view; no anchor, no zoom (3b21).
-		const Common::Point p = _talkWho < ARRAYSIZE(_personPos) ? _personPos[_talkWho] : Common::Point(-1, -1);
+		Common::Point p = _talkWho < ARRAYSIZE(_personPos) ? _personPos[_talkWho] : Common::Point(-1, -1);
+		if (_talkKind == kTalkComm && !_world.amiga()) {
+			// COMM uses the projected sender's position to zoom the clean room backdrop.
+			// The packed (x, y) words are at CD DS:225D and floppy DS:28B5.
+			static const uint16 kCommFacePositions[] = {
+				0xfff2, 0x050c, 0xff0a, 0x0b09, 0x0000, 0x0000,
+				0x0140, 0x0098, 0x000a, 0x128b, 0x109c, 0x0c9d
+			};
+			if (_talkWho < ARRAYSIZE(kCommFacePositions)) {
+				const uint16 position = kCommFacePositions[_talkWho];
+				p = Common::Point(position & 0xff, position >> 8);
+			}
+		}
 		if (!_visionDream && !_cabinView && _world.amiga()) {
 		// The Amiga's zoom is not traced (no capture): the engine's earlier
 		// 2x round the speaker stays there.
