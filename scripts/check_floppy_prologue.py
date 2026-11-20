@@ -19,12 +19,20 @@ def play(binary, data, root, name, script, settings=None, timeout=30):
     config = {"savepath": saves, "dune_no_music": 1, "dune_input": inputs, **(settings or {})}
     ini = folder / "game.ini"
     ini.write_text("[scummvm]\n" + "".join(f"{key}={value}\n" for key, value in config.items()))
-    with (folder / "stdout.log").open("w") as output:
-        subprocess.run([str(binary), "-c", str(ini), "--gfx-mode=surfacesdl", "--no-fullscreen",
-                        "--path=" + str(data), "dune"], stdout=output, stderr=subprocess.STDOUT,
-                       env=dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy",
-                                SDL_RENDER_DRIVER="software"), check=True, timeout=timeout)
-    return (saves / "dune-ios.log").read_text()
+    command = [str(binary), "-c", str(ini), "--gfx-mode=surfacesdl", "--no-fullscreen",
+               "--path=" + str(data), "dune"]
+    env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy", SDL_RENDER_DRIVER="software")
+    log = saves / "dune-ios.log"
+    for attempt in range(3):
+        output = folder / f"stdout-{attempt + 1}.log"
+        with output.open("w") as stream:
+            result = subprocess.run(command, stdout=stream, stderr=subprocess.STDOUT, env=env, timeout=timeout)
+        if result.returncode == 0:
+            return log.read_text()
+        # On macOS the dummy SDL surface occasionally fails before a game has started.
+        if log.exists() or "SDL_BlitSurface failed" not in output.read_text() or attempt == 2:
+            result.check_returncode()
+
 
 
 def pages(log):
