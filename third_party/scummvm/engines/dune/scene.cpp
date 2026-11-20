@@ -1051,8 +1051,7 @@ void GameScreen::composeView(bool includeOccupants) {
 		Common::Array<uint16> markerSprites;
 		{
 			Common::Array<byte> people;
-			if (includeOccupants)
-				_world.peopleInRoom(people);
+			_world.peopleInRoom(people);
 			const uint markers = MIN<uint>(Room(roomData).markerCount(salRoom), 23);
 			byte slots[23];
 			memset(slots, 0xff, sizeof(slots));
@@ -1124,7 +1123,7 @@ void GameScreen::composeView(bool includeOccupants) {
 			// BALCON frame 2 under the pieces the SAL record places.
 			sheet.drawFrame(2, _surface.surfacePtr(), 0, 0);
 		ok = Room(roomData).draw(salRoom, sheet, *_surface.surfacePtr(),
-				_panel.characterSheet().empty() ? nullptr : &characters, &markerSprites);
+				includeOccupants && !_panel.characterSheet().empty() ? &characters : nullptr, &markerSprites);
 		// draw_ornis_loop (seg000:3a32): the ornithopters parked on the pad
 		// of the place's first room, in the room's own colours.
 		if (ok && _room == 1 && _orniFrame != 0xff)
@@ -4895,7 +4894,11 @@ void GameScreen::drawTalk() {
 	} else if (_cabinView) {
 		drawCabin();
 	} else {
-		composeView();
+		// The CD zooms the empty room around the speaker's standing position.
+		// Wide shots still draw the people, including the scripted cast.
+		const bool cdPortrait = !_world.floppy() && !_talkEnded &&
+				(_talkKind == kTalkNormal || _talkKind == kTalkScene);
+		composeView(!cdPortrait);
 	}
 	if (!_talkEnded) {
 		// While a line is spoken the view zooms twice onto the speaker (the
