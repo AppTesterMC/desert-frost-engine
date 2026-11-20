@@ -57,6 +57,79 @@ bool fastCapture() {
 	return (isDumpRun() && !dumpEveryMillis()) || isDuneHarnessRun();
 }
 
+// A floppy HSQ head has authored idle groups followed by a speech table.
+// Paul banks his lively and calm poses together; a named actor has separate
+// groups. The original ending also runs both slots together on the last card.
+class FloppyCreditHead {
+public:
+    bool load(OSystem *system, Resource &resources, World &world, const char *name,
+            int x, int y, int bank, int calm, int budget) {
+        Common::Array<byte> data;
+        if (!resources.load(name, data))
+            return false;
+        _sheet.reset(new Sprite(system, data));
+        if (_sheet->animationCount() < 2) {
+            _sheet.reset();
+            return false;
+        }
+        _x = x;
+        _y = y;
+        _bank = bank;
+        _calm = calm;
+        _budget = budget;
+        _sheet->setPalette();
+        startLively(world);
+        return true;
+    }
+
+    void tick(World &world) {
+        if (!_sheet)
+            return;
+        if (_settled) {
+            if (_budget <= 0) {
+                const uint window = world.randMasked(_bank >= 0 ? 0x0f18 : 0x0f38);
+                if (window >> 8)
+                    return;
+                select(_bank >= 0 ? _bank : _calm, window & 0x38);
+                _budget = 8;
+            } else {
+                _frame = (_frame + 1) % _length;
+            }
+            --_budget;
+        } else {
+            --_budget;
+            if (_frame + 1 < _length)
+                ++_frame;
+            else if (_budget < 0)
+                _settled = true;
+            else
+                startLively(world);
+        }
+    }
+
+    void draw(Graphics::Surface &picture) {
+        if (_sheet)
+            _sheet->drawAnimationFrame(_animation, _frame, &picture, _x, _y);
+    }
+
+private:
+    void startLively(World &world) {
+        select(_bank >= 0 ? (uint)_bank : (world.randMasked(6) >> 1), _bank >= 0 ? 32 : 0);
+    }
+
+    void select(uint group, uint frame) {
+        _animation = MIN<uint>(group, _sheet->animationCount() - 2);
+        _length = MAX<uint>(1, _sheet->animationFrameCount(_animation));
+        _frame = MIN<uint>(frame, _length - 1);
+    }
+
+    Common::ScopedPtr<Sprite> _sheet;
+    int _x = 0, _y = 0;
+    int _bank = -1, _calm = 4, _budget = 0;
+    uint _animation = 0, _frame = 0, _length = 1;
+    bool _settled = false;
+};
+
 enum {
 	kIdleSpeakerMillis = 250,   ///< 0x32 timer ticks (seg000:2b5e)
 	kIdleDreamMillis = 2247,    ///< 0x1c2 ticks: the vision dream (seg000:2b8a)
@@ -679,8 +752,8 @@ void GameScreen::floppyEndingCreditsSlideshow() {
     _state.setW(GameState::kPersonsInRoom, 0);
     _state.setW(GameState::kPersonsWith, 0);
     Common::Array<byte> song;
-    if (_music && _resources.load("WORMSUIT.HSQ", song))
-        _music->play(song);
+    if (_music && _resources.load("WORMSUIT.HSQ", song) && _music->play(song))
+        _log.line("Credits: playing WORMSUIT.HSQ");
 
     auto findPalace = [&]() -> uint {
         for (uint i = 0; i < _world.locationCount(); ++i)
@@ -1002,40 +1075,41 @@ void GameScreen::floppyEndingCreditsSlideshow() {
         // Draw HSQ portrait sprite for floppy ending. dune-re intro_setup_talking_head
         // places each head at (0,0); scene 15 uses mirror_dual_head_setup:
         // Chani y+15, Paul x+45 (0x2d).
-        // The original intro head task picks lively animations for named
-        // actors every time a group ends. Its 120-tick idle budget exceeds
-        // this cast card's 600-PIT-tick hold (one animation tick per 16 PIT).
-        Common::ScopedPtr<Sprite> idleHead;
-        Common::Array<byte> backdrop;
-        uint idleAnimation = 0, idleFrame = 0;
         Graphics::Surface picture = _surface.surfacePtr()->getSubArea(Common::Rect(0, kFbOffset, 320, 170));
-        auto chooseAnimation = [&]() {
-            const uint count = idleHead->animationCount();
-            // The last table entry contains speech shapes, never an idle group.
-            idleAnimation = MIN<uint>(_world.randMasked(6) >> 1, count - 2);
-            idleFrame = 0;
-        };
-        if (playSlides && scene >= 2 && scene <= 13) {
-            Common::Array<byte> data;
-            if (_resources.load(kEndingHeads[scene], data)) {
-                idleHead.reset(new Sprite(_system, data));
-                if (idleHead->animationCount() < 2) {
-                    idleHead.reset();
-                } else {
-                    backdrop.resize(picture.h * picture.pitch);
-                    memcpy(backdrop.data(), picture.getPixels(), backdrop.size());
-                    idleHead->setPalette();
-                    chooseAnimation();
-                }
+        FloppyCreditHead actor, paul;
+        Common::Array<byte> backdrop;
+        if (playSlides && ((scene >= 1 && scene <= 13) || scene == 15)) {
+            bool animated;
+            if (scene == 1 || scene == 15) {
+                // char_to_sprite_player selects one of nine ages and a gaunt
+                // variant after a long desert walk (ds:f4). Mirror Paul gets
+                // four lively ticks, and late-game Chani starts with zero.
+                const int bank = 2 * MIN<uint>(_state.w(GameState::kGameTime) >> 6, 8) +
+                        (_state.b(0xf4) >= 16 ? 1 : 0);
+                animated = scene == 15 && actor.load(_system, _resources, _world, "CHAN.HSQ", 0, 15,
+                        -1, _state.b(GameState::kPhase) >= 0xc8 ? 5 : 4, 0);
+                if (paul.load(_system, _resources, _world, "PAUL.HSQ", scene == 15 ? 45 : 0, 0, bank, 0, 4))
+                    animated = true;
+            } else {
+                // The named cast have 30 subtitle words' worth of lively time
+                // (120 animation ticks) for a card lasting only 600 PIT ticks.
+                animated = actor.load(_system, _resources, _world, kEndingHeads[scene],
+                        kEndingHeadDx[scene], 0, -1, 4, 120);
+            }
+            if (animated) {
+                backdrop.resize(picture.h * picture.pitch);
+                memcpy(backdrop.data(), picture.getPixels(), backdrop.size());
+                actor.draw(picture);
+                paul.draw(picture);
             }
         }
-        if (idleHead) {
-            idleHead->drawAnimationFrame(idleAnimation, idleFrame, &picture, kEndingHeadDx[scene], 0);
-        } else if (scene < 15 && kEndingHeads[scene]) {
-            drawEndingHead(kEndingHeads[scene], kEndingHeadDx[scene], kFbOffset);
-        } else if (scene == 15) {
-            drawEndingHead("CHAN.HSQ", 0, 15 + kFbOffset);
-            drawEndingHead("PAUL.HSQ", 45, kFbOffset);
+        if (backdrop.empty()) {
+            if (scene < 15 && kEndingHeads[scene]) {
+                drawEndingHead(kEndingHeads[scene], kEndingHeadDx[scene], kFbOffset);
+            } else if (scene == 15) {
+                drawEndingHead("CHAN.HSQ", 0, 15 + kFbOffset);
+                drawEndingHead("PAUL.HSQ", 45, kFbOffset);
+            }
         }
 
         // Restore palette entry 0 (black) and entry 240 (bright gold, confirmed by
@@ -1099,45 +1173,38 @@ void GameScreen::floppyEndingCreditsSlideshow() {
         // wait_interruptable(0x258) holds each still for 600 PIT ticks.
         // The floppy timer is about 200.3 Hz, so this is approximately 3 s.
         if (playSlides && !skipHold) {
+            const bool terminalKey = scene == 15 && !fastCapture() && !ConfMan.hasKey("dune_speedrun") &&
+                    !ConfMan.hasKey("dune_exit_after_ending");
             const uint32 start = _system->getMillis();
             uint32 nextTick = 80;
             while (!advanceRequested()) {
                 const uint32 elapsed = _system->getMillis() - start;
-                if (elapsed >= 3000)
+                if (elapsed >= 3000 && !terminalKey)
                     break;
-                if (idleHead && elapsed >= nextTick) {
+                if (!backdrop.empty() && elapsed >= nextTick) {
                     do {
-                        if (++idleFrame >= idleHead->animationFrameCount(idleAnimation))
-                            chooseAnimation();
+                        actor.tick(_world);
+                        paul.tick(_world);
                         nextTick += 80;
                     } while (elapsed >= nextTick);
                     memcpy(picture.getPixels(), backdrop.data(), backdrop.size());
-                    idleHead->drawAnimationFrame(idleAnimation, idleFrame, &picture, kEndingHeadDx[scene], 0);
+                    actor.draw(picture);
+                    paul.draw(picture);
                     _system->copyRectToScreen(picture.getPixels(), picture.pitch, 0, kFbOffset, picture.w, picture.h);
                     _system->updateScreen();
                 }
                 _system->delayMillis(5);
             }
+            if (terminalKey && !_quitRequested) {
+                _log.line("Credits: final card dismissed by input");
+                _quitRequested = true;
+            }
         }
     }
-    // Keep the final Paul + Chani "Coming soon" card on screen until exit;
-    // drawEnding() would replace it with the black cast list.
-    // Source sequence_action_0b ends by waiting for a key, then exiting to
-    // DOS. Keep capture/harness runs non-blocking and non-quitting.
-    if (!fastCapture() && !ConfMan.hasKey("dune_speedrun")) {
-        Common::Event event;
-        while (!_quitRequested) {
-            while (pollDuneEvent(_system, event)) {
-                if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER)
-                    _quitRequested = true;
-                else if (event.type == Common::EVENT_KEYDOWN || event.type == Common::EVENT_LBUTTONDOWN)
-                    _quitRequested = true;
-            }
-            if (_quitRequested)
-                break;
-            _system->updateScreen();
-            _system->delayMillis(10);
-        }
+    if (!_quitRequested && ConfMan.hasKey("dune_exit_after_ending")) {
+        const uint seconds = (uint)MAX(0, ConfMan.getInt("dune_exit_after_ending"));
+        waitPumping(seconds * 1000);
+        _log.line("Recording: final credits shown; closing the game for file finalization");
         _quitRequested = true;
     }
 }
