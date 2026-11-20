@@ -212,6 +212,7 @@ private:
 			uint32 outMillis);
 	void palaceScene(const char *dumpName, uint room, const MarkerCharacter *markers, uint markerCount,
 			const Common::Rect *zoom, const char *foreground, uint32 duration, Transition out, uint32 outMillis);
+	void feydScene();
 	void backdropCharacterScene(const char *dumpName, const char *backdrop, const char *characterName,
 			const uint16 *animations, uint animationCount, bool sardaukar, uint32 duration,
 			Transition in, uint32 inMillis, Transition out, uint32 outMillis, uint16 subtitle = 0);

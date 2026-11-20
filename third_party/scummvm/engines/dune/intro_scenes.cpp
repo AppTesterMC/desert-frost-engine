@@ -219,19 +219,70 @@ bool FloppyIntro::drawBaronBackdrop(Sprite &back, Graphics::Surface &view) {
 	return true;
 }
 
-// Background.swift: Feyd between two rows of Sardaukar.
+// Original floppy Feyd composition with two left guards and one right guard.
 bool FloppyIntro::drawFeydBackdrop(Sprite &back, Graphics::Surface &view) {
 	back.setPalette();
 	view.fillRect(Common::Rect(84, 0, 236, 152), 48);
 	back.drawFrame(4, &view, 0, 0, true);
 	back.drawFrame(4, &view, 236, 0);
-	back.drawFrame(5, &view, -53, 8);
-	back.drawFrame(6, &view, -53, 8);
-	back.drawFrame(5, &view, 0, 13);
-	back.drawFrame(6, &view, 0, 13);
-	back.drawFrame(7, &view, 200, 13);
-	back.drawFrame(8, &view, 200, 13);
+	back.drawFrame(5, &view, -58, 12);
+	back.drawFrame(6, &view, -58, 12);
+	back.drawFrame(5, &view, -5, 17);
+	back.drawFrame(6, &view, -5, 17);
+	back.drawFrame(7, &view, 204, 14);
+	back.drawFrame(8, &view, 204, 14);
 	return true;
+}
+
+// The floppy portrait callback (DUNEPRG A454) runs every 16 ticks, or 80 ms.
+// It plays one of four complete expressions, then occasionally plays an
+// eight-frame block from the idle definition. The original seeds its masked
+// generator from the clock; an explicit harness seed reproduces a DOS run.
+void FloppyIntro::feydScene() {
+	Common::Array<byte> backData, faceData;
+	if (_aborted || _quit || !_resources.load("BACK.HSQ", backData) || !_resources.load("FEYD.HSQ", faceData))
+		return;
+	Sprite back(_system, backData), face(_system, faceData);
+	uint16 seed = ConfMan.hasKey("dune_rng_seed") ? (uint16)ConfMan.getInt("dune_rng_seed") : (uint16)_system->getMillis();
+	auto randomMasked = [&](uint16 mask) {
+		const uint32 product = (uint32)seed * 0xe56d;
+		seed = (uint16)(product + 1);
+		return (uint16)((((product >> 8) & 0xff00) | (seed >> 8)) & mask);
+	};
+	uint16 expression = randomMasked(6) / 2;
+	const uint16 openingFrames = face.animationFrameCount(expression);
+	if (!openingFrames || face.animationFrameCount(4) < 64)
+		return;
+	uint16 frame = 0, remaining = 0;
+	int tick = -1;
+	// The last 500 ms show the settled frame while DOS prepares the next shot.
+	runScene("intro-feyd", 4840, kNoTransition, 0, kNoTransition, 0, 2420, [&](uint32 elapsed, Graphics::Surface &view) {
+		const uint32 active = MIN<uint32>(elapsed, 4340);
+		const int due = active < 20 ? -1 : (int)(active - 20) / 80;
+		while (tick < due) {
+			++tick;
+			if (tick < openingFrames) {
+				frame = tick;
+			} else if (remaining) {
+				++frame;
+				--remaining;
+			} else {
+				const uint16 pick = randomMasked(0x0f38);
+				if (pick < 64) {
+					expression = 4;
+					frame = pick;
+					remaining = 7;
+				}
+			}
+		}
+		if (elapsed >= 4340) {
+			frame += remaining;
+			remaining = 0;
+		}
+		drawFeydBackdrop(back, view);
+		face.setPalette();
+		face.drawAnimationFrame(expression, frame, &view, 58, 0);
+	});
 }
 
 // Character.swift: queued animations each run frames x 160 ms; the last one
@@ -472,15 +523,11 @@ void FloppyIntro::backdropCharacterScene(const char *dumpName, const char *backd
 	player.offsetX = player.offsetY = 0;
 	if (!scumm_stricmp(characterName, "BARO.HSQ"))
 		player.offsetX = 83;
-	else if (!scumm_stricmp(characterName, "FEYD.HSQ"))
-		player.offsetX = 66;
 
 	const Common::String kind(backdrop);
 	runScene(dumpName, duration, in, inMillis, out, outMillis, duration / 2, [&](uint32 elapsed, Graphics::Surface &view) {
 		if (kind == "baron")
 			drawBaronBackdrop(back, view);
-		else if (kind == "feyd")
-			drawFeydBackdrop(back, view);
 		else
 			drawRedBackdrop(back, view);
 		if (sardaukar) {

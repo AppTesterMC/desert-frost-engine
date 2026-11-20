@@ -465,7 +465,6 @@ void FloppyIntro::playMovie(int startScene) {
 	static const MarkerCharacter balconyFamily[] = { { 4, 8 }, { 5, 6 }, { 6, 4 }, { 7, 2 }, { 8, 0 } };
 	static const Common::Rect letoZoom(75, 45, 75 + 84, 45 + 40);
 	static const Common::Rect jessicaZoom(170, 63, 170 + 84, 63 + 40);
-	static const uint16 feydAnimations[] = { 1, 4 };
 
 	if (due())
 		sietchScene("intro-sietch-1", 8, sietchFamily, ARRAYSIZE(sietchFamily), nullptr, 4000, kFade, 1000, kNoTransition, 0);
@@ -492,7 +491,7 @@ void FloppyIntro::playMovie(int startScene) {
 	if (due())
 		backdropCharacterScene("intro-baron", "baron", "BARO.HSQ", nullptr, 0, false, 2000, kDissolve, 300, kNoTransition, 0);
 	if (due())
-		backdropCharacterScene("intro-feyd", "feyd", "FEYD.HSQ", feydAnimations, ARRAYSIZE(feydAnimations), false, 4000, kNoTransition, 0, kNoTransition, 0);
+		feydScene();
 	if (due())
 		backdropCharacterScene("intro-baron-sardaukar", "baron", "BARO.HSQ", nullptr, 0, true, 3000, kNoTransition, 0, kDissolve, 300);
 	if (due())
