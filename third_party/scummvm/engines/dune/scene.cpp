@@ -1558,6 +1558,8 @@ void GameScreen::drawRoom(int pressedRow, int pressedArrow) {
 	// In a battle (ds:2b) the compass box is blank (floppy 329f -> 32be).
 	if (_sceneActive || (kNightBattleView && _battle))
 		_panel.setNavMode(Panel::kNavBlank);
+	if (_sceneActive && _sceneContinueLit && _rowActions[0] == kRowContinue && pressedRow < 0)
+		pressedRow = 0;
 	_panel.draw(_surface, exits, pressedRow, pressedArrow, day());
 	if (_palacePlan)
 		drawPalacePlan();
@@ -4813,6 +4815,18 @@ void GameScreen::update() {
 		updateNightBattle(_system->getMillis());
 	if (!isFastCapture()) {
 		const uint32 now = _system->getMillis();
+		if (_sceneActive && !_world.floppy() && (_mode == kRoom || _mode == kTalk) && _rowActions[0] == kRowContinue) {
+			// CD 1771 installs the 176b callback every 100 PIT ticks; d515
+			// reads its toggle instead of the mouse to highlight Continue.
+			const bool lit = ((now - _sceneBlinkStart) / 499) % 2 == 0;
+			if (lit != _sceneContinueLit) {
+				_sceneContinueLit = lit;
+				const bool exits[4] = { false, false, false, false };
+				_panel.draw(_surface, exits, lit ? 0 : -1, -1, day());
+				_system->copyRectToScreen(_surface.getBasePtr(0, 152), _surface.pitch, 0, 152, 320, 48);
+				_system->updateScreen();
+			}
+		}
 		if (!_clockStart || (_mode != kRoom && _mode != kMap))
 			_clockStart = now;
 		else if (now - _clockStart >= World::kPeriodMillis)
@@ -5062,7 +5076,8 @@ void GameScreen::drawTalk() {
 	}
 	_panel.setLeftPanel(Panel::kLeftBook);
 	_panel.setCompanions(_world.companion(0), _world.companion(1));
-	_panel.draw(_surface, exits, -1, -1, day());
+	const bool highlightContinue = _sceneActive && _sceneContinueLit && _rowActions[0] == kRowContinue;
+	_panel.draw(_surface, exits, highlightContinue ? 0 : -1, -1, day());
 	debugOverlay(*_surface.surfacePtr());
 	_system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
 	_system->updateScreen();

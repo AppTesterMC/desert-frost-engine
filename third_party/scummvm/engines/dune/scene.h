@@ -532,6 +532,8 @@ private:
 	Common::Array<byte> _scene;     ///< the running scripted scene's bytes
 	uint _sceneCursor = 0;
 	bool _sceneActive = false;
+	uint32 _sceneBlinkStart = 0;
+	bool _sceneContinueLit = false;
 	/**
 	 * The palace plan (ui_draw_palace_plan, CD seg000:18ee): a floor plan of
 	 * the Atreides palace over the view, from the red dot in the compass box.

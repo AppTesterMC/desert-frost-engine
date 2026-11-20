@@ -159,6 +159,8 @@ void GameScreen::startScene(uint16 cdOffset, bool holdLine) {
 	_scene = bytes;
 	_sceneCursor = 0;
 	_sceneActive = true;
+	_sceneBlinkStart = _system->getMillis();
+	_sceneContinueLit = false;
 	_sceneReturnRoom = _room;
 	_cast.clear();
 	_sceneKiss = 0;
