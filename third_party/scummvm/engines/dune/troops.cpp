@@ -603,7 +603,7 @@ void World::troopNewDay(uint id, uint index) {
 	// code), called first by the spice (6fe5 / 7d4e), army (71ef / 7f58)
 	// and irrigation (76cb / 842f) handlers; it acts on the first period of
 	// a day (ds:46de / ds:423a).
-	if (timeSlot() != 0 || index >= locationCount())
+	if (!dayChangedSinceLastPeriod() || index >= locationCount())
 		return;
 	if (!fortressConversion(index))
 		return;

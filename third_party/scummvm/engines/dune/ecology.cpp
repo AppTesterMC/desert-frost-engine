@@ -158,34 +158,68 @@ byte World::cellStage(uint16 longitude, int16 latitude) const {
 
 template<typename F>
 void World::forDisc(uint16 longitude, int16 latitude, uint radius, int limit, F cell) {
-	// The filled circle of seg000:64b2: for each row dy of the disc, the
-	// span of cells around the centre's column, wrapping round the row.
+	// seg000:64b2 rasterizes pairs of scanlines. Its shape and visit order
+	// both matter: 659d rotates the sprouting mask once per eligible cell.
 	if (!loadTablat())
 		return;
 	Common::Array<byte> &m = map();
-	const int r = (int)radius;
-	for (int dy = -r; dy <= r; ++dy) {
+	const auto paintRow = [&](int dy, int half) {
 		const int lat = latitude + dy;
 		if (lat > limit || lat < -limit)
-			continue;
+			return;
 		const uint row = (uint)ABS(lat);
 		if ((row + 1) * 8 > _tablat.size())
-			continue;
+			return;
 		const int rowOffset = READ_BE_UINT16(_tablat.data() + 8 * row);
 		const int cells = 2 * READ_BE_UINT16(_tablat.data() + 8 * row + 2);
 		if (!cells)
-			continue;
+			return;
 		const int rowStart = (int)kMapCentre + (lat < 0 ? -rowOffset : rowOffset);
 		const uint32 product = (uint32)longitude * (uint32)cells;
 		const int centre = (int)(((product >> 16) + ((product >> 15) & 1)) % (uint)cells);
-		int half = 0;
-		while ((half + 1) * (half + 1) + dy * dy <= r * r)
-			++half;
 		for (int dx = -half; dx <= half; ++dx) {
 			const int o = rowStart + (((centre + dx) % cells) + cells) % cells;
 			if (o >= 0 && o < (int)m.size())
 				cell((uint)o, m[o]);
 		}
+	};
+
+	int north = -(int)radius;
+	int south = (int)radius - 1;
+	int half = 0;
+	const auto paintPair = [&]() {
+		paintRow(north++, half);
+		paintRow(south--, half);
+	};
+	int remaining = (int)radius;
+	int error = remaining;
+	int slope = 0;
+	for (;;) {
+		error -= slope;
+		while (error >= 0) {
+			++half;
+			error -= ++slope;
+		}
+		paintPair();
+		error += remaining;
+		if (error < 0 || --remaining == 0)
+			break;
+		++slope;
+		++half;
+	}
+	++slope;
+	--remaining;
+	for (;;) {
+		paintPair();
+		// The second arc uses the carry from the original 16-bit ADD.
+		const bool carry = (uint16)error + (uint16)remaining > 0xffff;
+		error += remaining;
+		if (!carry && --remaining != 0)
+			continue;
+		if (--remaining < 0)
+			break;
+		++half;
+		error -= slope++;
 	}
 }
 

@@ -1371,6 +1371,12 @@ void World::prospect(uint id, uint index) {
 	troopByte(id, 3) |= Troop::kStopped;
 }
 
+bool World::dayChangedSinceLastPeriod() const {
+	// CD CS:1b46, floppy CS:1e89 compare the day nibble of the saved
+	// last processed clock with the current clock, including after a load.
+	return ((_state.w(GameState::kGameTime) ^ word(0x1174)) & 0xf0) != 0;
+}
+
 void World::runPeriod() {
 	// run_events_for_current_time_period, seg000:1b23: the troops' jobs
 	// (seg000:6c6f; the table at 6c26 has spice mining and prospecting
@@ -1378,9 +1384,10 @@ void World::runPeriod() {
 	// Once the Harkonnen palace has fallen (ds:c2 >= 7) no troop or
 	// time-of-day event runs any more (seg000:1b5e).
 	const bool troopEvents = _state.b(kShipmentPaused) < 7;
+	const bool newDay = dayChangedSinceLastPeriod();
 	// The new-day hook's illness picker (1c5f -> 1e43) runs before the
 	// stage-7 gate; Chani's cure (1d9f) after it, before the troops.
-	if (timeSlot() == 0) {
+	if (newDay) {
 		dailyRoomFixup(); // 1c5c -> 1d66
 		illnessNewDay();
 	}
@@ -1472,13 +1479,13 @@ void World::runPeriod() {
 				++troopByte(id, 26);
 		}
 	}
-	if (troopEvents && timeSlot() == 0)
+	if (troopEvents && newDay)
 		ecologyNewDay(); // seg000:63f0, on the new day
 	// seg000:1b86: the current place is staged again for the conditions
 	// (skipped with the rest from stage 7 on, seg000:1b5e).
 	if (troopEvents)
 		stageLocationForConditions(currentLocation());
-	if (timeSlot() == 0) {
+	if (newDay) {
 		// The new-day hook (CD seg000:1c62, floppy 1fa5) runs before the
 		// stage-7 gate: contact_distance_related ds:d5 grows by one a day
 		// once it is 1..0xfe (0 stays 0, 0xff wraps to 0 and stays 0xff).
@@ -1523,6 +1530,7 @@ void World::runPeriod() {
 		_log.line(Common::String::format("Clock: day %u, spice %u kg; %u miners (%u idle), %u kg a period", day(),
 				spiceStock(), miners, idle, rate));
 	}
+	setWord(0x1174, _state.w(GameState::kGameTime));
 }
 
 void World::advanceTime(uint slots) {

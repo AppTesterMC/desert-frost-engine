@@ -1,0 +1,143 @@
+{
+  "release": "Dune floppy DOS English",
+  "original_executable": "DUNEPRG.EXE",
+  "original_executable_sha256": "021e6767485735e643fdb842aa0850f339b2e5114a5142e4d7c8a10d0dc6bea7",
+  "starting_save_sha256": "b065828cd09396f76e398d09d7efc7da631c21b06850514ef646f1ea96493ca4",
+  "original_input_sha256": "3f84a41d48cde4c0573f7162081e4bb697d2e5f62b183015e061bd10049a14ee",
+  "original_engine_base": "d84ff66fc13438860a40994c7924d5b498a386fa",
+  "prepared_stages": [
+    {
+      "irrigation_days": 0,
+      "game_day": 3,
+      "period": 2,
+      "radius": 4,
+      "latitude": 10,
+      "sprouting_cells": 2,
+      "source_save_sha256": "2af433d7982cc3ce5e6c52e43a4e104fa9cf471bc5a4585fdb68ac8a188c72d8",
+      "map_sha256": "f9f327a86fac6ba47301057a4d4fe9c1ecccc73485fa7b71a11d734dc8df62bf",
+      "golden_sha256": "1c011e3a1c91246ee522ac30e5ffa9e5a25c4a3eed1852f8b9cb0db8503ebf3a"
+    },
+    {
+      "irrigation_days": 15,
+      "game_day": 18,
+      "period": 2,
+      "radius": 4,
+      "latitude": 10,
+      "sprouting_cells": 1,
+      "source_save_sha256": "7171bdddf07d8875ff40622326966fdf2967bef79fddcf8df3aa57080676712b",
+      "map_sha256": "ff4b2a30e1a8b658389d03aeadb10eccf62bda58a787d04e3c1b2bb0f6c84f82",
+      "golden_sha256": "0c50232cd6a186074ec606d2cc703f0bae879628b970008284ff513f23f4d594"
+    },
+    {
+      "irrigation_days": 30,
+      "game_day": 33,
+      "period": 2,
+      "radius": 5,
+      "latitude": 8,
+      "sprouting_cells": 1,
+      "source_save_sha256": "c7682b13be1609daff1e7ca3e151d68077d1ace0fefdacf4a15f7f6c460d6b65",
+      "map_sha256": "28770e52fddc89897981ad645a1aa0781f613ce9b39292d8810d10daddc16493",
+      "golden_sha256": "0b17d49a74e68a57f11641b9f96426ed2a3a4a3c044db35a7dd29805252d0fd2"
+    },
+    {
+      "irrigation_days": 45,
+      "game_day": 48,
+      "period": 2,
+      "radius": 6,
+      "latitude": 6,
+      "sprouting_cells": 3,
+      "source_save_sha256": "b065828cd09396f76e398d09d7efc7da631c21b06850514ef646f1ea96493ca4",
+      "map_sha256": "4dcf94d3d50935ebc3246777a54eb7931f32af7355d40e787376a79165830083",
+      "golden_sha256": "2b95c52b2c6d9b99b25c0800421b9cfaf6255236592e7459a57794cc6b251663"
+    },
+    {
+      "irrigation_days": 60,
+      "game_day": 63,
+      "period": 2,
+      "radius": 7,
+      "latitude": 4,
+      "sprouting_cells": 10,
+      "source_save_sha256": "e1c1097ff99ebd2ccdbf6c05d68854a5aae193d3118b8a71fdcccc2bb4d8b348",
+      "map_sha256": "9ec4407b5a83e40b5f387ee45fce0a417f8b109dcfefcbe74164ef2d962d52c7",
+      "golden_sha256": "961293c2460691d2c044fdd5c6f23697f2a5a9ac1b8e18c62482fc29356a91ee"
+    },
+    {
+      "irrigation_days": 75,
+      "game_day": 78,
+      "period": 2,
+      "radius": 8,
+      "latitude": 2,
+      "sprouting_cells": 7,
+      "source_save_sha256": "7c3c51e36bef456eaf32e02a0cc6c6f2b1fba40f5502d63a1ccee15ae4717a4c",
+      "map_sha256": "c3f7a8d0fe17824e717a395d713218c32741b02a9a3979e6a6295a900221fe4a",
+      "golden_sha256": "b5f5575f4c44289822a2b06712561bbd73212723205da8550420524ceb7d4e73"
+    },
+    {
+      "irrigation_days": 90,
+      "game_day": 93,
+      "period": 2,
+      "radius": 9,
+      "latitude": 0,
+      "sprouting_cells": 15,
+      "source_save_sha256": "eae0226d518fef9a0402e14ceb9fc2e870651f4977eaa7459a130e4f433ad346",
+      "map_sha256": "3a40204f8fb14ae34ee5d5665ababe27d77297f702ae72ed4107679ee3e56531",
+      "golden_sha256": "3529cb6b23ae9308870b2cae8a7fa348d8abc9db250b2f9706ea47b0f322d45b"
+    },
+    {
+      "irrigation_days": 105,
+      "game_day": 108,
+      "period": 2,
+      "radius": 10,
+      "latitude": -2,
+      "sprouting_cells": 29,
+      "source_save_sha256": "746d315c30624c948476da257e00367db44a53ffd4624ea276514099728541d6",
+      "map_sha256": "0be501c344ac5f2dd141f9fe206fba2e0dcd5ae616f360b59993e250028a8ffa",
+      "golden_sha256": "42eb11c7ffd92b81c1aa72531dfc4056f028b830b35ddfb4515c1525c13d11f5"
+    },
+    {
+      "irrigation_days": 120,
+      "game_day": 123,
+      "period": 2,
+      "radius": 11,
+      "latitude": -4,
+      "sprouting_cells": 34,
+      "source_save_sha256": "58157a916a5ebe2b095fc595c329a59b1f982ad2d1ad03f2149d5c28c1fe9d12",
+      "map_sha256": "3cb6d14453df450a0ecec7f45829cf2fa800bc4286b8f4824975654402f8ad0a",
+      "golden_sha256": "bebd9e770d9c76788f4e7758d817fafa8502e7f9b5745553951d38cb9e6f152f"
+    }
+  ],
+  "independent_progression": [
+    {
+      "day": 49,
+      "clock": 768,
+      "checkpoint": "dawn-1",
+      "ds_sha256": "b7c7bca8a50861a14bc44d5eb0016a1b27d16e4c888a87c64a55952ad133e868",
+      "map_sha256": "4dcf94d3d50935ebc3246777a54eb7931f32af7355d40e787376a79165830083",
+      "irrigated_place12": "020555260a00bb7208016106552606e0041c0000000000000000101d"
+    },
+    {
+      "day": 51,
+      "clock": 800,
+      "checkpoint": "dawn-4",
+      "ds_sha256": "36871f81bb618edc17cd8fb414d4d7e1eeb6c17db0ffff41436bf45a18a30a66",
+      "map_sha256": "6a5b88063a084dce82ad5dfefcc3514bb1bc49b57ad2cbde889c9c343292e7d5",
+      "irrigated_place12": "020555260a00bb720801610755260400041c00000000000000001013"
+    },
+    {
+      "day": 52,
+      "clock": 816,
+      "checkpoint": "dawn-5",
+      "ds_sha256": "51f0dfd1e7a5d723200dee63f189894d55fdbcf800ad94dce2d711c023a1e51d",
+      "map_sha256": "1490de00997d51d149a3015fd8ba16c7c4452118eb4622ffe37d1acff1d18f28",
+      "irrigated_place12": "020555260a00bb720801610755260410041c00000000000000001014"
+    },
+    {
+      "day": 53,
+      "clock": 832,
+      "checkpoint": "dawn-7",
+      "ds_sha256": "df68c78cf273f126447293912495eb426d257c86d96bdbc8b9aeb7dd0441841c",
+      "map_sha256": "1490de00997d51d149a3015fd8ba16c7c4452118eb4622ffe37d1acff1d18f28",
+      "irrigated_place12": "020555260a00bb720801610755260420041c00000000000000001015"
+    }
+  ]
+}

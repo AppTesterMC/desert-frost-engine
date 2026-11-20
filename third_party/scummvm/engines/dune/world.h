@@ -773,6 +773,7 @@ private:
 	byte _requestedPhase = 0;
 
 	void runPeriod();
+	bool dayChangedSinceLastPeriod() const;
 	/** The phase 0x64 callback (CD seg000:1f13, floppy 222e): Chani to a Harkonnen fortress, Feyd-Rautha's COMM message. */
 	void chaniPrisoner();
 	/** The cure step (CD 1eda, floppy 21f5) for Chani at @p index. */

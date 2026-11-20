@@ -1,0 +1,57 @@
+wait 500
+click left 160 163
+wait 3000
+click left 35 176
+wait 3000
+click left 160 187
+wait 2000
+click left 160 163
+wait 5000
+click left 160 163
+wait 3000
+click left 160 163
+wait 3000
+click left 274 189
+wait 3000
+checkpoint desert
+click left 160 179
+wait 1900
+click left 160 179
+wait 1900
+checkpoint dawn-1
+click left 160 179
+wait 1900
+click left 160 179
+wait 1900
+checkpoint dawn-2
+click left 160 179
+wait 1900
+click left 160 179
+wait 1900
+checkpoint dawn-3
+click left 160 179
+wait 1900
+click left 160 179
+wait 1900
+checkpoint dawn-4
+click left 160 179
+wait 1900
+click left 160 179
+wait 1900
+checkpoint dawn-5
+click left 160 179
+wait 1900
+click left 160 179
+wait 1900
+checkpoint dawn-6
+click left 160 179
+wait 1900
+click left 160 179
+wait 1900
+checkpoint dawn-7
+click left 160 163
+wait 2200
+click left 35 176
+wait 2200
+checkpoint globe
+quit
