@@ -15,8 +15,7 @@
 # Sega CD uses a separate frontend without the completion bot and is rejected.
 # DUNE_SPEEDRUN_ALLOW_ORDER_BYPASSES=1 permits legacy bot shortcuts for engine
 # investigation only; output and evidence.json always disclose the bypasses.
-# DUNE_SPEEDRUN_REQUIRE_PLAYER_UI=1 requires a player-ui-v1 coverage declaration
-# (see notes/player-input-coverage-contract.md); assisted runs still fail it.
+# DUNE_SPEEDRUN_REQUIRE_PLAYER_UI=1 rejects these engine-assisted route runs.
 # DUNE_SPEEDRUN_UNINTERRUPTED=1 (or DUNE_SPEEDRUN_REQUIRE_UNINTERRUPTED=1)
 # enables uninterrupted mode: no save/reload retries and player-UI completion.
 
@@ -42,13 +41,6 @@ case "${1:-}" in --uninterrupted|--require-uninterrupted|uninterrupted)
 esac
 if [ "${DUNE_SPEEDRUN_UNINTERRUPTED:-0}" = 1 ] || [ "${DUNE_SPEEDRUN_REQUIRE_UNINTERRUPTED:-0}" = 1 ]; then
 	uninterrupted_mode=1
-fi
-
-# Player-UI mode: emit player-ui-v1 coverage. It does not imply uninterrupted
-# (save/reload retries remain allowed) unless uninterrupted mode is requested.
-player_ui_mode=0
-if [ "${DUNE_SPEEDRUN_PLAYER_UI:-0}" = 1 ] || [ "${DUNE_SPEEDRUN_REQUIRE_PLAYER_UI:-0}" = 1 ]; then
-	player_ui_mode=1
 fi
 
 seeds=${*:-1}
@@ -84,11 +76,6 @@ for seed in $seeds; do
 		export DUNE_SKIP_BUILD=1
 		export DUNE_RUN_ROOT="$run"
 		export DUNE_DATA="$data"
-		if [ "$player_ui_mode" = 1 ]; then
-			export DUNE_SPEEDRUN_PLAYER_UI=1
-		else
-			unset DUNE_SPEEDRUN_PLAYER_UI
-		fi
 		if [ "$uninterrupted_mode" = 1 ]; then
 			export DUNE_SPEEDRUN_UNINTERRUPTED=1
 		else

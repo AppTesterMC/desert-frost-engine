@@ -50,7 +50,6 @@ def assess(text, part="full", process_exit=0, allow_order_bypasses=False,
     player_ui_declarations = [line for line in declarations if "player-ui-v1" in line]
     player_ui_categories = _player_ui_categories(player_ui_declarations)
     player_ui_declared = bool(player_ui_declarations)
-    player_ui_complete = player_ui_declared and REQUIRED_PLAYER_UI_CATEGORIES.issubset(player_ui_categories)
     reload_lines = []
     slot0_reload_lines = []
     for line in lines:
@@ -95,33 +94,30 @@ def assess(text, part="full", process_exit=0, allow_order_bypasses=False,
         failures.append(f"{len(progression)} FORCED progression shortcut(s) in {part} run")
     if fallback and not allow_order_bypasses:
         failures.append(f"{len(fallback)} direct order fallback(s) bypassed a missing or refused command")
-    if require_player_ui and not player_ui_complete:
+    # Older builds printed all ten categories at startup when a flag was set.
+    # The same bot continued to call travelTo and other gameplay methods directly.
+    if require_player_ui or require_uninterrupted:
         failures.append("player-UI completion is not certified by this bot")
-    if require_uninterrupted:
-        if reload_count:
-            failures.append(f"{reload_count} battle save/reload retry/retries")
-        if not player_ui_complete:
-            failures.append("player-UI completion is not certified by this bot")
+    if require_uninterrupted and reload_count:
+        failures.append(f"{reload_count} battle save/reload retry/retries")
     if interrupted:
         classification = "interrupted"
-    elif player_ui_complete and not failures:
-        classification = "uninterrupted"
-    elif declarations and any("engine-assisted" in d for d in declarations):
+    elif player_ui_declared or any("engine-assisted" in line for line in declarations):
         classification = "assisted"
     else:
         classification = "unknown"
-    uninterrupted = classification == "uninterrupted"
     return {
         "schema": 1,
         "part": part,
         "process_exit": process_exit,
         "passed": not failures,
-        "coverage": "player-ui-v1" if player_ui_declared else ("engine-assisted" if declarations else "unknown"),
-        "player_ui_completion_verified": bool(player_ui_complete and not failures),
+        "coverage": "engine-assisted" if classification == "assisted" or declarations else "unknown",
+        "player_ui_completion_verified": False,
         "player_ui_declared": player_ui_declared,
-        "player_ui_categories": sorted(player_ui_categories),
+        "player_ui_declared_categories": sorted(player_ui_categories),
+        "player_ui_categories": [],
         "required_player_ui_categories": sorted(REQUIRED_PLAYER_UI_CATEGORIES),
-        "player_ui_missing_categories": sorted(REQUIRED_PLAYER_UI_CATEGORIES - player_ui_categories),
+        "player_ui_missing_categories": sorted(REQUIRED_PLAYER_UI_CATEGORIES),
         "total_saved_game_loads": save_loads,
         "reload_count": reload_count,
         "reloads": reload_count,
@@ -139,7 +135,7 @@ def assess(text, part="full", process_exit=0, allow_order_bypasses=False,
         "slot0_reloads": slot0_reload_lines,
         "troop_approach_retries": slot0_reload_count,
         "interrupted": interrupted,
-        "uninterrupted": uninterrupted,
+        "uninterrupted": False,
         "classification": classification,
         "run_classification": classification,
         "interruption_status": classification,
@@ -194,12 +190,9 @@ def main():
     if args.json:
         args.json.write_text(json.dumps(result, indent=2) + "\n")
     if result["passed"]:
-        if result["player_ui_completion_verified"]:
-            detail = f"{result['forts']} forts, player-UI completion verified; " \
-                     f"{result['direct_order_fallbacks']} direct order fallback(s)"
-        else:
-            detail = f"{result['forts']} forts, assisted engine completion; " \
-                     f"{result['direct_order_fallbacks']} direct order fallback(s); player-UI completion unverified; {result['classification']}"
+        detail = (f"{result['forts']} forts, assisted engine completion; "
+                  f"{result['direct_order_fallbacks']} direct order fallback(s); "
+                  f"player-UI completion unverified; {result['classification']}")
         if result["forced_setup_shortcuts"]:
             detail += f"; {result['forced_setup_shortcuts']} declared FORCED setup(s)"
         if args.allow_order_bypasses:

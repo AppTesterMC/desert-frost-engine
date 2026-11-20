@@ -124,20 +124,14 @@ elif [ "${1:-}" = "speedrun" ]; then
 	part=${2:-campaign}
 	seed=${3:-1}
 	mkdir -p "$evidence_root/logs"
-	if [ "${DUNE_SPEEDRUN_PLAYER_UI:-0}" = 1 ] || [ "${DUNE_SPEEDRUN_UNINTERRUPTED:-0}" = 1 ]; then
-		player_ui_line="dune_speedrun_player_ui=1
-"
-	else
-		player_ui_line=""
-	fi
 	if [ "${DUNE_SPEEDRUN_UNINTERRUPTED:-0}" = 1 ]; then
 		uninterrupted_line="dune_speedrun_uninterrupted=1
 "
 	else
 		uninterrupted_line=""
 	fi
-	printf '[scummvm]\nsavepath=%s\ndune_speedrun=%s\ndune_rng_seed=%s\ndune_no_music=1\ndune_floppy_start=99\ndune_intro_start=99\ndune_skip_cd_story=1\n%s%s' \
-		"$run_root/saves" "$part" "$seed" "$player_ui_line" "$uninterrupted_line" > "$config"
+	printf '[scummvm]\nsavepath=%s\ndune_speedrun=%s\ndune_rng_seed=%s\ndune_no_music=1\ndune_floppy_start=99\ndune_intro_start=99\ndune_skip_cd_story=1\n%s' \
+		"$run_root/saves" "$part" "$seed" "$uninterrupted_line" > "$config"
 	if [ "${DUNE_SPEEDRUN_NO_REWINDS:-0}" = 1 ]; then
 		printf 'dune_speedrun_no_rewinds=1\n' >> "$config"
 	fi

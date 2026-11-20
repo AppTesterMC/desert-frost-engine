@@ -129,28 +129,18 @@ Speedrun: day 153: end
 
 
 
-    def test_player_ui_complete_run_certifies_completion(self):
-        cats = "navigation, dialogue, orders, combat, map, save-load, options, equipment, espionage, worm"
-        log = ("Speedrun: day 1: coverage player-ui-v1: " + cats + "\n" + END)
-        result = evidence.assess(log, require_player_ui=True)
-        self.assertTrue(result["passed"])
-        self.assertTrue(result["player_ui_completion_verified"])
-        self.assertFalse(result["player_ui_missing_categories"])
-
-    def test_player_ui_incomplete_declaration_fails_ui_gate(self):
-        result = evidence.assess("Speedrun: day 1: coverage player-ui-v1: navigation, dialogue\n" + END,
-                                 require_player_ui=True)
+    def test_historical_startup_banner_is_not_input_evidence(self):
+        categories = ", ".join(sorted(evidence.REQUIRED_PLAYER_UI_CATEGORIES))
+        log = f"Speedrun: day 1: coverage player-ui-v1: {categories}\n" + END
+        result = evidence.assess(log, require_player_ui=True, require_uninterrupted=True)
         self.assertFalse(result["passed"])
         self.assertFalse(result["player_ui_completion_verified"])
-        self.assertTrue(result["player_ui_missing_categories"])
-
-    def test_player_ui_v1_without_require_flag_still_marks_verified(self):
-        cats = "navigation, dialogue, orders, combat, map, save-load, options, equipment, espionage, worm"
-        log = ("Speedrun: day 1: coverage player-ui-v1: " + cats + "\n" + END)
-        result = evidence.assess(log)
-        self.assertTrue(result["passed"])
-        self.assertTrue(result["player_ui_completion_verified"])
-
+        self.assertFalse(result["uninterrupted"])
+        self.assertEqual(result["classification"], "assisted")
+        self.assertEqual(result["player_ui_declared_categories"], sorted(evidence.REQUIRED_PLAYER_UI_CATEGORIES))
+        self.assertEqual(result["player_ui_missing_categories"], sorted(evidence.REQUIRED_PLAYER_UI_CATEGORIES))
+        self.assertTrue(evidence.assess(log)["passed"])
+        self.assertFalse(evidence.assess(log)["player_ui_completion_verified"])
 
     def test_no_rewinds_checks_all_slots_and_allows_saving(self):
         self.assertTrue(evidence.assess("Saves: slot 0 saved\n" + END, require_no_rewinds=True)["passed"])
@@ -167,14 +157,12 @@ Speedrun: day 153: end
         self.assertEqual(result["classification"], "interrupted")
         self.assertEqual(result["reload_count"], 1)
 
-    def test_uninterrupted_mode_requires_no_reload_and_player_ui(self):
-        cats = "navigation, dialogue, orders, combat, map, save-load, options, equipment, espionage, worm"
-        log = "Speedrun: day 1: coverage player-ui-v1: " + cats + "\n" + END
-        result = evidence.assess(log, require_uninterrupted=True)
-        self.assertTrue(result["passed"])
-        self.assertTrue(result["uninterrupted"])
-        self.assertEqual(result["classification"], "uninterrupted")
-        self.assertEqual(result["reload_count"], 0)
+    def test_strict_uninterrupted_reports_separate_battle_and_input_failures(self):
+        result = evidence.assess("Saves: slot 1 loaded\n" + END, require_uninterrupted=True)
+        self.assertEqual(len(result["failures"]), 2)
+        self.assertEqual(result["classification"], "interrupted")
+        self.assertEqual(result["reload_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

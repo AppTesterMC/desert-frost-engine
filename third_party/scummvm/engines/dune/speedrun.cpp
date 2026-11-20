@@ -2714,11 +2714,7 @@ void GameScreen::speedrun(const Common::String &part) {
 	if (!loadDialogue())
 		return;
 	speedrunLog(Common::String::format("start (%s, %s)", part.c_str(), _world.floppy() ? "floppy" : "CD"));
-	const bool playerUi = ConfMan.hasKey("dune_speedrun_player_ui") && ConfMan.getBool("dune_speedrun_player_ui");
-	if (playerUi)
-		speedrunLog("coverage player-ui-v1: navigation, dialogue, orders, combat, map, save-load, options, equipment, espionage, worm");
-	else
-		speedrunLog("coverage engine-assisted-v1: direct campaign actions and battle save/reload retries; player-UI completion unverified");
+	speedrunLog("coverage engine-assisted-v1: direct campaign actions; player-UI completion unverified");
 	if (part == "orders") {
 		// Deliberately seeded regression states, not campaign progression.
 		// Test the bot against the same rows and reaction gate as a player.

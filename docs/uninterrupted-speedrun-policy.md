@@ -19,9 +19,7 @@ Rules:
 Classification:
 
 - `interrupted`: any slot-1 battle save/reload retry occurred (`reload_count > 0`).
-- `uninterrupted`: no slot-1 reloads, no fatal `BLOCKED` markers, no progression
-  shortcuts, no direct order fallbacks, and a complete `player-ui-v1` coverage
-  declaration.
+- The completion bot uses direct calls for movement and dialogue. With zero battle retries it can show an assisted victory. Even a historical `player-ui-v1` banner listing every control at startup is insufficient to demonstrate a controls-only victory.
 
 Engine controls:
 
@@ -36,7 +34,7 @@ Evidence:
 - Disclosed seed: 30 (campaign part).
 - Platforms: DOS floppy (18 forts), DOS CD (13 forts), Amiga (18 forts).
 - Artifacts: notes/speedrun/uninterrupted-evidence/seed30/{floppy,cd,amiga}/evidence.json
-- WS1 PASS captured in notes/speedrun/uninterrupted-evidence/seed30/ws1-pass-lines.txt
+- The historical WS1 PASS used the startup declaration. Reclassify its logs with the current checker for an assisted route verdict.
 
 ## Run a fresh floppy campaign without reloading
 
