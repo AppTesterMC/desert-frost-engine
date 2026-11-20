@@ -384,16 +384,8 @@ bool FloppyIntro::play() {
 	// Development aid: "dune_floppy_start=<n>" skips the first n scenes (the
 	// log numbers them), so a late scene can be checked without replaying
 	// four minutes of intro.
-	const int startScene = ConfMan.hasKey("dune_floppy_start") ? ConfMan.getInt("dune_floppy_start") : 0;
-	_sceneNumber = 0;
+	int startScene = ConfMan.hasKey("dune_floppy_start") ? ConfMan.getInt("dune_floppy_start") : 0;
 	_introStart = _lastTimedDump = _system->getMillis();
-	auto due = [&]() {
-		++_sceneNumber;
-		if (_sceneNumber <= startScene)
-			return false;
-		_log.line(Common::String::format("Intro scene %d", _sceneNumber));
-		return true;
-	};
 	startSong("WORMINTR.HSQ");
 	Common::Array<byte> video;
 	if (_resources.load("LOGO.HNM", video)) {
@@ -406,6 +398,37 @@ bool FloppyIntro::play() {
 		_skipPrologue = _aborted && player.skippedWithEscape();
 	}
 
+	const bool manual = !ConfMan.hasKey("dune_speedrun") && !isRecording() && !isDumpRun() && !isDuneHarnessRun();
+	for (;;) {
+		playMovie(startScene);
+		// A passive floppy movie returns to the Cryo/Virgin logo sequence.
+		// Capture and campaign playback continue into the prologue after one pass.
+		if (_aborted || _quit || !manual || startScene >= _sceneNumber)
+			break;
+		startScene = 0;
+		startSong("WORMINTR.HSQ");
+	}
+	if (_aborted && !_quit && !_skipPrologue) {
+		_log.line("Intro: skipped to the prologue");
+		_aborted = false;
+	}
+	if (++_sceneNumber > startScene && !_skipPrologue && !_quit) {
+		_log.line(Common::String::format("Intro scene %d", _sceneNumber));
+		prologue();
+	}
+	_log.line(_aborted ? "Intro: prologue skipped" : "Intro: floppy sequence finished");
+	return !_quit;
+}
+
+void FloppyIntro::playMovie(int startScene) {
+	_sceneNumber = 0;
+	auto due = [&]() {
+		++_sceneNumber;
+		if (_sceneNumber <= startScene)
+			return false;
+		_log.line(Common::String::format("Intro scene %d", _sceneNumber));
+		return true;
+	};
 	// Scene order: swift-dune Intro.swift; durations and transitions from the
 	// recording where it differs (see intro_first.cpp and intro.h).
 	if (due())
@@ -485,14 +508,6 @@ bool FloppyIntro::play() {
 		flightScene("intro-flight", 22000);
 	if (due())
 		creditsScene("intro-credits");
-	if (_aborted && !_quit && !_skipPrologue) {
-		_log.line("Intro: skipped to the prologue");
-		_aborted = false;
-	}
-	if (due() && !_skipPrologue && !_quit)
-		prologue();
-	_log.line(_aborted ? "Intro: prologue skipped" : "Intro: floppy sequence finished");
-	return !_quit;
 }
 
 bool FloppyIntro::playVideo(const char *name, uint top) {

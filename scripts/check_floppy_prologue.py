@@ -47,6 +47,8 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--hold-ms", type=int, default=8500)
     parser.add_argument("--timed-watch", action="store_true", help="also run the full minute-long watched prologue")
+    parser.add_argument("--movie-repeat", action="store_true",
+                        help="also wait for the complete credit reel and advance the second movie pass")
     args = parser.parse_args()
     if args.hold_ms < 8000:
         parser.error("hold must exceed the previous seven-second page timer")
@@ -76,6 +78,14 @@ def main():
     assert "Startup complete: throne room displayed" in log
     assert all((frames / f"prologue-{page}.png").is_file() for page in PAGES)
     print("PASS manual hold, nine individual advances, both Escape paths and unattended capture", flush=True)
+    if args.movie_repeat:
+        script = "wait 69000\ncheckpoint second-pass\nkey SPACE\nwait 1500\nquit\n"
+        log = play(binary, data, root, "movie-repeat", script, {"dune_floppy_start": 32}, timeout=85)
+        before, marker, after = log.partition("checkpoint second-pass")
+        scenes = [line for line in before.splitlines() if line.startswith("Intro scene ")]
+        assert marker and scenes[:2] == ["Intro scene 33", "Intro scene 1"] and not pages(before)
+        assert pages(after) == PAGES[:1], "advancing the second movie pass should open the first prologue card"
+        print("PASS passive movie repeat and keyboard advance from the second pass", flush=True)
     if args.timed_watch:
         script = "wait 1000\nkey SPACE\nwait 63500\ncheckpoint watch-finished\nquit\n"
         log = play(binary, data, root, "timed-watch", script,

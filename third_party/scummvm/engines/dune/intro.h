@@ -74,8 +74,9 @@ bool playCdIntro(OSystem *system, Resource &resources, StartupLog &log);
  * Chani 72-84, Liet 76-80, Paul in the desert 84-88, sietch 88-104, desert
  * walk 104, palace stairs and balcony 106-114, Paul 114, sunset fort 116-121,
  * Baron/Feyd 122-129, night attack 130-139, Paul 140, kiss 142-150,
- * ornithopter take-off 152-156, night flight 156-177, credits 178-191,
- * prologue 192-255, throne room 256.
+ * ornithopter take-off 152-156, night flight 156-177. The recording skips
+ * the production credits early. Unattended DOS plays the full reel and
+ * repeats the movie. Advancing the movie opens the narrated prologue.
  *
  * A tap or key during the cinematic opens the prologue. Its pages wait for
  * player input. Escape enters the throne room. Unattended runs advance automatically.
@@ -182,6 +183,7 @@ private:
 
 	// ---- first half of the intro (intro_first.cpp) ----
 	bool drawSunrise(Sprite &background, Graphics::Surface &view, bool village, bool fort);
+	void playMovie(int startScene);
 	void logoSwap();
 	void presentsScene(const char *dumpName, bool cryo);
 	void starsScene(const char *dumpName);
