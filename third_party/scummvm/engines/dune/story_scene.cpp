@@ -40,6 +40,7 @@
 #include "dune/debug.h"
 #include "dune/dialogue.h"
 #include "dune/harness.h"
+#include "dune/intro.h"
 #include "dune/palace.h"
 #include "dune/resource.h"
 #include "dune/scene.h"
@@ -994,32 +995,20 @@ void GameScreen::floppyEndingCreditsSlideshow() {
             shiftDown();
             break;
         case 14: {
-            // play_credits(false): CREDITS.HSQ sprites scroll over kSkyNight + INTDS.HSQ
-            // frame 0 for ~55 s. Scroll active 3 s..52 s (0 -> 1790 px) so every
-            // production entry enters the 320x200 view. Leaves final frame in _surface.
+            // Both the opening and the winning reel use the same 44 credit sprites.
+            // The winning reel is framed at framebuffer row 18, above its caption.
             Common::Array<byte> credData, intdsData;
             if (_resources.load("CREDITS.HSQ", credData) && _resources.load("INTDS.HSQ", intdsData)) {
                 Sprite cred(_system, credData), intds(_system, intdsData);
-                static const int16 kLines[][3] = {
-                    { 0, 134, 0 }, { 1, 77, 30 }, { 2, 126, 90 }, { 3, 56, 120 }, { 4, 86, 210 },
-                    { 5, 68, 270 }, { 6, 104, 340 }, { 7, 166, 360 }, { 8, 166, 380 }, { 9, 75, 440 },
-                    { 10, 166, 460 }, { 11, 48, 540 }, { 12, 64, 570 }, { 13, 124, 585 }, { 14, 86, 615 },
-                    { 15, 88, 625 }, { 16, 96, 715 }, { 17, 166, 735 }, { 18, 166, 755 }, { 19, 67, 815 },
-                    { 20, 166, 835 }, { 21, 65, 915 }, { 22, 58, 995 }, { 23, 75, 1035 }, { 24, 92, 1075 },
-                    { 25, 166, 1095 }, { 26, 67, 1135 }, { 27, 55, 1175 }, { 28, 113, 1255 }, { 29, 166, 1275 },
-                    { 30, 166, 1295 }, { 31, 166, 1315 }, { 32, 166, 1335 }, { 33, 66, 1375 }, { 34, 60, 1415 },
-                    { 35, 108, 1505 }, { 36, 64, 1520 }, { 37, 120, 1535 }, { 38, 126, 1565 }, { 39, 59, 1580 },
-                    { 40, 96, 1595 }, { 41, 114, 1685 }, { 42, 74, 1700 }, { 43, 6, 1790 }
-                };
-                auto drawCreditsFrame = [&](int scroll) {
+                const uint32 scrollDuration = 1779 * 30;
+                auto drawCreditsFrame = [&](uint32 scrollMillis) {
                     _surface.fillRect(Common::Rect(0, 0, 320, 200), 0);
+                    Graphics::Surface view = _surface.surfacePtr()->getSubArea(Common::Rect(0, kFbOffset, 320, 170));
                     _panel.applyPalette();
-                    drawSky(_system, _resources, *_surface.surfacePtr(), kSkyNarrow, 320, kSkyNight, true);
-                    cred.setPalette(); // CREDITS supplies the sunset gradient over the sky tiles.
-                    intds.drawFrame(0, _surface.surfacePtr(), 0, 60);
-                    for (uint i = 0; i < ARRAYSIZE(kLines); ++i)
-                        cred.drawFrame(kLines[i][0], _surface.surfacePtr(), kLines[i][1], 152 - scroll + kLines[i][2]);
-                    shiftDown();
+                    drawSky(_system, _resources, view, kSkyNarrow, 320, kSkyNight, true);
+                    cred.setPalette();
+                    intds.drawFrame(0, &view, 0, 60);
+                    drawFloppyProductionCredits(cred, view, scrollMillis);
                 };
                 if (!playSlides) {
                     auto captureScroll = [&](int scroll, const char *name) {
@@ -1029,27 +1018,22 @@ void GameScreen::floppyEndingCreditsSlideshow() {
                         _system->updateScreen();
                         dumpScreen(_system, name);
                     };
-                    captureScroll(0, "ending-slide-14-begin");
-                    captureScroll(895, "ending-slide-14-middle");
-                    captureScroll(1790, "ending-slide-14-end");
-                    drawCreditsFrame(895);
+                    // First visible logo, music/art credits and the final legal notice,
+                    // sampled 0.48 s, 19.48 s and 53.37 s into the native scroll.
+                    captureScroll(480, "ending-slide-14-begin");
+                    captureScroll(19480, "ending-slide-14-middle");
+                    captureScroll(scrollDuration, "ending-slide-14-end");
+                    drawCreditsFrame(19480);
                 } else {
-                    // Animated production credits: ~3 s fade-in hold, 49 s scroll
-                    // (0 -> 1790 px over the full CREDITS.HSQ range), ~3 s hold.
-                    // Total ~55 s (passive samples: scene14 174000..229000 ms).
-                    const uint32 kScrollStart = 3000, kScrollEnd = 52000, kTotal = 55000;
                     drawCreditsFrame(0);
                     fade(true);
                     const uint32 start = _system->getMillis();
                     skipHold = true;
                     while (!_quitRequested) {
                         const uint32 elapsed = _system->getMillis() - start;
-                        if (elapsed >= kTotal)
+                        if (elapsed >= scrollDuration)
                             break;
-                        const int scroll = elapsed <= kScrollStart ? 0
-                            : elapsed >= kScrollEnd ? 1790
-                            : (int)(1790u * (elapsed - kScrollStart) / (kScrollEnd - kScrollStart));
-                        drawCreditsFrame(scroll);
+                        drawCreditsFrame(elapsed);
                         _system->copyRectToScreen(_surface.getPixels(), _surface.pitch, 0, 0, 320, 200);
                         _system->updateScreen();
                         if (advanceRequested())
@@ -1057,7 +1041,7 @@ void GameScreen::floppyEndingCreditsSlideshow() {
                         _system->delayMillis(16);
                     }
                     // Leave the final scroll position in _surface for the caption draw.
-                    drawCreditsFrame(1790);
+                    drawCreditsFrame(scrollDuration);
                 }
             }
             break;
