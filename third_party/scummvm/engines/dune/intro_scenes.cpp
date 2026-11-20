@@ -122,11 +122,14 @@ bool FloppyIntro::runSceneImpl(const char *dumpName, uint32 duration, Transition
 		return false;
 	debugSetScene(Common::String::format("floppy/%s", dumpName));
 
+	if (_manualPrologue)
+		_log.line(Common::String::format("Prologue page: %s", dumpName));
+	const uint32 holdAt = _manualPrologue ? duration - outMillis : duration;
 	Graphics::ManagedSurface composed;
 	composed.create(320, kViewHeight, Graphics::PixelFormat::createFormatCLUT8());
 	const uint32 start = _system->getMillis();
 	while (!_aborted && !_quit) {
-		const uint32 elapsed = isFastCapture() ? captureAt : MIN<uint32>(_system->getMillis() - start, duration);
+		const uint32 elapsed = isFastCapture() ? captureAt : MIN<uint32>(_system->getMillis() - start, holdAt);
 		// As in swift-dune's Intro node, the picture stands still during a
 		// transition: the first frame while coming in, the last while going out.
 		uint32 sceneTime = elapsed;
@@ -171,8 +174,12 @@ bool FloppyIntro::runSceneImpl(const char *dumpName, uint32 duration, Transition
 			dumpScreen(_system, dumpName);
 			break;
 		}
-		if (elapsed >= duration)
+		if (elapsed >= holdAt) {
+			// Once the card has settled, keep its picture and service input.
+			while (_manualPrologue && wait(50)) {
+			}
 			break;
+		}
 		if (!wait(25))
 			break;
 	}
@@ -795,6 +802,7 @@ void FloppyIntro::prologuePalaceScene(const char *dumpName) {
 // narration is COMMAND1 records prologueSentence(0..7).
 void FloppyIntro::prologue() {
 	static const uint16 baronAnimation[] = { 4 };
+	_manualPrologue = !ConfMan.hasKey("dune_speedrun") && !isRecording() && !isDumpRun() && !isDuneHarnessRun();
 	setViewTop(0);
 	startSong("WORMSUIT.HSQ");
 	prologueStarsScene("prologue-stars", false, prologueSentence(0));
@@ -809,6 +817,7 @@ void FloppyIntro::prologue() {
 			prologueSentence(6));
 	desertWalkScene("prologue-night", kSkyNight, 7000, kFade, 1000, kFade, 1000, prologueSentence(7));
 	prologuePalaceScene("prologue-palace");
+	_manualPrologue = false;
 	setViewTop(kViewTop);
 }
 

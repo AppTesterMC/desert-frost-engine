@@ -74,8 +74,8 @@ bool playCdIntro(OSystem *system, Resource &resources, StartupLog &log);
  * ornithopter take-off 152-156, night flight 156-177, credits 178-191,
  * prologue 192-255, throne room 256.
  *
- * A tap or key skips the rest of the intro. On dump/harness runs each scene
- * renders one representative frame and moves on.
+ * A tap or key during the cinematic opens the prologue. Its pages wait for
+ * player input. Escape enters the throne room. Unattended runs advance automatically.
  */
 class FloppyIntro {
 public:
@@ -235,6 +235,7 @@ private:
 	byte _subtitleColour[3]; ///< STARS.HSQ colour 25, the narration's orange.
 	Common::Array<byte> _font; ///< DNCHAR.BIN or DUNECHAR.HSQ for intro captions.
 	bool _aborted, _quit;
+	bool _skipPrologue, _manualPrologue;
 	Common::Rect _zoomTarget;             ///< Where a kZoom transition ends.
 	int _sceneNumber;                     ///< Numbered as the log reports them.
 	uint32 _introStart, _lastTimedDump;   ///< For dumpEveryMillis().

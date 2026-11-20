@@ -218,7 +218,7 @@ bool playCdIntro(OSystem *system, Resource &resources, StartupLog &log) {
 
 FloppyIntro::FloppyIntro(OSystem *system, Resource &resources, StartupLog &log, Music *music) :
 		_system(system), _resources(resources), _log(log), _music(music), _viewTop(kViewTop), _prologueBase(0),
-		_aborted(false), _quit(false), _sceneNumber(0), _introStart(0), _lastTimedDump(0) {
+		_aborted(false), _quit(false), _skipPrologue(false), _manualPrologue(false), _sceneNumber(0), _introStart(0), _lastTimedDump(0) {
 	_surface.create(320, 200, Graphics::PixelFormat::createFormatCLUT8());
 	memset(_palette, 0, sizeof(_palette));
 	_subtitleColour[0] = 216;
@@ -400,6 +400,7 @@ bool FloppyIntro::play() {
 		if (result == HnmPlayer::kQuit)
 			return false;
 		_aborted = result == HnmPlayer::kSkipped;
+		_skipPrologue = _aborted && player.skippedWithEscape();
 	}
 
 	// Scene order: swift-dune Intro.swift; durations and transitions from the
@@ -481,14 +482,11 @@ bool FloppyIntro::play() {
 		flightScene("intro-flight", 22000);
 	if (due())
 		creditsScene("intro-credits");
-	// A tap or key during the intro skips to the narrated prologue, as in
-	// the original (and swift-dune); one during the prologue skips to the
-	// throne room.
-	if (_aborted && !_quit) {
+	if (_aborted && !_quit && !_skipPrologue) {
 		_log.line("Intro: skipped to the prologue");
 		_aborted = false;
 	}
-	if (due())
+	if (due() && !_skipPrologue && !_quit)
 		prologue();
 	_log.line(_aborted ? "Intro: prologue skipped" : "Intro: floppy sequence finished");
 	return !_quit;
@@ -596,7 +594,7 @@ void FloppyIntro::present() {
 	}
 }
 
-// Waits while keeping the app responsive; a tap or key skips the intro.
+// Pump events during the cinematic, its transitions and each prologue page.
 bool FloppyIntro::wait(uint32 millis) {
 	const uint32 end = _system->getMillis() + (isFastIntroCapture() ? 0 : millis);
 	Common::Event event;
@@ -604,8 +602,14 @@ bool FloppyIntro::wait(uint32 millis) {
 		while (pollDuneEvent(_system, event)) {
 			if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER)
 				_quit = true;
-			else if ((event.type == Common::EVENT_LBUTTONDOWN || event.type == Common::EVENT_KEYDOWN) && !isFastIntroCapture())
-				_aborted = true; // Dump runs ignore input: their window may steal a keystroke.
+			else if (!isFastIntroCapture() && (event.type == Common::EVENT_LBUTTONDOWN ||
+			         (event.type == Common::EVENT_KEYDOWN && !event.kbdRepeat))) {
+				if (event.type == Common::EVENT_KEYDOWN && event.kbd.keycode == Common::KEYCODE_ESCAPE)
+					_skipPrologue = true;
+				else if (_manualPrologue)
+					return false; // End this page's render loop. The next page receives its own input.
+				_aborted = true;
+			}
 		}
 		if (_aborted || _quit)
 			return false;
