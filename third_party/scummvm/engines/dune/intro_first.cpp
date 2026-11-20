@@ -264,10 +264,8 @@ void FloppyIntro::titleScene(const char *dumpName) {
 	dunes.free();
 }
 
-// WormCall.swift: the desert (SHAI 44 at 0,74 under the midday sky) and the
-// authored SHAI/SHAI2 animation. Recording: the sand puffs (groups 0-21)
-// take 3.5 s, the worm surfaces and dives in the next 1.8 s (12 fps), the
-// empty desert holds and the scene fades out at 7 s. SD8 is the call.
+// Floppy 061E stages the worm call. Once the desert has faded in, 5122
+// starts SD8 and draws one SHAI group every 25 PIT ticks.
 void FloppyIntro::wormScene(const char *dumpName) {
 	Common::Array<byte> wormData, wormExtension, soundData;
 	if (_aborted || _quit || !_resources.load("SHAI.HSQ", wormData) || !_resources.load("SHAI2.HSQ", wormExtension))
@@ -275,27 +273,35 @@ void FloppyIntro::wormScene(const char *dumpName) {
 	Sprite worm(_system, wormData), wormFrames(_system, wormExtension);
 	worm.setShaiAnimationFormat();
 	worm.mergeFrames(wormFrames);
-	// Groups 0-21 are the sand puffs, 22-41 the worm and its trail; the
-	// last two groups only restore the ground and are not drawn.
-	const uint frames = MIN<uint>(42, worm.animationFrameCount(0));
-	const uint puffFrames = MIN<uint>(22, frames);
+	const uint frames = worm.animationFrameCount(0);
 	Sound call(_system);
-	if (!fastCapture() && _resources.load("SD8.HSQ", soundData))
-		call.playVOC(soundData);
-	const uint32 duration = 8000, puffs = 3500;
-	runScene(dumpName, duration, kFade, 500, kFade, 1000, 4700, [&](uint32 elapsed, Graphics::Surface &view) {
-		drawSky(_system, _resources, view, kSkyNarrow, 320, kSkyDay);
+	const bool hasCall = !fastCapture() && _resources.load("SD8.HSQ", soundData);
+	bool startedCall = false;
+	// The original fades each six-bit DAC channel one step per VGA refresh.
+	const uint32 fadeMillis = 64 * 1000 / 70;
+	const uint32 fadeOutAt = 7800; // Music cue 0x178 starts the next transition.
+	runScene(dumpName, fadeOutAt + fadeMillis, kNoTransition, 0, kNoTransition, 0, 4700, [&](uint32 elapsed, Graphics::Surface &view) {
 		worm.setPalette();
+		drawSky(_system, _resources, view, kSkyNarrow, 320, kSkyDay, true);
 		worm.drawFrame(44, &view, 0, 74);
-		if (!frames)
-			return;
-		uint frame;
-		if (elapsed < puffs)
-			frame = (uint)(elapsed * puffFrames / puffs);
-		else
-			frame = puffFrames + (uint)((elapsed - puffs) * 12 / 1000);
-		if (frame < frames)
-			worm.drawAnimationFrame(0, (uint16)frame, &view, 0, 0);
+		if (elapsed >= fadeMillis) {
+			if (hasCall && !startedCall) {
+				call.playVOC(soundData);
+				startedCall = true;
+			}
+			const uint32 frame = (uint64)(elapsed - fadeMillis) * 1193182 / (25 * 5957 * 1000);
+			if (frame < frames)
+				worm.drawAnimationFrame(0, (uint16)frame, &view, 0, 0);
+		}
+		if (elapsed < fadeMillis || elapsed > fadeOutAt) {
+			const uint32 fade = elapsed < fadeMillis ? fadeMillis - elapsed : elapsed - fadeOutAt;
+			byte rgb[256 * 3];
+			_system->getPaletteManager()->grabPalette(rgb, 0, 256);
+			const int subtract = MIN<uint32>(63, fade * 70 / 1000) * 4;
+			for (uint i = 0; i < sizeof(rgb); ++i)
+				rgb[i] = MAX<int>(0, rgb[i] - subtract);
+			_system->getPaletteManager()->setPalette(rgb, 0, 256);
+		}
 	});
 }
 

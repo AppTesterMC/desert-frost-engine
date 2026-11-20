@@ -382,60 +382,39 @@ void Sprite::parseAnimations() {
 		return;
 
 	if (_shaiAnimationFormat) {
-		// SHAI is the one character resource whose animation tail is not the
-		// normal group/definition table. After the zero marker and block-size
-		// word it is a stream of (sprite, x, y) words; a rectangle-like run
-		// (the area to restore) separates the frames. The parser follows
-		// swift-dune's, keeping SHAI2 frame numbers, but each group is one
-		// frame: the recording shows the 44 groups over about 3.7 s at the
-		// resources' 12 fps, not the 7 s that doubling them would take.
+		// Floppy 5158: each update starts with an eight-byte restore rectangle,
+		// then one to three sprite/position triples, in draw order.
+		uint32 position = animationOffset + 4;
+		const uint32 end = position + READ_LE_UINT16(_data.data() + animationOffset + 2);
+		if (end > _data.size())
+			return;
 		Animation animation;
 		animation.x = 0;
 		animation.y = 0;
-		Common::Array<AnimationGroup> groups;
-		AnimationGroup group;
-		uint16 maxSpriteIndex = 0;
-		uint32 position = animationOffset + 4;
-		while (position + 6 <= _data.size()) {
-			if (position + 8 <= _data.size()) {
-				const uint16 x1 = READ_LE_UINT16(_data.data() + position);
-				const uint16 y1 = READ_LE_UINT16(_data.data() + position + 2);
-				const uint16 x2 = READ_LE_UINT16(_data.data() + position + 4);
-				const uint16 y2 = READ_LE_UINT16(_data.data() + position + 6);
-				if (x1 < x2 && y1 < y2 && x1 != (uint16)(maxSpriteIndex + 1)) {
-					if (!group.images.empty()) {
-						const uint16 groupIndex = groups.size();
-						groups.push_back(group);
-						AnimationFrame frame;
-						frame.groups.push_back(groupIndex);
-						animation.frames.push_back(frame);
-						group = AnimationGroup();
-					}
-					// The four-word clear rectangle is consumed by the probe. The
-					// following six bytes are the first authored sprite triple.
-					position += 8;
-					continue;
-				}
+		for (uint f = 0; f < 44; ++f) {
+			const uint pieces = f < 22 ? 1 : (f >= 24 && f < 37 ? 3 : 2);
+			if (position + 8 + pieces * 6 > end)
+				return;
+			position += 8;
+			AnimationGroup group;
+			for (uint i = 0; i < pieces; ++i) {
+				AnimationImage image;
+				image.frame = READ_LE_UINT16(_data.data() + position);
+				// SHAI slot 45 holds animation data. A reference to sprite 45
+				// actually selects slot zero of SHAI2 (floppy 5198).
+				if (image.frame >= 45)
+					image.frame = tableSize / 2 + (image.frame - 45);
+				image.x = (int16)READ_LE_UINT16(_data.data() + position + 2);
+				image.y = (int16)READ_LE_UINT16(_data.data() + position + 4);
+				group.images.push_back(image);
+				position += 6;
 			}
-
-			AnimationImage image;
-			image.frame = READ_LE_UINT16(_data.data() + position);
-			image.x = (int16)READ_LE_UINT16(_data.data() + position + 2);
-			image.y = (int16)READ_LE_UINT16(_data.data() + position + 4);
-			maxSpriteIndex = image.frame;
-			group.images.push_back(image);
-			position += 6;
-		}
-		if (!group.images.empty()) {
-			const uint16 groupIndex = groups.size();
-			groups.push_back(group);
 			AnimationFrame frame;
-			frame.groups.push_back(groupIndex);
+			frame.groups.push_back(_animationGroups.size());
+			_animationGroups.push_back(group);
 			animation.frames.push_back(frame);
 		}
-		_animationGroups = groups;
-		if (!animation.frames.empty())
-			_animations.push_back(animation);
+		_animations.push_back(animation);
 		return;
 	}
 
