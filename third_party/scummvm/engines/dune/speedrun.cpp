@@ -1323,11 +1323,13 @@ void GameScreen::speedrunShipment() {
 	for (int i = (int)_world.sightingCount() - 1; i >= 0; --i) {
 		if (_world.sighting((uint)i) & 0x80)
 			continue; // already seen
-		byte variant = 0;
-		const byte person = _world.viewSighting((uint)i, variant);
-		_state.setB(0x24, variant);
-		_state.setB(0xe9, person);
-		presentLine(person, person, 4, 0, kTalkComm);
+		if (!speedrunClickRow(kRowCommNew, -1, nullptr) ||
+				!speedrunClickRow(kRowCommPick, i, nullptr)) {
+			if (!_quitRequested)
+				speedrunLog("BLOCKED unread COMM message not selectable in the palace");
+			_speedrunShipping = false;
+			return;
+		}
 		speedrunConverse();
 	}
 	if (!speedrunMeet(3)) {
